@@ -884,16 +884,23 @@ and Total columns, use one unambiguous final `Total` row, and declare its unit
 explicitly as W/Watts, mW, uW/µW, nW, or pW. Values are normalized to watts.
 Total maps to `QoRResult.power` and `power_total`; dynamic maps to
 Internal + Switching only when both cells are present; leakage maps directly.
-A literal zero is valid available evidence. Missing/ambiguous reports are
-`UNKNOWN`, absent files are `UNAVAILABLE`, structural/numeric parse failures
-are `MALFORMED`, semantic failures are `INVALID`, and other formats/units are
-`UNSUPPORTED`; none receives a fabricated numeric total.
+A literal zero is valid available evidence. Detailed parser classifications are
+`UNKNOWN` for missing/ambiguous report content, `UNAVAILABLE` for absent files,
+`MALFORMED` for structural/numeric parse failures, `INVALID` for semantic
+failures, and `UNSUPPORTED` for other formats/units; none receives a fabricated
+numeric total. These are `PowerParseStatus` values stored in
+`raw_reports["power"]["parsing_status"]`. Canonical `QoRResult.power_status`
+remains the historical `PowerStatus` vocabulary only: `AVAILABLE`,
+`UNAVAILABLE`, and compatibility-only `ESTIMATED`; every non-available parser
+classification is canonical `UNAVAILABLE` with all canonical power fields
+`None`.
 
 For MCMM, every mapping requires an active `scenario_id`; global fallback and
 duplicate mappings are rejected. A scenario with no usable power report leaves
 the global power objective unknown rather than averaging other scenarios. The
-configured source path, SHA-256, format/parser version, unit, producer,
-scenario/mode/corner, and diagnostics appear under the existing
+configured source path, SHA-256, format/parser version, original/normalized
+unit, producer/producer version, discovered tool version, scenario/mode/corner,
+and diagnostics appear under the existing
 `QoRResult.raw_reports["power"]`, summary output, and existing run manifest.
 Report content and identity are part of the existing flow cache key. Mock flow
 always remains explicitly mock and power-unavailable. `rca run-sta`,

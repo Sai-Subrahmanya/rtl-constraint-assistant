@@ -156,7 +156,12 @@ def _raw_metric(qor, name: str) -> tuple[float | None, str | None]:
         av = _area_value(qor)
         return av.value, av.source
     if name == "power":
-        if qor.power_status != PowerStatus.UNAVAILABLE.value and qor.power is not None:
+        # Only canonical usable power evidence participates.  Detailed parser
+        # failures are mapped to canonical UNAVAILABLE and retained solely in
+        # report provenance; never let an arbitrary status plus a value become
+        # a fabricated objective.
+        usable_power_statuses = {PowerStatus.AVAILABLE.value, PowerStatus.ESTIMATED.value}
+        if qor.power_status in usable_power_statuses and qor.power is not None:
             return float(qor.power), None
         return None, None
     if name == "constraint_quality":
@@ -465,13 +470,12 @@ def _cmp_area(qa, qb) -> int | None:
 
 
 def _cmp_power(qa, qb) -> int | None:
-    """Compare power (MIN) only when known on both sides."""
+    """Compare power (MIN) only when both canonical values are usable."""
     if qa.power is None or qb.power is None:
         return None
-    # Respect UNAVAILABLE status: if either side reports unavailable, treat as unknown.
-    from ..utils.enums import PowerStatus
-    if (getattr(qa, "power_status", None) == PowerStatus.UNAVAILABLE.value or
-        getattr(qb, "power_status", None) == PowerStatus.UNAVAILABLE.value):
+    usable_power_statuses = {PowerStatus.AVAILABLE.value, PowerStatus.ESTIMATED.value}
+    if (getattr(qa, "power_status", None) not in usable_power_statuses or
+            getattr(qb, "power_status", None) not in usable_power_statuses):
         return None
     return _cmp_lower_better(qa.power, qb.power)
 

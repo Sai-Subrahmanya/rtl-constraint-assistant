@@ -235,9 +235,14 @@ flow:
 `Total` becomes the existing QoR `power`/`power_total`; dynamic power is
 `Internal + Switching` only when both cells are reported, and leakage comes
 from the Leakage cell. Missing, ambiguous, malformed, invalid, or unsupported
-reports never become zero. Each accepted report carries its path, SHA-256,
-format, unit, scenario/mode/corner, and parser diagnostics into the existing
-QoR summary and run manifest; its content is cache-relevant.
+reports never become zero. The parser records those detailed outcomes as
+`PowerParseStatus` in `raw_reports["power"]["parsing_status"]`; canonical
+`QoRResult.power_status` remains backward-compatible (`AVAILABLE`,
+`UNAVAILABLE`, or existing caller-supplied `ESTIMATED`) and maps every
+non-available parse classification to `UNAVAILABLE`. Each accepted report
+carries its path, SHA-256, format, unit, scenario/mode/corner, and parser
+diagnostics into the existing QoR summary and run manifest; its content is
+cache-relevant.
 
 This feature ingests a **configured tool report**. It does not run a power tool,
 produce activity data, or claim physical/silicon measurement. Mock flow remains
@@ -254,7 +259,7 @@ With your permission, the following enhancements were incorporated (documented h
 2. **Rich CLI** for beautiful, structured console output.
 3. **FastAPI web dashboard** with live constraint/coverage/QoR views (`rca dashboard`).
 4. **JSON Schema** for the project configuration (versioned).
-5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests), Step-12 MCMM coverage (70 tests), Step-13 validation scenarios (40 tests), Step-14 SymbiYosys formal-adapter coverage (11 tests), Step-15 semantic-comparison audit coverage (67 tests), and Step-20 power-report ingestion coverage (34 tests) — full suite **850 collected / 850 passed**. Coverage spans parser, constraints, SDC parsing/generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), formal proof verdicts/provenance, configured power reports, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
+5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests), Step-12 MCMM coverage (70 tests), Step-13 validation scenarios (40 tests), Step-14 SymbiYosys formal-adapter coverage (11 tests), Step-15 semantic-comparison audit coverage (67 tests), and Step-20 power-report ingestion coverage (38 tests) — full suite **854 collected / 854 passed**. Coverage spans parser, constraints, SDC parsing/generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), formal proof verdicts/provenance, configured power reports, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
 6. **Deterministic hashing** utilities for reproducibility/caching.
 
 ---

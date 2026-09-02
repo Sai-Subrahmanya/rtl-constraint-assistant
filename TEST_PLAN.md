@@ -18,7 +18,7 @@ semantic-comparison, and conservative power-report-ingestion coverage. Tests are
 | Step-15 semantic-comparison audit | `tests/unit/test_equivalence.py` | 67 | Existing UCM/SDC normalization and deterministic semantic-diff coverage, plus hardened CLI UNKNOWN handling and active-MCMM scope/context comparisons. |
 | Step-12 MCMM | `tests/unit/test_mcmm.py` | 70 | MCMM aggregation, per-scenario identity, cache, evaluator. |
 | Step-11 Pareto | `tests/unit/test_pareto.py` | 125 | Multi-objective Pareto/scalar/final selection. |
-| Step-20 power-report ingestion | `tests/unit/test_power_reports.py` | 34 | One representative OpenROAD/OpenSTA `report_power` fixture; parsing, units, statuses, provenance, artifact/cache, MCMM, Pareto, mock, and CLI/report regressions. |
+| Step-20 power-report ingestion | `tests/unit/test_power_reports.py` | 38 | One representative OpenROAD/OpenSTA `report_power` fixture; parsing, units, parser classification/canonical QoR compatibility, provenance, artifact/cache, MCMM, Pareto, mock, and CLI/report regressions. |
 
 ## Step-13 named scenarios
 
@@ -85,7 +85,10 @@ provenance handling without substituting a fake result for a real formal proof.
 
 The one tracked fixture is `tests/golden/reports/openroad_report_power_representative.rpt`.
 It is labelled representative test data, not a live power-tool result. All bad
-variants are generated in test text or pytest temporary directories.
+variants are generated in test text or pytest temporary directories. Detailed
+outcomes are parser `PowerParseStatus` classifications; canonical QoR keeps
+only backward-compatible `PowerStatus` availability (`AVAILABLE`,
+`UNAVAILABLE`, `ESTIMATED`) and maps all parser failures to `UNAVAILABLE`.
 
 1. Recognized `Total`, Internal + Switching dynamic, and Leakage map to the existing QoR fields.
 2. Explicit `W` normalization.
@@ -95,32 +98,36 @@ variants are generated in test text or pytest temporary directories.
 6. Explicit `µW` normalization.
 7. Explicit `nW` normalization.
 8. Explicit `pW` normalization.
-9. Valid literal zero remains `AVAILABLE`.
-10. Missing report is `UNAVAILABLE`, never zero.
-11. Missing Total is `UNKNOWN`.
-12. Missing Internal/Switching component leaves dynamic unknown but keeps total.
-13. Missing Leakage leaves leakage unknown but keeps total.
-14. Malformed numeric cell is `MALFORMED`.
-15. Multiple candidate report tables are `UNKNOWN`.
-16. Unrelated text is `UNSUPPORTED`.
-17. Unsupported explicit unit is `UNSUPPORTED`.
-18. Absent unit is `UNKNOWN`; no implicit watts default exists.
-19. Negative values are `INVALID`.
-20. Inconsistent complete component sum is `INVALID`.
-21. Repeated parse is deterministic.
-22. Summary/rehydration retain power components and provenance.
-23. Single-scenario YAML allows omitted scenario ID and resolves its path.
-24. MCMM rejects global, unknown, inactive, and duplicate report mappings.
-25. Real-flow plumbing accepts valid report-derived evidence.
-26. Existing run manifest records a run-relative report artifact and SHA-256.
-27. Report mutation changes the existing cache key and prevents a cache hit.
-28. A missing configured report remains unavailable in a real flow.
-29. Mock flow ignores a configured report and stays mock/unavailable.
-30. MCMM selects only each scenario's own report and retains per-scenario provenance.
-31. Missing required active-scenario power leaves global MCMM power unknown; no average is made.
-32. Available report-derived lower power participates in existing Pareto comparison.
-33. Effective scenario association changes the existing cache identity.
-34. Existing CLI and human report present tool-reported wording and report provenance.
+9. Valid literal zero is parser `AVAILABLE`.
+10. Missing report is parser `UNAVAILABLE`, never zero.
+11. `PowerParseStatus` is separate from the unchanged three-value canonical `PowerStatus`.
+12. Missing Total is parser `UNKNOWN`.
+13. Missing Internal/Switching component leaves dynamic unknown but keeps total.
+14. Missing Leakage leaves leakage unknown but keeps total.
+15. Malformed numeric cell is parser `MALFORMED`.
+16. A `38.6%` Internal cell cannot be parsed as power.
+17. A `100.0%` Total cell cannot be parsed as power.
+18. Multiple candidate report tables are parser `UNKNOWN`.
+19. Unrelated text is parser `UNSUPPORTED`.
+20. Unsupported explicit unit is parser `UNSUPPORTED`.
+21. Absent unit is parser `UNKNOWN`; no implicit watts default exists.
+22. Negative values are parser `INVALID`.
+23. Inconsistent complete component sum is parser `INVALID`.
+24. Repeated parse is deterministic.
+25. Summary/rehydration retain power components and provenance.
+26. Single-scenario YAML allows omitted scenario ID and resolves its path.
+27. MCMM rejects a global report mapping.
+28. MCMM rejects an unknown report scenario ID.
+29. MCMM rejects an inactive report scenario ID.
+30. MCMM rejects duplicate scenario report mappings.
+31. Real-flow plumbing accepts valid report-derived evidence, tracks the manifest artifact/hash, and preserves a same-input cache hit while report mutation rekeys it.
+32. A missing configured report remains canonical unavailable in a real flow.
+33. A malformed report preserves parser `MALFORMED` provenance while canonical QoR remains unavailable with no numeric components.
+34. Mock flow ignores a configured report and stays mock/unavailable.
+35. MCMM selects only each scenario's own report, retains per-scenario provenance, and keeps global power unknown when an active scenario is missing power.
+36. Available report-derived lower power participates in existing Pareto comparison.
+37. Rebinding a report to another MCMM scenario, and missing-versus-present evidence, change the existing cache identity.
+38. CLI and human report present tool-reported wording/provenance and show a detailed parser classification beside canonical unavailable power.
 
 ## Gate criteria
 
@@ -130,8 +137,8 @@ variants are generated in test text or pytest temporary directories.
 - `tests/unit/test_pareto.py` : **125 passed** (Step-11 regression).
 - `tests/unit/test_mcmm.py` : **70 passed** (Step-12 regression).
 - `tests/unit/test_equivalence.py` : **67 passed** (Step-15 audit/hardening gate).
-- `tests/unit/test_power_reports.py` : **34 passed** (Step-20 parser/flow/cache/MCMM/CLI gate; no live power tool).
-- Full `python -m pytest -q` : **850 collected, 850 passed, 0 failed, 0 skipped, 0 errors** (in the project virtual environment).
+- `tests/unit/test_power_reports.py` : **38 passed** (Step-20 parser/flow/cache/MCMM/CLI gate; no live power tool).
+- Full `python -m pytest -q` : **854 collected, 854 passed, 0 failed, 0 skipped, 0 errors** (in the project virtual environment).
 
 ## Environment notes
 

@@ -114,7 +114,13 @@ def design_report(design_summary: dict[str, Any], tg_summary: dict[str, Any],
             if leakage is not None:
                 a(f"  Leakage power: {leakage:.6g} W")
         else:
-            a(f"  Power: {status}")
+            # Detailed report-parser classification is provenance, while
+            # canonical QoR intentionally remains UNAVAILABLE here.
+            provenance = qor_summary.get("power_provenance") or {}
+            parse_status = provenance.get("parsing_status")
+            suffix = (f" (report parser: {parse_status})"
+                      if parse_status and parse_status != status else "")
+            a(f"  Power: {status}{suffix}")
         provenance = qor_summary.get("power_provenance") or {}
         if provenance:
             a(f"  Source: {provenance.get('report_path') or '-'}")

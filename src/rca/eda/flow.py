@@ -36,6 +36,7 @@ from ..constraint_model import ConstraintSet
 from ..qor.model import QoRResult
 from ..reports.power import (
     POWER_REPORT_PARSER_VERSION,
+    PowerParseStatus,
     parse_openroad_power_report,
     unavailable_power_result,
 )
@@ -251,7 +252,7 @@ def _apply_power_report(qor: Any, power_input: dict[str, Any], *, scenario: str,
         # Retain a defensive conservative result for config-like callers.
         from ..reports.power import PowerReportParseResult
         parsed = PowerReportParseResult(
-            status=PowerStatus.UNSUPPORTED.value,
+            status=PowerParseStatus.UNSUPPORTED.value,
             source_path=str(power_input.get("path", "")),
             source_sha256=str(power_input.get("sha256", "")),
             scenario_id=scenario, mode=mode, corner=corner,
@@ -266,7 +267,10 @@ def _apply_power_report(qor: Any, power_input: dict[str, Any], *, scenario: str,
             corner=corner,
             producer_version=reported_version,
         )
-    qor.power_status = parsed.status
+    # Canonical QoR power status deliberately preserves the historic three
+    # states. Detailed parser classification remains in raw_reports below.
+    qor.power_status = (PowerStatus.AVAILABLE.value if parsed.available
+                        else PowerStatus.UNAVAILABLE.value)
     qor.power = parsed.total if parsed.available else None
     qor.power_total = parsed.total if parsed.available else None
     qor.power_dynamic = parsed.dynamic if parsed.available else None

@@ -630,21 +630,18 @@ class RunStatus(str, Enum):
 
 
 class PowerStatus(str, Enum):
-    """Availability and validation state for canonical QoR power evidence.
+    """Canonical QoR power availability, retained for backward compatibility.
 
-    Existing ``AVAILABLE``, ``UNAVAILABLE``, and ``ESTIMATED`` values remain
-    wire-compatible.  The additional values let report ingestion distinguish
-    absent evidence from recognized-but-unknown, malformed, invalid, and
-    unsupported evidence without fabricating a numeric power value.
+    Detailed report-ingestion outcomes deliberately belong to the parser-bound
+    ``rca.reports.power.PowerParseStatus`` classification, which is retained in
+    ``QoRResult.raw_reports[\"power\"]``.  Canonical QoR therefore continues to
+    expose only available, unavailable, or existing caller-supplied estimated
+    power semantics.
     """
 
     AVAILABLE = "AVAILABLE"
-    UNAVAILABLE = "UNAVAILABLE"   # no configured/reportable power evidence
+    UNAVAILABLE = "UNAVAILABLE"   # no usable reportable power evidence
     ESTIMATED = "ESTIMATED"       # legacy compatibility; parser never assigns it
-    UNKNOWN = "UNKNOWN"           # recognized structure but no unique usable total
-    MALFORMED = "MALFORMED"       # intended report has syntactically invalid structure/cell
-    INVALID = "INVALID"           # parsed values fail semantic validation
-    UNSUPPORTED = "UNSUPPORTED"   # file is not the supported report format/unit
 
 
 class BackendKind(str, Enum):

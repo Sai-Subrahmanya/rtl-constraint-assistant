@@ -14,15 +14,33 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from ..utils.enums import PowerStatus
 from ..utils.hashing import hash_file, hash_text
 
 POWER_REPORT_FORMAT = "openroad_report_power"
 POWER_REPORT_PARSER_VERSION = "1"
 POWER_REPORT_PRODUCER = "openroad_opensta"
+
+
+class PowerParseStatus(str, Enum):
+    """Detailed parser classification, separate from canonical QoR status.
+
+    ``QoRResult.power_status`` intentionally remains the historical
+    :class:`rca.utils.enums.PowerStatus` vocabulary.  The flow records this
+    classification in ``raw_reports[\"power\"][\"parsing_status\"]`` while mapping
+    every non-available parse result to canonical ``UNAVAILABLE`` power.
+    """
+
+    AVAILABLE = "AVAILABLE"
+    UNAVAILABLE = "UNAVAILABLE"
+    UNKNOWN = "UNKNOWN"
+    MALFORMED = "MALFORMED"
+    INVALID = "INVALID"
+    UNSUPPORTED = "UNSUPPORTED"
+
 
 # The reported unit must be declared in the table header.  The parser does not
 # assume OpenSTA's default command units, because a redirected report alone may
@@ -72,7 +90,7 @@ class PowerReportParseResult:
 
     @property
     def available(self) -> bool:
-        return self.status == PowerStatus.AVAILABLE.value and self.total is not None
+        return self.status == PowerParseStatus.AVAILABLE.value and self.total is not None
 
     def provenance(self) -> dict[str, Any]:
         """Return the structured metadata stored in ``QoRResult.raw_reports``."""
@@ -82,7 +100,10 @@ class PowerReportParseResult:
             "producer": POWER_REPORT_PRODUCER,
             "producer_version": self.producer_version,
             "original_unit": self.original_unit,
-            "normalized_unit": "W",
+            # Only claim a normalized unit when a usable numeric report value
+            # was actually accepted. Unsupported/malformed evidence must not
+            # masquerade as normalized power data.
+            "normalized_unit": "W" if self.available else None,
             "scenario_id": self.scenario_id,
             "mode": self.mode,
             "corner": self.corner,
@@ -104,7 +125,7 @@ def unavailable_power_result(*, source_path: str = "", scenario_id: str | None =
                              ) -> PowerReportParseResult:
     """Build an explicit unavailable result without fabricating a value."""
     return PowerReportParseResult(
-        status=PowerStatus.UNAVAILABLE.value,
+        status=PowerParseStatus.UNAVAILABLE.value,
         source_path=source_path,
         scenario_id=scenario_id,
         mode=mode,
@@ -185,18 +206,18 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
     # signature is an intended but malformed report.  A wholly unrelated file
     # is simply unsupported by this focused parser.
     if not header_indices:
-        status = (PowerStatus.MALFORMED.value if re.search(r"\breport_power\b", text, re.IGNORECASE)
-                  else PowerStatus.UNSUPPORTED.value)
+        status = (PowerParseStatus.MALFORMED.value if re.search(r"\breport_power\b", text, re.IGNORECASE)
+                  else PowerParseStatus.UNSUPPORTED.value)
         message = ("OpenROAD/OpenSTA report_power marker was found but the required "
                    "group-summary header is malformed."
-                   if status == PowerStatus.MALFORMED.value else
+                   if status == PowerParseStatus.MALFORMED.value else
                    "File does not identify the supported OpenROAD/OpenSTA report_power "
                    "group-summary format.")
         return PowerReportParseResult(status=status, diagnostics=[message], **common)
 
     if len(header_indices) != 1:
         return PowerReportParseResult(
-            status=PowerStatus.UNKNOWN.value,
+            status=PowerParseStatus.UNKNOWN.value,
             diagnostics=[("Ambiguous report: multiple OpenROAD/OpenSTA power tables found; "
                           "no table was selected.")],
             **common,
@@ -210,7 +231,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
                      if _TOTAL_RE.search(lines[i])]
     if not total_indices:
         return PowerReportParseResult(
-            status=PowerStatus.UNKNOWN.value,
+            status=PowerParseStatus.UNKNOWN.value,
             diagnostics=["Recognized OpenROAD/OpenSTA power table has no Total row."],
             **common,
         )
@@ -219,13 +240,13 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
                     if (m := _UNIT_RE.search(line))]
     if not unit_matches:
         return PowerReportParseResult(
-            status=PowerStatus.UNKNOWN.value,
+            status=PowerParseStatus.UNKNOWN.value,
             diagnostics=["Recognized OpenROAD/OpenSTA power table has no explicit power unit."],
             **common,
         )
     if len(unit_matches) != 1:
         return PowerReportParseResult(
-            status=PowerStatus.UNKNOWN.value,
+            status=PowerParseStatus.UNKNOWN.value,
             diagnostics=["Ambiguous power unit declarations in the report table."],
             **common,
         )
@@ -233,7 +254,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
     factor = _UNIT_FACTORS.get(original_unit.lower())
     if factor is None:
         return PowerReportParseResult(
-            status=PowerStatus.UNSUPPORTED.value,
+            status=PowerParseStatus.UNSUPPORTED.value,
             original_unit=original_unit,
             diagnostics=[f"Unsupported explicit power unit '{original_unit}'."],
             **common,
@@ -241,7 +262,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
 
     if len(total_indices) != 1:
         return PowerReportParseResult(
-            status=PowerStatus.UNKNOWN.value,
+            status=PowerParseStatus.UNKNOWN.value,
             original_unit=original_unit,
             diagnostics=["Ambiguous report: multiple Total rows found; no row was selected."],
             **common,
@@ -250,7 +271,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
     cells = _TOTAL_RE.search(lines[first_total]).group(1).split()
     if len(cells) < 4:
         return PowerReportParseResult(
-            status=PowerStatus.MALFORMED.value,
+            status=PowerParseStatus.MALFORMED.value,
             original_unit=original_unit,
             diagnostics=[("Malformed Total row: expected Internal, Switching, Leakage, and "
                           "Total columns.")],
@@ -263,7 +284,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
         parsed, error = _parse_cell(token)
         if error:
             return PowerReportParseResult(
-                status=PowerStatus.MALFORMED.value,
+                status=PowerParseStatus.MALFORMED.value,
                 original_unit=original_unit,
                 diagnostics=[f"Malformed numeric {label} power cell '{token}' in Total row."],
                 **common,
@@ -273,7 +294,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
     internal, switching, leakage, total = values
     if total is None:
         return PowerReportParseResult(
-            status=PowerStatus.UNKNOWN.value,
+            status=PowerParseStatus.UNKNOWN.value,
             original_unit=original_unit,
             diagnostics=["Recognized Total row has no usable total-power value."],
             **common,
@@ -281,7 +302,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
     present = {label: value for label, value in zip(labels, values) if value is not None}
     if any(value < 0 for value in present.values()):
         return PowerReportParseResult(
-            status=PowerStatus.INVALID.value,
+            status=PowerParseStatus.INVALID.value,
             original_unit=original_unit,
             diagnostics=["Negative power is invalid in the supported report summary."],
             **common,
@@ -295,7 +316,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
         component_total = internal + switching + leakage
         if not math.isclose(total, component_total, rel_tol=0.02, abs_tol=1e-15):
             return PowerReportParseResult(
-                status=PowerStatus.INVALID.value,
+                status=PowerParseStatus.INVALID.value,
                 original_unit=original_unit,
                 diagnostics=[("Total power is inconsistent with Internal + Switching + Leakage "
                               "beyond report-rounding tolerance.")],
@@ -309,7 +330,7 @@ def parse_openroad_power_text(text: str, *, source_path: str = "",
     if leakage is None:
         diagnostics.append("Leakage power unavailable: Total-row leakage component is missing.")
     return PowerReportParseResult(
-        status=PowerStatus.AVAILABLE.value,
+        status=PowerParseStatus.AVAILABLE.value,
         total=total,
         dynamic=dynamic,
         leakage=leakage,
@@ -340,6 +361,7 @@ __all__ = [
     "POWER_REPORT_FORMAT",
     "POWER_REPORT_PARSER_VERSION",
     "POWER_REPORT_PRODUCER",
+    "PowerParseStatus",
     "PowerReportParseResult",
     "parse_openroad_power_report",
     "parse_openroad_power_text",

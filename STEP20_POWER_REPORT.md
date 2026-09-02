@@ -67,19 +67,25 @@ missing-value sentinel.
 
 ## Conservative status policy
 
-`PowerStatus` retains its existing wire-compatible `AVAILABLE`, `UNAVAILABLE`,
-and `ESTIMATED` values. Step 20 adds the following distinct statuses; the
-parser never assigns `ESTIMATED`.
+The canonical `QoRResult.power_status` remains exactly the historical,
+wire-compatible `PowerStatus` vocabulary: `AVAILABLE`, `UNAVAILABLE`, and
+`ESTIMATED`. The parser never assigns `ESTIMATED`.
 
-| Status | Meaning | Canonical numeric `power` |
+Detailed ingestion classification is deliberately separate:
+`rca.reports.power.PowerParseStatus` is retained as
+`QoRResult.raw_reports["power"]["parsing_status"]`. Every non-available parser
+classification maps to canonical QoR `power_status=UNAVAILABLE` and all
+canonical power fields remain `None`.
+
+| Parser classification | Meaning | Canonical QoR `power_status` / numeric `power` |
 |---|---|---|
-| `AVAILABLE` | Exactly one valid table, explicit supported unit, and usable total. | Total in W, including `0.0`. |
-| `UNAVAILABLE` | No mapping was configured or the configured report file is absent/unreadable. | `None` |
-| `UNKNOWN` | Recognized table but no unambiguous usable total, including missing total/table unit or multiple table/total candidates. | `None` |
-| `MALFORMED` | Intended `report_power` report has malformed structure or numeric cells. | `None` |
-| `INVALID` | Parsed value is negative or a complete component sum differs materially from Total. | `None` |
-| `UNSUPPORTED` | File does not identify this format or declares an unsupported unit. | `None` |
-| `ESTIMATED` | Existing compatibility status only; not emitted by this parser. | Existing caller behavior. |
+| `AVAILABLE` | Exactly one valid table, explicit supported unit, and usable total. | `AVAILABLE` / Total in W, including `0.0`. |
+| `UNAVAILABLE` | No mapping was configured or the configured report file is absent/unreadable. | `UNAVAILABLE` / `None` |
+| `UNKNOWN` | Recognized table but no unambiguous usable total, including missing total/table unit or multiple table/total candidates. | `UNAVAILABLE` / `None` |
+| `MALFORMED` | Intended `report_power` report has malformed structure or numeric cells. | `UNAVAILABLE` / `None` |
+| `INVALID` | Parsed value is negative or a complete component sum differs materially from Total. | `UNAVAILABLE` / `None` |
+| `UNSUPPORTED` | File does not identify this format or declares an unsupported unit. | `UNAVAILABLE` / `None` |
+| `ESTIMATED` | Canonical compatibility status only; not emitted by this parser or its parser classification. | Existing caller behavior. |
 
 When all three components are present, Total is checked against
 Internal + Switching + Leakage using a 2% relative / `1e-15 W` absolute printed
@@ -121,9 +127,11 @@ There is no global MCMM report fallback.
 
 The parser boundary is `rca.reports.power.PowerReportParseResult`; it is not a
 second QoR or provenance model. The existing `QoRResult.raw_reports["power"]`
-contains format and parser version, producer and optional producer version,
-original/normalized unit, scenario/mode/corner, source report path/SHA-256,
-parse status, diagnostics, and raw Internal/Switching source cells.
+contains format and parser version, configured producer and optional producer
+version, discovered flow tool version, original unit and normalized unit when
+numeric power is accepted, scenario/mode/corner, source report path/SHA-256,
+parser classification,
+diagnostics, and raw Internal/Switching source cells.
 
 `QoRResult.summary()`/`to_dict()` retain old fields and add:
 
@@ -155,16 +163,17 @@ mock, ignores configured power-report inputs, and returns unavailable power.
 
 Each MCMM scenario invokes this same flow selection with its own scenario ID,
 mode, and corner. Per-scenario QoR retains its own power provenance. The
-existing conservative aggregation sees any non-available/missing power as
-unknown; it does not average the remaining scenarios or create a global power
-number. Existing Pareto logic treats available report-derived lower power as
-lower-is-better and keeps all unavailable/unknown/invalid statuses out of the
-power objective.
+existing conservative aggregation sees any canonical unavailable/missing power
+as unknown; it does not average the remaining scenarios or create a global
+power number. Existing Pareto logic treats available report-derived lower power
+as lower-is-better and keeps canonical unavailable (including all non-available
+parser classifications) out of the power objective.
 
 Existing commands are extended rather than replaced:
 
 - `rca run-sta` prints tool-reported total and available dynamic/leakage
-  components, otherwise the specific conservative status, with report format,
+  components. For unusable evidence it prints canonical `UNAVAILABLE` together
+  with the parser classification when it is more specific, plus report format,
   path, and SHA-256 provenance.
 - real `rca optimize` routes evaluation through the existing flow so it can
   retain report-derived fields and cache/manifest evidence; its final output
@@ -187,14 +196,14 @@ virtual environment (so commands are `python -m pytest ...` after activation):
 
 | Gate | Result |
 |---|---|
-| Step 20 power ingestion: `tests/unit/test_power_reports.py` | **34 collected / 34 passed / 0 failed / 0 skipped / 0 errors** |
+| Step 20 power ingestion: `tests/unit/test_power_reports.py` | **38 collected / 38 passed / 0 failed / 0 skipped / 0 errors** |
 | Existing EDA/report regression: `tests/unit/test_eda.py` | **34 collected / 34 passed / 0 failed / 0 skipped / 0 errors** |
 | Step 11 Pareto: `tests/unit/test_pareto.py` | **125 collected / 125 passed / 0 failed / 0 skipped / 0 errors** |
 | Step 12 MCMM: `tests/unit/test_mcmm.py` | **70 collected / 70 passed / 0 failed / 0 skipped / 0 errors** |
 | Step 13 validation: `tests/unit/test_validation_step13.py` | **40 collected / 40 passed / 0 failed / 0 skipped / 0 errors** |
 | Step 14 SymbiYosys adapter: `tests/unit/test_symbiyosys.py` | **11 collected / 11 passed / 0 failed / 0 skipped / 0 errors** |
 | Step 15 equivalence: `tests/unit/test_equivalence.py` | **67 collected / 67 passed / 0 failed / 0 skipped / 0 errors** |
-| Full project: `python -m pytest -q` | **850 collected / 850 passed / 0 failed / 0 skipped / 0 errors** |
+| Full project: `python -m pytest -q` | **854 collected / 854 passed / 0 failed / 0 skipped / 0 errors** |
 
 `python -m compileall -q src tests`, `git diff --check`, and Ruff checks on the
 new parser/test files also passed. The power tests use fake orchestration

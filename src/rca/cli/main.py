@@ -182,7 +182,14 @@ def _print_power_summary(console, q: dict, *, indent: str = "  ") -> None:
                 pieces.append(f"leakage={leakage:.6g} W")
             console.print(f"{indent}  " + "  ".join(pieces))
     else:
-        console.print(f"{indent}Power: {status}")
+        # Canonical QoR remains UNAVAILABLE for every unusable report. Retain
+        # the parser-bound detail so users can distinguish absent evidence from
+        # unknown, malformed, invalid, or unsupported configured evidence.
+        provenance = q.get("power_provenance") or {}
+        parse_status = provenance.get("parsing_status")
+        suffix = (f" (report parser: {parse_status})"
+                  if parse_status and parse_status != status else "")
+        console.print(f"{indent}Power: {status}{suffix}")
     provenance = q.get("power_provenance") or {}
     if provenance:
         report_path = provenance.get("report_path") or "-"

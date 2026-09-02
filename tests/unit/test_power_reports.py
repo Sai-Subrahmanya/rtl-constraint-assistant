@@ -31,6 +31,7 @@ from rca.qor.objectives import is_dominating, objective_vector
 from rca.reports.power import (
     POWER_REPORT_FORMAT,
     POWER_REPORT_PARSER_VERSION,
+    PowerParseStatus,
     parse_openroad_power_report,
     parse_openroad_power_text,
 )
@@ -65,7 +66,7 @@ def _report_with_unit(unit: str, *, internal: str = "1", switching: str = "2",
 def test_power_fixture_parses_total_dynamic_and_leakage_with_provenance():
     parsed = parse_openroad_power_report(_FIXTURE, scenario_id="FUNC_SLOW",
                                          mode="functional", corner="slow")
-    assert parsed.status == PowerStatus.AVAILABLE.value
+    assert parsed.status == PowerParseStatus.AVAILABLE.value
     assert parsed.total == pytest.approx(1.33e-3)
     assert parsed.dynamic == pytest.approx(8.57e-4 + 4.56e-4)
     assert parsed.leakage == pytest.approx(1.30e-5)
@@ -87,7 +88,7 @@ def test_power_fixture_parses_total_dynamic_and_leakage_with_provenance():
 )
 def test_explicit_units_normalize_to_watts(unit, factor):
     parsed = parse_openroad_power_text(_report_with_unit(unit))
-    assert parsed.status == PowerStatus.AVAILABLE.value
+    assert parsed.status == PowerParseStatus.AVAILABLE.value
     assert parsed.total == pytest.approx(6 * factor)
     assert parsed.dynamic == pytest.approx(3 * factor)
     assert parsed.leakage == pytest.approx(3 * factor)
@@ -97,7 +98,7 @@ def test_valid_zero_is_available_not_unavailable():
     parsed = parse_openroad_power_text(
         _report_with_unit("Watts", internal="0", switching="0", leakage="0", total="0")
     )
-    assert parsed.status == PowerStatus.AVAILABLE.value
+    assert parsed.status == PowerParseStatus.AVAILABLE.value
     assert parsed.total == 0.0
     assert parsed.dynamic == 0.0
     assert parsed.leakage == 0.0
@@ -105,10 +106,20 @@ def test_valid_zero_is_available_not_unavailable():
 
 def test_missing_report_is_unavailable_not_zero(tmp_path):
     parsed = parse_openroad_power_report(tmp_path / "does-not-exist.rpt")
-    assert parsed.status == PowerStatus.UNAVAILABLE.value
+    assert parsed.status == PowerParseStatus.UNAVAILABLE.value
     assert parsed.total is None
     assert parsed.dynamic is None
     assert parsed.leakage is None
+
+
+def test_parser_classification_does_not_expand_canonical_power_status():
+    """Detailed report failures remain parser provenance, not a QoR API break."""
+    assert [status.value for status in PowerStatus] == [
+        "AVAILABLE", "UNAVAILABLE", "ESTIMATED",
+    ]
+    parsed = parse_openroad_power_text("report_power\nnot a group summary\n")
+    assert parsed.status == PowerParseStatus.MALFORMED.value
+    assert parsed.status not in {status.value for status in PowerStatus}
 
 
 def test_missing_total_is_unknown():
@@ -116,14 +127,14 @@ def test_missing_total_is_unknown():
         "Total                  8.57e-04   4.56e-04   1.30e-05   1.33e-03 100.0%\n", ""
     )
     parsed = parse_openroad_power_text(text)
-    assert parsed.status == PowerStatus.UNKNOWN.value
+    assert parsed.status == PowerParseStatus.UNKNOWN.value
     assert parsed.total is None
 
 
 def test_missing_dynamic_component_keeps_total_available():
     text = _report_with_unit("Watts", internal="-", switching="2", leakage="3", total="6")
     parsed = parse_openroad_power_text(text)
-    assert parsed.status == PowerStatus.AVAILABLE.value
+    assert parsed.status == PowerParseStatus.AVAILABLE.value
     assert parsed.total == 6.0
     assert parsed.dynamic is None
     assert parsed.leakage == 3.0
@@ -132,7 +143,7 @@ def test_missing_dynamic_component_keeps_total_available():
 def test_missing_leakage_keeps_total_available():
     text = _report_with_unit("Watts", internal="1", switching="2", leakage="-", total="6")
     parsed = parse_openroad_power_text(text)
-    assert parsed.status == PowerStatus.AVAILABLE.value
+    assert parsed.status == PowerParseStatus.AVAILABLE.value
     assert parsed.total == 6.0
     assert parsed.dynamic == 3.0
     assert parsed.leakage is None
@@ -140,44 +151,52 @@ def test_missing_leakage_keeps_total_available():
 
 def test_malformed_numeric_field_is_not_a_power_value():
     parsed = parse_openroad_power_text(_report_with_unit("Watts", leakage="not-a-number"))
-    assert parsed.status == PowerStatus.MALFORMED.value
+    assert parsed.status == PowerParseStatus.MALFORMED.value
+    assert parsed.total is None
+
+
+@pytest.mark.parametrize("field,value", [("internal", "38.6%"), ("total", "100.0%")])
+def test_percentage_tokens_cannot_be_parsed_as_power_cells(field, value):
+    kwargs = {field: value}
+    parsed = parse_openroad_power_text(_report_with_unit("Watts", **kwargs))
+    assert parsed.status == PowerParseStatus.MALFORMED.value
     assert parsed.total is None
 
 
 def test_two_report_tables_are_ambiguous_not_silently_selected():
     parsed = parse_openroad_power_text(_fixture_text() + "\n" + _fixture_text())
-    assert parsed.status == PowerStatus.UNKNOWN.value
+    assert parsed.status == PowerParseStatus.UNKNOWN.value
     assert parsed.total is None
 
 
 def test_unsupported_file_is_not_a_power_value():
     parsed = parse_openroad_power_text("timing report\nwns -0.02\n")
-    assert parsed.status == PowerStatus.UNSUPPORTED.value
+    assert parsed.status == PowerParseStatus.UNSUPPORTED.value
     assert parsed.total is None
 
 
 def test_unsupported_explicit_unit_is_not_a_power_value():
     parsed = parse_openroad_power_text(_report_with_unit("kW"))
-    assert parsed.status == PowerStatus.UNSUPPORTED.value
+    assert parsed.status == PowerParseStatus.UNSUPPORTED.value
     assert parsed.total is None
 
 
 def test_absent_unit_is_unknown_not_assumed_watts():
     text = _report_with_unit("Watts").replace("Power (Watts)", "Power")
     parsed = parse_openroad_power_text(text)
-    assert parsed.status == PowerStatus.UNKNOWN.value
+    assert parsed.status == PowerParseStatus.UNKNOWN.value
     assert parsed.total is None
 
 
 def test_negative_power_is_invalid_not_a_power_value():
     parsed = parse_openroad_power_text(_report_with_unit("Watts", internal="-1", total="4"))
-    assert parsed.status == PowerStatus.INVALID.value
+    assert parsed.status == PowerParseStatus.INVALID.value
     assert parsed.total is None
 
 
 def test_inconsistent_component_sum_is_invalid_not_a_power_value():
     parsed = parse_openroad_power_text(_report_with_unit("Watts", total="60"))
-    assert parsed.status == PowerStatus.INVALID.value
+    assert parsed.status == PowerParseStatus.INVALID.value
     assert parsed.total is None
 
 
@@ -191,7 +210,7 @@ def test_qor_summary_retains_power_fields_and_existing_provenance_container():
     parsed = parse_openroad_power_report(_FIXTURE, scenario_id="S1")
     q = QoRResult(
         power=parsed.total, power_total=parsed.total, power_dynamic=parsed.dynamic,
-        power_leakage=parsed.leakage, power_status=parsed.status,
+        power_leakage=parsed.leakage, power_status=PowerStatus.AVAILABLE.value,
         raw_reports={"power": parsed.provenance()},
     )
     summary = q.summary()
@@ -351,6 +370,7 @@ def test_real_flow_ingests_power_artifact_and_report_hash_and_invalidates_cache(
 
     same = _real_run(cfg, sources, ybin, obin, run_id="same")
     assert same["status"] == RunStatus.CACHE_HIT.value
+    assert same["cache_key"] == first["cache_key"]
     assert same["qor_result"].power == pytest.approx(1.33e-3)
 
     report.write_text(_fixture_text().replace("1.33e-03", "1.32e-03"), encoding="utf-8")
@@ -370,6 +390,23 @@ def test_real_flow_missing_configured_report_stays_unavailable(tmp_path):
     assert out["qor"]["power_status"] == PowerStatus.UNAVAILABLE.value
     assert out["qor"]["power"] is None
     assert "power_report" not in out["manifest"]["artifacts"]
+
+
+def test_real_flow_keeps_detailed_parse_failure_in_provenance_and_canonical_power_unavailable(tmp_path):
+    report = tmp_path / "malformed_power.rpt"
+    report.write_text("report_power\nthis is not a group table\n", encoding="utf-8")
+    cfg, sources, ybin, obin = _real_flow_config(
+        tmp_path, [PowerReportConfig(format="openroad_report_power", path=str(report))]
+    )
+    out = _real_run(cfg, sources, ybin, obin, run_id="malformed")
+    assert out["status"] == RunStatus.SUCCESS.value
+    assert out["qor"]["power_status"] == PowerStatus.UNAVAILABLE.value
+    assert out["qor"]["power"] is None
+    assert out["qor"]["power_total"] is None
+    assert out["qor"]["power_dynamic"] is None
+    assert out["qor"]["power_leakage"] is None
+    assert out["qor"]["power_provenance"]["parsing_status"] == PowerParseStatus.MALFORMED.value
+    assert out["qor"]["power_provenance"]["normalized_unit"] is None
 
 
 def test_mock_flow_ignores_configured_report_and_remains_unavailable(tmp_path):
@@ -442,17 +479,43 @@ def test_report_derived_available_power_participates_in_existing_pareto_logic():
     assert not is_dominating(high_candidate, low_candidate)
 
 
-def test_cache_identity_binds_effective_scenario_association(tmp_path):
+def test_cache_identity_changes_for_rebound_or_missing_scenario_evidence(tmp_path):
     report = tmp_path / "power.rpt"
+    missing = tmp_path / "missing.rpt"
     shutil.copyfile(_FIXTURE, report)
-    cfg, sources, ybin, obin = _real_flow_config(
-        tmp_path, [PowerReportConfig(format="openroad_report_power", path=str(report))]
+    scenarios = [ScenarioSpec(id="A"), ScenarioSpec(id="B")]
+    cfg_a, sources, ybin, obin = _real_flow_config(
+        tmp_path,
+        [PowerReportConfig(format="openroad_report_power", path=str(report), scenario_id="A")],
+        scenarios=scenarios,
+        mcmm=MCMMConfig(enabled=True),
     )
-    scenario_a = _real_run(cfg, sources, ybin, obin, run_id="scenario-a", scenario="A")
-    scenario_b = _real_run(cfg, sources, ybin, obin, run_id="scenario-b", scenario="B")
-    assert scenario_a["qor"]["power_status"] == PowerStatus.AVAILABLE.value
-    assert scenario_b["qor"]["power_status"] == PowerStatus.AVAILABLE.value
-    assert scenario_a["cache_key"] != scenario_b["cache_key"]
+    bound = _real_run(cfg_a, sources, ybin, obin, run_id="bound", scenario="A")
+    assert bound["qor"]["power_status"] == PowerStatus.AVAILABLE.value
+
+    # Moving the same file mapping from A to B changes selected evidence for A;
+    # it cannot be reused as A's report and therefore has a distinct cache key.
+    cfg_b, _, _, _ = _real_flow_config(
+        tmp_path,
+        [PowerReportConfig(format="openroad_report_power", path=str(report), scenario_id="B")],
+        scenarios=scenarios,
+        mcmm=MCMMConfig(enabled=True),
+    )
+    rebound = _real_run(cfg_b, sources, ybin, obin, run_id="rebound", scenario="A")
+    assert rebound["qor"]["power_status"] == PowerStatus.UNAVAILABLE.value
+    assert rebound["cache_key"] != bound["cache_key"]
+
+    # A present mapped report and an otherwise identical missing mapped report
+    # also have distinct experiment identities.
+    cfg_missing, _, _, _ = _real_flow_config(
+        tmp_path,
+        [PowerReportConfig(format="openroad_report_power", path=str(missing), scenario_id="A")],
+        scenarios=scenarios,
+        mcmm=MCMMConfig(enabled=True),
+    )
+    absent = _real_run(cfg_missing, sources, ybin, obin, run_id="absent", scenario="A")
+    assert absent["qor"]["power_status"] == PowerStatus.UNAVAILABLE.value
+    assert absent["cache_key"] != bound["cache_key"]
 
 
 def test_cli_and_human_report_use_tool_reported_wording_and_provenance():
@@ -463,7 +526,7 @@ def test_cli_and_human_report_use_tool_reported_wording_and_provenance():
 
     parsed = parse_openroad_power_report(_FIXTURE, scenario_id="S1")
     summary = QoRResult(
-        power=parsed.total, power_status=parsed.status,
+        power=parsed.total, power_status=PowerStatus.AVAILABLE.value,
         power_dynamic=parsed.dynamic, power_leakage=parsed.leakage,
         raw_reports={"power": parsed.provenance()},
     ).summary()
@@ -476,3 +539,16 @@ def test_cli_and_human_report_use_tool_reported_wording_and_provenance():
     assert "POWER (MOST RECENT RECORDED RUN)" in report
     assert "Tool-reported power" in report
     assert str(_FIXTURE) in report
+
+    # Detailed parser outcomes remain visible in CLI/report presentation even
+    # though canonical QoR deliberately stays UNAVAILABLE.
+    unavailable = QoRResult(
+        power=None,
+        power_status=PowerStatus.UNAVAILABLE.value,
+        raw_reports={"power": {"format": POWER_REPORT_FORMAT,
+                                "parsing_status": PowerParseStatus.MALFORMED.value}},
+    ).summary()
+    _print_power_summary(console, unavailable)
+    assert "Power: UNAVAILABLE (report parser: MALFORMED)" in console.export_text()
+    unavailable_report = design_report({}, {}, None, None, ConstraintSet(), [], unavailable)
+    assert "Power: UNAVAILABLE (report parser: MALFORMED)" in unavailable_report
