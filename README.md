@@ -194,7 +194,7 @@ With your permission, the following enhancements were incorporated (documented h
 2. **Rich CLI** for beautiful, structured console output.
 3. **FastAPI web dashboard** with live constraint/coverage/QoR views (`rca dashboard`).
 4. **JSON Schema** for the project configuration (versioned).
-5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests passing in the Step-11 acceptance gate). Full unit/integration/golden coverage spans parser, constraints, SDC parsing, SDC generation, connectivity, timing model, inference, equivalence, validation, exceptions, provenance, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
+5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests) and Step-12 MCMM coverage (70 tests) plus a Step-13 validation-engine scenario suite (40 tests) — full suite **800 collected / 800 passed**. Coverage spans parser, constraints, SDC parsing, SDC generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), exceptions, provenance, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
 6. **Deterministic hashing** utilities for reproducibility/caching.
 
 ---

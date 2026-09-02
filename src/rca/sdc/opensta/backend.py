@@ -29,6 +29,8 @@ class OpenSTASDCBackend(GenericSDCBackend):
         ]
 
     def render(self, cset: ConstraintSet, design_name: str = "top",
-               mode: SafeMode = SafeMode.BALANCED, with_provenance: bool = True) -> str:
+               mode: SafeMode = SafeMode.BALANCED, with_provenance: bool = True,
+               scenario: str | None = None) -> str:
         return self.generate(cset, design_name=design_name, mode=mode,
-                             with_provenance=with_provenance).text
+                             with_provenance=with_provenance,
+                             scenario=scenario).text

@@ -41,8 +41,13 @@ from .candidate import Candidate
 #   - a label factory
 def _clone(cset: ConstraintSet) -> ConstraintSet:
     """Clone a ConstraintSet by rebuilding from copied constraints. This avoids
-    Pydantic's deep-copy failing on transient locks inside the set."""
+    Pydantic's deep-copy failing on transient locks inside the set.
+
+    Scenarios (MCMM definitions) survive the clone so scenario semantics remain
+    part of every candidate's UCM (Step 12 §2)."""
     new_cs = ConstraintSet(name=getattr(cset, "name", ""))
+    for sid, s in (getattr(cset, "scenarios", {}) or {}).items():
+        new_cs.scenarios[sid] = s.model_copy(deep=True)
     for c in cset:
         try:
             new_cs.add(deepcopy(c))

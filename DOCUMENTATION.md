@@ -360,16 +360,21 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | `cadence/backend.py` | ~110 | Tempus/EDI skeleton. Adds Cadence-style header and `set_db` comments. |
 | Each backend `__init__.py` | ~3 | Re-exports the backend class. |
 
-### 5.10 `src/rca/validation/` — constraint validation (WP-J)
+### 5.10 `src/rca/validation/` — constraint validation (WP-J, strengthened in Step 13)
 
 | File | Lines | Purpose |
 |---|---|---|
-| `__init__.py` | — | Re-exports `run_validation`, `ValidationResult`, `ValidationIssue`. |
-| `base.py` | ~50 | `ValidationIssue` (severity, code, message, object_name, source_constraint, suggestion) and `ValidationResult` with `.errors()`, `.warnings()`, `.add(issue)`, plus `CoverageReport`. |
-| `references.py` | ~45 | Reference checker (§41): every port/pin/net/clock referenced by a constraint must exist in the design or in the ConstraintSet's clock set. Flags dangling references as warnings (strict mode → errors). |
-| `conflicts.py` | ~60 | Conflict detector (§42): checks for overlapping constraints (e.g., two `create_clock` on the same object, conflicting set_input_delay for the same port/clock/edge without `-add_delay`, contradictory clock groups). |
-| `coverage.py` | ~135 | Coverage analyzer (§43): measures (a) clock-source coverage (% of detected clock pins that have `create_clock`), (b) input coverage (% of non-clock inputs with `set_input_delay`), (c) output coverage (% of outputs with `set_output_delay`). In strict mode missing coverage is an error; otherwise a warning. |
-| `engine.py` | 43 | `run_validation(design, timing_graph, cset, run_coverage=True) → ValidationResult`. Wires the three modules above into one pass and aggregates counts. |
+| `__init__.py` | — | Re-exports `run_validation` (as `validate`), `ValidationResult`, `ValidationIssue`, `ValidationReport`, `CoverageReport`. |
+| `base.py` | ~220 | `ValidationIssue` (severity, category, code, message, constraint_id, related ids, object names, scenario id, evidence, suggestion, blocking, source_location, plus Step-13 provenance `source_kind`/`origin`/`assumption_ids`/`resolution_status`) and `ValidationReport` with per-layer summaries and `overall_status()`. Deterministic `issue_id`. |
+| `engine.py` | ~150 | `run_validation(...) → ValidationResult`. Ordered pipeline: references → semantic → conflicts → exceptions+scenarios → completeness → backend → coverage → (optional) SDC-import → hydrate provenance. |
+| `references.py` | ~180 | Reference integrity (§41): every port/pin/net/cell/register/clock referenced by a constraint must exist. Distinguishes `RESOLVED` (a known miss) from `UNRESOLVED` (design unavailable). Ref-kind-consistency checks (Step 13). |
+| `semantic.py` | ~560 | Constraint-type semantic checks: clocks, generated clocks, I/O timing, clock groups, path selectors, plus Step-13 value/unit/range semantics for clock uncertainty/latency/transition, input transition, load, driving cell, design rules, min/max delay. |
+| `conflicts.py` | ~420 | Conflict and overlap/shadow detection (§42): duplicate/conflicting clocks, IO delays, latency/uncertainty, min/max delay, plus Step-13 precedence-aware user-vs-inference conflicts and contradictory exceptions. |
+| `coverage.py` | ~661 | Coverage analyzer (§43): clock-source, input/output timing path, reg-to-reg, CDC path, and clock-relationship coverage. `UNKNOWN` when graph unavailable; `NOT_APPLICABLE` when zero applicable; retains numerator/denominator evidence. |
+| `completeness.py` | ~150 | Step-13 completeness / missing-info: unresolved clock relationships, generated-clock transforms, missing IO timing, unresolved timing environment. Never invents a value. |
+| `exceptions.py` | ~260 | Exception sanity (§14) + scenario coherence (§15). Step-13: records formal-verification state via `verify_exceptions`; unverified ⇒ `EXCEPTION_UNVERIFIED`, never concluded safe. |
+| `sdc_import.py` | ~120 | Step-13 SDC import/parse classification (§16/Req 10): consumes importer diagnostics and classifies `SYNTAX_INVALID / SEMANTIC_INVALID / INCOMPLETE / COMPLETE / UNRESOLVED` without re-parsing. |
+| `backend.py` | ~50 | Backend capability (§16): preflight via the chosen `SDCBackend`; vendor syntax checks stay behind the backend abstraction. |
 
 ### 5.11 `src/rca/exceptions/` — exception effectiveness & formal (WP-K)
 

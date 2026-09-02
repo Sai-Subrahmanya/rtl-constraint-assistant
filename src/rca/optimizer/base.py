@@ -31,6 +31,13 @@ from ..qor.objectives import (
     compute_margin, explanation_for, is_dominating, objective_vector,
     pareto_front, scalar_score, select_final,
 )
+from ..mcmm.aggregate import (
+    mcmm_explanation_for,
+    mcmm_is_dominating,
+    mcmm_pareto_front,
+    mcmm_scalar_score,
+    mcmm_select_final,
+)
 from ..utils.enums import (
     CandidateDecision,
     OptimizationStatus,
@@ -78,6 +85,10 @@ class OptimizationResult:
     def pareto_size(self) -> int:
         return len(self.pareto)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the optimization result (alias of :meth:`summary`)."""
+        return self.summary()
+
     def summary(self) -> dict[str, Any]:
         return {
             "baseline_id": self.baseline.id if self.baseline else None,
@@ -107,7 +118,8 @@ class Optimizer:
                  work_dir: Path | None = None) -> None:
         self.cfg = cfg
         self.evaluate_fn = evaluate_fn
-        self.work_dir = work_dir or Path(cfg.flow.output_dir) / "optimization"
+        self.work_dir = Path(work_dir) if work_dir is not None else (
+            Path(cfg.flow.output_dir) / "optimization")
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.budget = OptimizationBudget.from_config(cfg)
         self._priorities = dict(cfg.optimization.priorities)
@@ -153,8 +165,9 @@ class Optimizer:
         if baseline.qor is None or baseline.run_id == "":
             self._evaluate(baseline)
             self._classify(baseline)
-            self.budget.tick_eda_run()
-            result.eda_runs += 1
+            baseline_eda_runs = _eda_run_count(baseline)
+            self.budget.tick_eda_run(baseline_eda_runs)
+            result.eda_runs += baseline_eda_runs
             self._count_cache(baseline, result)
         else:
             self._classify(baseline)
@@ -171,6 +184,8 @@ class Optimizer:
         if not baseline.hard_feasible:
             baseline.decision = CandidateDecision.REJECTED_INFEASIBLE
             result.infeasible.append(baseline)
+
+        mcmm = self._mcmm_enabled()
 
         # ----- main bounded search -----
         explored_hashes: set[str] = {baseline.constraint_model_hash
@@ -202,8 +217,9 @@ class Optimizer:
                         baseline_setup_wns=baseline.qor.setup_wns if baseline.qor else None,
                         baseline_hold_wns=baseline.qor.hold_wns if baseline.qor else None,
                     )
-                    self.budget.tick_eda_run()
-                    result.eda_runs += 1
+                    cand_eda_runs = _eda_run_count(c)
+                    self.budget.tick_eda_run(cand_eda_runs)
+                    result.eda_runs += cand_eda_runs
                     self._count_cache(c, result)
                     result.all_candidates.append(c)
                     if c.blocked:
@@ -221,14 +237,22 @@ class Optimizer:
 
             # Recompute Pareto across ALL feasible candidates so far
             feasible = [c for c in result.all_candidates if c.hard_feasible]
-            front = pareto_front(feasible)
+            use_mcmm = mcmm or self._any_mcmm(feasible)
+            if use_mcmm:
+                front = mcmm_pareto_front(feasible)
+                best_cand = mcmm_select_final(front, baseline, self._priorities)
+                best_score = (mcmm_scalar_score(best_cand, baseline, self._priorities)
+                              if best_cand else float("-inf"))
+            else:
+                front = pareto_front(feasible)
+                best_cand = select_final(front, baseline, self._priorities)
+                best_score = (scalar_score(best_cand, baseline, self._priorities)
+                              if best_cand else float("-inf"))
             for c in feasible:
                 c.pareto_member = c in front
             result.pareto = front
 
             # Best scalar (reporting only)
-            best_cand = select_final(front, baseline, self._priorities)
-            best_score = scalar_score(best_cand, baseline, self._priorities) if best_cand else float("-inf")
             best_headroom = best_cand.margin_headroom_ns if best_cand else None
             self.budget.record(len(front), best_score, best_headroom)
 
@@ -245,7 +269,13 @@ class Optimizer:
 
         # ----- final selection -----
         feasible_all = [c for c in result.all_candidates if c.hard_feasible]
-        front = pareto_front(feasible_all)
+        use_mcmm = mcmm or self._any_mcmm(feasible_all)
+        if use_mcmm:
+            front = mcmm_pareto_front(feasible_all)
+            final = mcmm_select_final(front, baseline, self._priorities)
+        else:
+            front = pareto_front(feasible_all)
+            final = select_final(front, baseline, self._priorities)
         for c in feasible_all:
             c.pareto_member = c in front
             if c in front:
@@ -254,22 +284,33 @@ class Optimizer:
                 c.decision = CandidateDecision.DOMINATED
         result.pareto = front
 
-        final = select_final(front, baseline, self._priorities)
         if final is None:
             final = baseline
         final.decision = CandidateDecision.FINAL
         result.final = final
 
         # Assign ranks to feasible candidates by scalar score (deterministic)
-        ranked = sorted(feasible_all,
-                        key=lambda c: (-scalar_score(c, baseline, self._priorities), c.id))
-        for i, c in enumerate(ranked):
-            c.rank = i
-            c.priority_score = scalar_score(c, baseline, self._priorities)
+        if use_mcmm:
+            ranked = sorted(feasible_all,
+                            key=lambda c: (-mcmm_scalar_score(c, baseline, self._priorities), c.id))
+            for i, c in enumerate(ranked):
+                c.rank = i
+                c.priority_score = mcmm_scalar_score(c, baseline, self._priorities)
+        else:
+            ranked = sorted(feasible_all,
+                            key=lambda c: (-scalar_score(c, baseline, self._priorities), c.id))
+            for i, c in enumerate(ranked):
+                c.rank = i
+                c.priority_score = scalar_score(c, baseline, self._priorities)
 
-        result.explanation = explanation_for(final, baseline, front,
-                                             result.all_candidates,
-                                             self._priorities)
+        if use_mcmm:
+            result.explanation = mcmm_explanation_for(final, baseline, front,
+                                                      result.all_candidates,
+                                                      self._priorities)
+        else:
+            result.explanation = explanation_for(final, baseline, front,
+                                                 result.all_candidates,
+                                                 self._priorities)
         final.explanation = result.explanation
 
         stop = self.budget.should_stop()
@@ -288,23 +329,48 @@ class Optimizer:
     # ------------------------------------------------------------------
     # Evaluation & classification
     # ------------------------------------------------------------------
+    def _mcmm_enabled(self) -> bool:
+        """Whether MCMM is active for this optimizer run.
+
+        MCMM is active only when explicitly enabled AND more than one scenario is
+        active.  When disabled or a single active scenario exists the optimizer
+        uses the legacy Step-11 path (backward compatibility, Step 12 §22).
+        """
+        mcmm = getattr(self.cfg, "mcmm", None)
+        if mcmm is None or not bool(getattr(mcmm, "enabled", False)):
+            return False
+        try:
+            from ..mcmm import build_scenario_matrix
+            mat = build_scenario_matrix(self.cfg)
+            return bool(mat.is_enabled and mat.scenario_count > 1)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _any_mcmm(cands) -> bool:
+        """True when any candidate carries an MCMM aggregate result."""
+        return any(getattr(c, "mcmm", None) is not None for c in cands)
+
     def _evaluate(self, cand: Candidate) -> None:
         assert self.evaluate_fn is not None
         cand.decision = CandidateDecision.EDA_PENDING
         try:
             qor_out = self.evaluate_fn(cand, self.work_dir)
-            qor, cache_key, cache_status, run_id = _normalize_eval(qor_out)
-            cand.qor = qor
-            cand.cache_key = cache_key or ""
-            cand.cache_status = cache_status or "MISS"
-            cand.run_id = run_id or ""
-            if qor is not None:
-                qor.candidate_id = cand.id
-                qor.cache_key = cand.cache_key
-                qor.cache_status = cand.cache_status
-                qor.run_id = cand.run_id or qor.run_id
-            cand.validity_status = "VALIDATED"
-            cand.decision = CandidateDecision.EVALUATED
+            if _is_mcmm_result(qor_out):
+                self._apply_mcmm(cand, qor_out)
+            else:
+                qor, cache_key, cache_status, run_id = _normalize_eval(qor_out)
+                cand.qor = qor
+                cand.cache_key = cache_key or ""
+                cand.cache_status = cache_status or "MISS"
+                cand.run_id = run_id or ""
+                if qor is not None:
+                    qor.candidate_id = cand.id
+                    qor.cache_key = cand.cache_key
+                    qor.cache_status = cand.cache_status
+                    qor.run_id = cand.run_id or qor.run_id
+                cand.validity_status = "VALIDATED"
+                cand.decision = CandidateDecision.EVALUATED
         except Exception as e:
             log.error("Candidate %s evaluation failed: %s", cand.id, e)
             cand.warnings.append(str(e))
@@ -314,9 +380,37 @@ class Optimizer:
             cand.infeasible_reason = f"evaluation_error:{e}"
             cand.qor = QoRResult(tool="error", notes=[str(e)])
 
+    def _apply_mcmm(self, cand: Candidate, mcmm_result: Any) -> None:
+        """Attach an MCMMResult to a candidate and derive global verdict.
+
+        The per-scenario records are retained on ``cand.mcmm``; ``cand.qor`` is
+        left as None because MCMM results are never collapsed into a single
+        QoR value.
+        """
+        cand.mcmm = mcmm_result
+        cand.qor = None
+        cand.cache_key = getattr(mcmm_result, "cache_key", "") or ""
+        cand.cache_status = _mcmm_cache_status(mcmm_result)
+        cand.run_id = ";".join(getattr(mcmm_result, "run_ids", []) or [])
+        cand.global_status = getattr(mcmm_result, "global_status", "") or ""
+        cand.limiting_scenarios = list(getattr(mcmm_result, "limiting_scenarios", []) or [])
+        cand.margin_limiting_scenarios = list(
+            getattr(mcmm_result, "margin_limiting_scenarios", []) or [])
+        cand.hard_feasible = bool(getattr(mcmm_result, "feasible", False))
+        cand.blocked = bool(getattr(mcmm_result, "blocked", False))
+        cand.infeasible_reason = getattr(mcmm_result, "global_reason", "") or ""
+        cand.margin_headroom_ns = getattr(mcmm_result, "margin_headroom_ns", None)
+        cand.margin_utilization = getattr(mcmm_result, "margin_utilization", None)
+        cand.diagnostics = list(getattr(mcmm_result, "diagnostics", []) or [])
+        cand.validity_status = "VALIDATED"
+        cand.decision = CandidateDecision.EVALUATED
+
     def _classify(self, cand: Candidate,
                   baseline_setup_wns: float | None = None,
                   baseline_hold_wns: float | None = None) -> None:
+        # MCMM candidates are classified globally during _apply_mcmm.
+        if getattr(cand, "mcmm", None) is not None:
+            return
         qor = cand.qor
         if cand.blocked or qor is None:
             cand.hard_feasible = False
@@ -355,6 +449,39 @@ class Optimizer:
             result.cache_hits += 1
         elif cand.cache_status and cand.cache_status != "N_A":
             result.cache_misses += 1
+
+
+def _is_mcmm_result(out: Any) -> bool:
+    """Return True when an evaluation output is an MCMM aggregate result."""
+    return (out is not None
+            and hasattr(out, "scenario_results")
+            and hasattr(out, "active_scenario_ids")
+            and hasattr(out, "global_status"))
+
+
+def _eda_run_count(cand: Candidate | None) -> int:
+    """Number of individual EDA runs represented by a candidate.
+
+    For MCMM candidates this is the per-scenario run count; otherwise it is 1
+    (one STA/synthesis run per candidate).
+    """
+    if cand is None:
+        return 0
+    mcmm = getattr(cand, "mcmm", None)
+    if mcmm is not None and getattr(mcmm, "eda_runs", 0):
+        return int(mcmm.eda_runs)
+    return 1
+
+
+def _mcmm_cache_status(mcmm_result: Any) -> str:
+    """Derive a candidate-level cache status from the MCMM aggregate."""
+    cache_hits = int(getattr(mcmm_result, "cache_hits", 0) or 0)
+    cache_misses = int(getattr(mcmm_result, "cache_misses", 0) or 0)
+    if cache_misses > 0:
+        return "MISS"
+    if cache_hits > 0:
+        return "HIT"
+    return "N_A"
 
 
 def _normalize_eval(out: Any) -> tuple[QoRResult | None, str, str, str]:

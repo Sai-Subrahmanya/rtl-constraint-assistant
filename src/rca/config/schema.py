@@ -270,8 +270,39 @@ PROJECT_SCHEMA: dict = {
         },
         "scenarios": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "mode": {"type": "string", "default": "functional"},
+                    "corner": {"type": "string", "default": "slow"},
+                    "libraries": {"type": "array", "items": {"type": "string"}, "default": []},
+                    "parasitics": {"type": "string"},
+                    "sdc_set_id": {"type": "string"},
+                    "environment": {
+                        "type": "object",
+                        "additionalProperties": {"type": ["string", "number", "boolean"]},
+                        "default": {},
+                    },
+                    "active": {"type": "boolean", "default": True},
+                    "constraints": {"type": "object", "default": {}},
+                },
+                "default": {},
+            },
             "default": [],
+        },
+        "mcmm": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "enabled": {"type": "boolean", "default": False},
+                "active_scenario_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": [],
+                },
+            },
+            "default": {},
         },
     },
 }

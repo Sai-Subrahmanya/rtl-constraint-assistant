@@ -17,6 +17,9 @@ from ..constraint_model import ConstraintSet
 from ..qor.model import QoRResult
 from ..utils.enums import CandidateDecision
 
+if False:  # typing only; avoids a runtime import cycle at dataclass-creation time
+    from ..mcmm.model import MCMMResult
+
 
 @dataclass
 class Candidate:
@@ -46,6 +49,13 @@ class Candidate:
     scenario: str = "default"
     corner: str = "default"
     mode: str = "default"
+    # ---------- Step 12: MCMM evaluation provenance ----------
+    # Per-scenario records plus the global aggregate.  When None, the
+    # candidate was evaluated in the legacy single-scenario path.
+    mcmm: Any | None = None          # rca.mcmm.model.MCMMResult
+    global_status: str = ""          # feasible | infeasible | blocked | invalid
+    limiting_scenarios: list[str] = field(default_factory=list)
+    margin_limiting_scenarios: list[str] = field(default_factory=list)
     # Experiment identity (Step 10 cache integration)
     cache_key: str = ""
     cache_status: str = ""    # HIT / MISS / N_A / BLOCKED
@@ -101,4 +111,8 @@ class Candidate:
             "margin_headroom_ns": self.margin_headroom_ns,
             "margin_utilization": self.margin_utilization,
             "explanation": self.explanation,
+            "mcmm": self.mcmm.to_dict() if self.mcmm is not None else None,
+            "global_status": self.global_status,
+            "limiting_scenarios": list(self.limiting_scenarios),
+            "margin_limiting_scenarios": list(self.margin_limiting_scenarios),
         }
