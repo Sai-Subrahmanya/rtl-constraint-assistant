@@ -1,9 +1,11 @@
-# Test Plan — RCA Validation and Formal Exception Verification (Steps 13–14)
+# Test Plan — RCA Validation, Formal Exception Verification, and Semantic Comparison (Steps 13–15)
 
-This test plan describes the validation-engine and concrete formal-adapter
-coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
-`tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios), and
-`tests/unit/test_symbiyosys.py` (Step 14, 11 named scenarios).
+This test plan describes validation-engine, concrete formal-adapter, and
+semantic-comparison coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
+`tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios),
+`tests/unit/test_symbiyosys.py` (Step 14, 11 named scenarios), and
+`tests/unit/test_equivalence.py` (Step 9 capability, Step-15 audit-hardened;
+67 named semantic-comparison scenarios).
 
 ## Suites
 
@@ -12,6 +14,7 @@ coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
 | Step-7 validation | `tests/unit/test_validation.py` | 74 | Deterministic IDs, clocks, gclks, IO, groups, conflicts, coverage, exceptions, scenarios, backend, immutability. |
 | Step-13 validation | `tests/unit/test_validation_step13.py` | 40 | Strengthened reference/semantic/conflict/completeness/exception-safety/scenario/SDC-import/backend/provenance/determinism. |
 | Step-14 SymbiYosys formal adapter | `tests/unit/test_symbiyosys.py` | 11 | PASS/FAIL/UNKNOWN/error/timeout verdicts, counterexamples, configuration, scenario provenance, validation integration, and immutability. |
+| Step-15 semantic-comparison audit | `tests/unit/test_equivalence.py` | 67 | Existing UCM/SDC normalization and deterministic semantic-diff coverage, plus hardened CLI UNKNOWN handling and active-MCMM scope/context comparisons. |
 | Step-12 MCMM | `tests/unit/test_mcmm.py` | 70 | MCMM aggregation, per-scenario identity, cache, evaluator. |
 | Step-11 Pareto | `tests/unit/test_pareto.py` | 125 | Multi-objective Pareto/scalar/final selection. |
 
@@ -83,7 +86,8 @@ provenance handling without substituting a fake result for a real formal proof.
 - `tests/unit/test_symbiyosys.py` : **11 passed** (Step-14 gate; no real formal tool required).
 - `tests/unit/test_pareto.py` : **125 passed** (Step-11 regression).
 - `tests/unit/test_mcmm.py` : **70 passed** (Step-12 regression).
-- Full `python -m pytest -q` : **811 collected, 811 passed, 0 failed, 0 skipped, 0 errors**.
+- `tests/unit/test_equivalence.py` : **67 passed** (Step-15 audit/hardening gate).
+- Full `python -m pytest -q` : **816 collected, 816 passed, 0 failed, 0 skipped, 0 errors**.
 
 ## Environment notes
 

@@ -179,7 +179,7 @@ rtl-constraint-assistant/
 | `rca generate`     | Emit SDC (generic/opensta/synopsys/cadence backend). |
 | `rca validate`     | Validate generated or imported SDC; runs configured SymbiYosys exception proofs if opted in. |
 | `rca coverage`     | Per-category coverage report with uncovered objects. |
-| `rca compare --a A.sdc --b B.sdc` | Semantic diff between two SDC files. |
+| `rca compare --a A.sdc --b B.sdc` | Semantic UCM-level diff between two SDC files with scenario and provenance context; unsupported or unresolved intent is reported as `UNKNOWN`, never equivalent. |
 | `rca explain -c CID` | Explain why a constraint exists and its evidence. |
 | `rca run-sta`      | Run synthesis + STA and collect QoR. |
 | `rca optimize`     | Closed-loop multi-objective optimization. |
@@ -224,7 +224,7 @@ With your permission, the following enhancements were incorporated (documented h
 2. **Rich CLI** for beautiful, structured console output.
 3. **FastAPI web dashboard** with live constraint/coverage/QoR views (`rca dashboard`).
 4. **JSON Schema** for the project configuration (versioned).
-5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests), Step-12 MCMM coverage (70 tests), Step-13 validation scenarios (40 tests), and Step-14 SymbiYosys formal-adapter coverage (11 tests) — full suite **811 collected / 811 passed**. Coverage spans parser, constraints, SDC parsing/generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), formal proof verdicts/provenance, exceptions, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
+5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests), Step-12 MCMM coverage (70 tests), Step-13 validation scenarios (40 tests), Step-14 SymbiYosys formal-adapter coverage (11 tests), and Step-15 semantic-comparison audit coverage (67 tests) — full suite **816 collected / 816 passed**. Coverage spans parser, constraints, SDC parsing/generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), formal proof verdicts/provenance, exceptions, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
 6. **Deterministic hashing** utilities for reproducibility/caching.
 
 ---

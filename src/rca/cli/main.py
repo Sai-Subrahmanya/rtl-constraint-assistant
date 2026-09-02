@@ -16,6 +16,7 @@ from typing import Optional
 import typer
 import uvicorn
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -25,7 +26,7 @@ from ..config.model import ProjectConfig, default_config, load_config, write_con
 from ..constraint_model import ConstraintSet
 from ..design_model import Design
 from ..eda import MockEDA, OpenSTABackend, YosysBackend, get_tool, run_flow
-from ..equivalence import compare as compare_sets
+from ..equivalence import compare_sdc_text
 from ..exceptions import analyze_exceptions, formal_backend_from_config, verify_exceptions
 from ..explanation import design_report, explain_candidate, explain_constraint
 from ..inference import InferenceEngine
@@ -485,16 +486,18 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
     separated from semantic identity; unsupported or unresolved options
     surface as UNKNOWN rather than false equivalence.
     """
-    cfg = _load(config)
-    am = _am(cfg)
+    # Retain the project-config argument as part of the established CLI
+    # contract, but compare the supplied SDC inputs through the hardened
+    # importer.  The legacy SDCParser silently drops unsupported commands,
+    # which could otherwise turn materially unknown intent into EQUIVALENT.
+    _load(config)
     try:
-        parser = SDCParser()
-        cset_a = parser.parse_file(a)
-        cset_b = parser.parse_file(b)
-    except Exception as exc:
-        console.print(f"[red]Failed to parse SDC: {exc}[/red]")
-        raise typer.Exit(code=2)
-    result = compare_sets(cset_a, cset_b)
+        text_a = Path(a).read_text(encoding="utf-8", errors="replace")
+        text_b = Path(b).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        console.print(f"[red]Failed to read SDC: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    result = compare_sdc_text(text_a, text_b, source_a=a, source_b=b)
     if json_out:
         import json as _json
         console.print_json(data=result.to_dict())
@@ -518,7 +521,15 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
                   f"   Only in B: {c['only_in_right']}"
                   f"   Unknown: [magenta]{c['unknown']}[/]")
     console.print(f"  Duplicates in A: {c['duplicates_left']}   "
-                  f"Duplicates in B: {c['duplicates_right']}")
+                  f"Duplicates in B: {c['duplicates_right']}"
+                  f"   Scenario context findings: {c['scenario_differences']}")
+    if result.scenario_differences:
+        console.print("\n[bold]Scenario context findings:[/bold]")
+        for finding in result.scenario_differences[:10]:
+            where = finding.scenario_id or "active scenario matrix"
+            category = escape(f"[{finding.status}]")
+            console.print(f"  - {category} {escape(where)}: {escape(finding.field)}")
+            console.print(f"      {escape(finding.explanation)}")
     if result.different_constraints:
         console.print("\n[bold]Top semantic differences:[/bold]")
         shown = 0
@@ -527,25 +538,47 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
                 console.print(f"  … and {len(result.different_constraints)-shown} more")
                 break
             ids = f"{p.a_id} → {p.b_id}" if p.a_id and p.b_id else (p.a_id or p.b_id or "")
-            console.print(f"  - [{p.constraint_type}] {ids}")
+            category = escape(f"[{p.constraint_type}]")
+            console.print(f"  - {category} {escape(ids)}")
             for fld in p.fields[:3]:
-                console.print(f"      {fld.field}: A={fld.value_a!r}  B={fld.value_b!r}")
-                console.print(f"        {fld.explanation}")
+                console.print(
+                    f"      {escape(fld.field)}: A={escape(repr(fld.value_a))}  "
+                    f"B={escape(repr(fld.value_b))}"
+                )
+                console.print(f"        {escape(fld.explanation)}")
+            provenance = []
+            if p.a_provenance is not None:
+                provenance.append(f"A={p.a_provenance!r}")
+            if p.b_provenance is not None:
+                provenance.append(f"B={p.b_provenance!r}")
+            if provenance:
+                console.print(f"      Provenance: {escape('; '.join(provenance))}")
             shown += 1
     if result.only_in_left:
         console.print("\n[bold]Only in A:[/bold]")
         for p in result.only_in_left[:10]:
-            console.print(f"  - [{p.constraint_type}] {p.a_id}")
+            category = escape(f"[{p.constraint_type}]")
+            console.print(f"  - {category} {escape(p.a_id or '')}")
     if result.only_in_right:
         console.print("\n[bold]Only in B:[/bold]")
         for p in result.only_in_right[:10]:
-            console.print(f"  - [{p.constraint_type}] {p.b_id}")
+            category = escape(f"[{p.constraint_type}]")
+            console.print(f"  - {category} {escape(p.b_id or '')}")
     if result.unknown_constraints:
         console.print("\n[magenta][bold]UNKNOWN (cannot prove equivalence):[/bold][/magenta]")
         for p in result.unknown_constraints[:10]:
-            console.print(f"  - [{p.constraint_type}] {p.a_id or '?'} vs {p.b_id or '?'}")
+            ids = f"{p.a_id or '?'} vs {p.b_id or '?'}"
+            category = escape(f"[{p.constraint_type}]")
+            console.print(f"  - {category} {escape(ids)}")
             for n in p.notes[:3]:
-                console.print(f"      {n}")
+                console.print(f"      {escape(n)}")
+            provenance = []
+            if p.a_provenance is not None:
+                provenance.append(f"A={p.a_provenance!r}")
+            if p.b_provenance is not None:
+                provenance.append(f"B={p.b_provenance!r}")
+            if provenance:
+                console.print(f"      Provenance: {escape('; '.join(provenance))}")
     if result.normalization_notes:
         console.print("\n[dim]Normalization notes:[/dim]")
         for n in result.normalization_notes:

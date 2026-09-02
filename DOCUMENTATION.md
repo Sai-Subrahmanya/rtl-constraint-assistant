@@ -393,8 +393,8 @@ A timing exception selector is not itself a formal property. RCA therefore never
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | — | Re-exports. |
-| `normalize.py` | ~70 | Constraint normalization (§50): before comparing two constraints, canonicalize their target lists, clock references, waveform representation, and unit formatting so semantically identical constraints compare equal even when textually different (e.g., `10000ps` vs `10ns`, `-name clk` vs positional). |
-| `semantic_compare.py` | ~100 | `compare(a: ConstraintSet, b: ConstraintSet) → ComparisonResult`: returns equivalence (EQUIVALENT / DIFFERENT / OVERLAPPING / CONFLICTING), plus added/removed/modified constraint lists. Used by `rca compare` and by the optimizer to detect regressions. |
+| `normalize.py` | ~70 | Constraint normalization (§50): before comparing two constraints, canonicalize their target lists, clock references, waveform representation, and unit formatting. This makes semantically identical constraints compare equal even when textually different (e.g., `10000ps` vs `10ns`, `-name clk` vs positional). |
+| `semantic_compare.py` | ~100 | `compare(a: ConstraintSet, b: ConstraintSet) → ComparisonResult`: returns semantic equivalence/differences plus added/removed/modified constraint lists, deterministic `scenario_differences`, and source provenance summaries separate from semantic identity. It projects `scenario_ids=[]` to all active scenarios only when both UCMs provide comparable active matrices; one-sided matrices remain UNKNOWN. Used by `rca compare` and by the optimizer to detect regressions. |
 
 ### 5.13 `src/rca/source/` — source manifest and resolution (WP-A)
 
@@ -753,7 +753,7 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca infer [CONFIG]` | Run inference only; prints the proposed ConstraintSet without generating SDC. | `--show-assumptions` |
 | `rca generate [CONFIG]` | Emit SDC from the current UCM (skip inference if a snapshot is present). | `--backend`, `--scenario NAME` |
 | `rca validate [CONFIG]` | Run the validator against the current UCM/design and print issues. | `--strict` |
-| `rca compare [CONFIG] --a FILE.sdc --b FILE.sdc` | Semantically compare two SDC files via normalization + `semantic_compare`. Prints equivalence verdict and added/removed/modified sets. |  |
+| `rca compare [CONFIG] --a FILE.sdc --b FILE.sdc` | Semantically compare two SDC files through the hardened SDC importer, normalization + `semantic_compare`. Prints equivalence/UNKNOWN verdict, field- and scenario-context differences, and added/removed/modified sets; `--json` emits deterministic machine output. | `--json` |
 | `rca coverage [CONFIG]` | Print only the coverage metrics (clock/in/out %). |  |
 | `rca explain [CONFIG] [CONSTRAINT_ID]` | Print natural-language explanation(s) of one or all constraints (evidence, assumptions, source). |  |
 | `rca run-sta [CONFIG]` | Synthesize with Yosys and/or run OpenSTA with current SDC; print timing report. | `--eda {yosys,opensta,mock}`, `--sdc FILE` |
