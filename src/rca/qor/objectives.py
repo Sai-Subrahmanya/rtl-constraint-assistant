@@ -179,57 +179,61 @@ def compute_margin(qor, required_setup_ns: float = 0.0,
                    baseline_setup_wns: float | None = None,
                    baseline_hold_wns: float | None = None
                    ) -> dict[str, float | None]:
-    """Binding headroom + margin utilization (corrected).
+    """Candidate binding headroom + margin utilization (diagnostic).
 
-    setup_headroom_ns = max(0, setup_wns - req_s) * 1e9
-    hold_headroom_ns  = max(0, hold_wns - req_h) * 1e9
-    margin_headroom_ns = min(setup_headroom_ns, hold_headroom_ns)  [ns, diagnostic]
+    margin_headroom_ns (diagnostic, ns):
+        Candidate headroom above the required timing floors, per dimension
+        clamped at zero:
+            setup_headroom_ns = max(0, cand_setup_wns - req_s) * 1e9
+            hold_headroom_ns  = max(0, cand_hold_wns  - req_h) * 1e9
+        margin_headroom_ns = min(setup_headroom_ns, hold_headroom_ns) when
+        both candidate WNS are known; the known single dimension when only
+        one is known; None when neither is known.
 
-    usable_baseline_ns = min(max(0, baseline_setup_wns - req_s),
-                             max(0, baseline_hold_wns - req_h)) * 1e9
-        (if baseline hold known; else falls back to setup headroom only)
-    consumed_ns = max(0, baseline_setup_wns - cand_setup_wns) * 1e9
-    margin_utilization = clamp(consumed_ns / usable_baseline_ns, 0, 1)
-        where usable_baseline_ns > 0; otherwise None (no margin to consume).
+    margin_utilization (diagnostic / secondary tie-break signal):
+        Fraction of the usable baseline timing margin consumed by the
+        candidate, measured per dimension and combined as the maximum
+        (binding-dimension) utilization:
 
-    NOTE: margin_utilization is a diagnostic/tradeoff metric only. It is
-    NOT a standalone objective to maximize: a candidate that consumes more
-    slack without delivering PPA/quality benefit must not outrank a candidate
-    that consumes less. Pareto dominance ignores utilization entirely; it is
-    consulted only as a secondary tie-break AFTER priorities are honored,
-    preferring LOWER utilization (i.e. preserving slack) among otherwise
-    equivalent candidates.
+            setup_headroom  = max(0, baseline_setup_wns - req_s)
+            hold_headroom   = max(0, baseline_hold_wns  - req_h)
+            setup_consumed  = max(0, baseline_setup_wns - cand_setup_wns)
+            hold_consumed   = max(0, baseline_hold_wns  - cand_hold_wns)
+            setup_util      = clamp(setup_consumed / setup_headroom, 0, 1)
+            hold_util       = clamp(hold_consumed  / hold_headroom,  0, 1)
+            margin_utilization = max(setup_util, hold_util)
 
-    FORMULA (binding-dimension max utilization):
+    PREREQUISITES (ALL must hold; otherwise margin_utilization is None):
+      1. Baseline setup AND baseline hold WNS are both known.
+      2. Candidate setup AND candidate hold WNS are both known.
+      3. Baseline setup headroom is positive (baseline is above the
+         required setup floor).
+      4. Baseline hold headroom is positive (baseline is above the
+         required hold floor).
+      There is NO one-dimensional setup-only fallback: if any required
+      information is missing, or either baseline headroom is zero, the
+      result is None — a positive common margin on both dimensions is
+      required to measure a meaningful consumed fraction.
 
-        setup_headroom  = max(0, baseline_setup_wns - req_s)
-        hold_headroom   = max(0, baseline_hold_wns  - req_h)
-        setup_consumed  = max(0, baseline_setup_wns - cand_setup_wns)
-        hold_consumed   = max(0, baseline_hold_wns  - cand_hold_wns)
-        setup_util      = setup_consumed / setup_headroom  (clamped [0,1])
-        hold_util       = hold_consumed  / hold_headroom   (clamped [0,1])
-        margin_utilization = max(setup_util, hold_util)
+    PER-DIMENSION POLICY:
+      - Negative consumption (the candidate improves timing relative to the
+        baseline on that dimension) is clamped at zero on that dimension.
+      - Per-dimension utilization is clamped to [0, 1].
+      - Combining as max(setup_util, hold_util) means the most-constrained
+        dimension governs: a candidate that destroys hold slack cannot look
+        "low utilization" simply because setup is generous.
 
-    If BOTH baseline setup AND hold headroom are positive and both baseline
-    and candidate WNS are known, utilization is the most-constrained
-    (highest) consumed fraction across setup and hold. This prevents a
-    candidate that destroys hold slack from looking "low utilization"
-    simply because setup is generous.
-
-    ZERO/UNKNOWN policy:
-      - If EITHER baseline setup or baseline hold headroom is zero (baseline
-        already at the required floor), utilization is None — there is no
-        positive common margin to trade.
-      - If any of baseline_setup_wns, baseline_hold_wns, cand_setup_wns,
-        cand_hold_wns is missing, utilization is None; we do not fabricate
-        a one-dimensional fallback.
-      - Negative consumption (candidate improves timing vs baseline) clamps
-        to 0 on that dimension.
-      - Values are clamped to [0, 1].
-
-    Hard timing floors are enforced by classify_feasibility() — any candidate
-    with setup WNS below required_setup_ns is INFEASIBLE before utilization is
-    considered.
+    ROLE IN SELECTION:
+      - margin_utilization is diagnostic only; it is NOT a Pareto objective
+        (consuming slack is not a benefit by itself).
+      - It is excluded from scalar_score().
+      - It is used only as a secondary final-selection tie-break, applied
+        after feasibility and Pareto/priority ordering, preferring LOWER
+        utilization (greater residual timing margin) among otherwise
+        equivalent candidates.
+      - Hard feasibility (classify_feasibility) is evaluated BEFORE margin
+        utilization is considered: candidates violating a required timing
+        floor are INFEASIBLE and never reach Pareto or final selection.
     """
     if qor is None:
         return {"margin_headroom_ns": None, "margin_utilization": None}
