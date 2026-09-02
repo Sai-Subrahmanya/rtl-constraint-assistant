@@ -41,6 +41,7 @@ from ..optimizer import Optimizer
 from ..parser import SlangAdapter
 from ..provenance import AssumptionLedger
 from ..qor.model import QoRResult
+from ..qor.repository import QoRRepositoryError, SQLiteQoRRepository
 from ..sdc import SDCParser, get_backend
 from ..sdc_importer import SdcImporter
 from ..scenarios import build_scenarios
@@ -256,6 +257,38 @@ def _print_mcmm_result(console, m: "MCMMResult", matrix) -> None:
         console.print("  Diagnostics:")
         for d in m.diagnostics:
             console.print(f"    - {d}")
+
+
+def _record_standalone_mcmm_history(cfg: ProjectConfig, cset: ConstraintSet,
+                                    mcmm_result: MCMMResult, candidate_id: str = "baseline") -> tuple[str | None, str | None]:
+    """Index a completed ``run-sta`` MCMM aggregate without changing its artifacts.
+
+    The repository needs a session-scoped candidate key even for a baseline
+    MCMM command.  This creates a one-candidate historical session after the
+    established MCMM artifact is written; it does not run an optimizer or
+    modify the MCMM/flow/cache models.
+    """
+    try:
+        from ..optimizer import Candidate, OptimizationResult
+
+        candidate = Candidate(id=candidate_id, constraint_set=cset, mcmm=mcmm_result)
+        candidate.hard_feasible = bool(mcmm_result.feasible)
+        candidate.blocked = bool(mcmm_result.blocked)
+        candidate.global_status = mcmm_result.global_status
+        candidate.infeasible_reason = mcmm_result.global_reason
+        candidate.cache_key = mcmm_result.cache_key
+        candidate.cache_status = mcmm_result.cache_status
+        candidate.run_id = ";".join(mcmm_result.run_ids)
+        candidate.margin_headroom_ns = mcmm_result.margin_headroom_ns
+        candidate.margin_utilization = mcmm_result.margin_utilization
+        session = OptimizationResult(baseline=candidate, final=candidate, all_candidates=[candidate])
+        repo = SQLiteQoRRepository.for_output_dir(cfg.flow.output_dir)
+        session_id = repo.record_optimizer_session(
+            session, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
+        )
+        return session_id, None
+    except Exception as exc:
+        return None, f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
 
 
 # ---- Commands ---------------------------------------------------------------
@@ -695,6 +728,11 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
             ev = mock_mcmm_evaluator(matrix, base_cset=cset)
             m = ev(base_cand, Path(cfg.flow.output_dir))
             am.write_json("mcmm_report.json", m.to_dict())
+            session_id, persistence_warning = _record_standalone_mcmm_history(cfg, cset, m)
+            if session_id:
+                console.print(f"[dim]Historical QoR session: {session_id}[/dim]")
+            if persistence_warning:
+                console.print(f"[yellow]{persistence_warning}[/yellow]")
             _print_mcmm_result(console, m, matrix)
             return
         # Real backend: run the flow once per active scenario, then aggregate.
@@ -724,6 +762,44 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
             sid: {key: value for key, value in res.items() if key != "qor_result"}
             for sid, res in per_scenario.items()
         })
+        # Keep the established mcmm_report.json layout untouched, then build
+        # the existing MCMM model solely for relational aggregate indexing.
+        from ..mcmm import BLOCKED, ScenarioQoR, aggregate_objectives, finalize_limiting, global_feasibility, global_margin
+        aggregate = MCMMResult(candidate_id="baseline", active_scenario_ids=list(matrix.active_ids))
+        for sid in matrix.active_ids:
+            scenario = matrix.scenario(sid)
+            res = per_scenario[sid]
+            sqor = ScenarioQoR(
+                candidate_id="baseline", scenario_id=sid, mode=scenario.mode, corner=scenario.corner,
+                name=scenario.name, qor=res.get("qor_result"), cache_key=res.get("cache_key", ""),
+                cache_status=("HIT" if res.get("status") == "CACHE_HIT" else
+                              "MISS" if res.get("cache_key") else res.get("status", "")),
+                run_id=res.get("run_id", ""), backend=backend, tool=backend,
+            )
+            # A failed/blocked scenario has no canonical QoR for the shared
+            # MCMM helper to classify. Preserve that observed flow status
+            # explicitly rather than allowing ScenarioQoR's historical default
+            # of ``infeasible`` to recast it as a timing verdict.
+            if sqor.qor is None:
+                sqor.status = BLOCKED
+                sqor.blocked = True
+                sqor.infeasible_reason = str(
+                    res.get("blocked_reason") or "; ".join(res.get("diagnostics") or []) or
+                    res.get("status") or "no QoR result"
+                )
+            aggregate.scenario_results[sid] = sqor
+            if sqor.run_id:
+                aggregate.run_ids.append(sqor.run_id)
+        aggregate.eda_runs = len(aggregate.scenario_results)
+        global_feasibility(aggregate)
+        aggregate_objectives(aggregate)
+        global_margin(aggregate)
+        finalize_limiting(aggregate)
+        session_id, persistence_warning = _record_standalone_mcmm_history(cfg, cset, aggregate)
+        if session_id:
+            console.print(f"[dim]Historical QoR session: {session_id}[/dim]")
+        if persistence_warning:
+            console.print(f"[yellow]{persistence_warning}[/yellow]")
         for sid, res in per_scenario.items():
             console.print(f"[cyan]Scenario {sid}[/cyan]  status={res.get('status')}  "
                           f"run_id={res.get('run_id')}")
@@ -899,7 +975,19 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
     if result.final and result.final.constraint_set:
         final_sdc = sdc_backend.render(result.final.constraint_set, design_name=cfg.project.name)
         am.write_text("design.final.sdc", final_sdc)
+    # The existing optimizer JSON/JSONL artifacts remain canonical.  Index
+    # after they are complete; a database issue only emits a warning and never
+    # changes candidate, optimizer, EDA, or cache semantics.
+    history_session_id = None
+    try:
+        history_session_id = SQLiteQoRRepository.for_output_dir(cfg.flow.output_dir).record_optimizer_session(
+            result, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
+        )
+    except Exception as exc:
+        console.print(f"[yellow]QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}[/yellow]")
     console.print(Panel("[cyan bold]Optimization complete[/cyan bold]"))
+    if history_session_id:
+        console.print(f"  Historical QoR session: {history_session_id}")
     console.print(f"  Stop reason: {result.stop_reason.value if result.stop_reason else 'n/a'}")
     console.print(f"  Iterations:  {result.iterations}  EDA runs: {result.eda_runs}  Elapsed: {result.elapsed_seconds:.1f}s")
     console.print(f"  Pareto size: {len(result.pareto)}")
@@ -959,6 +1047,71 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
                    "qor": latest_qor,
                    "constraints": cset.snapshot()})
     sys.stdout.write(text)
+
+
+@app.command()
+def history(
+    run_id: str | None = typer.Option(None, "--run-id", help="Physical run/evaluation id"),
+    candidate_id: str | None = typer.Option(None, "--candidate", help="Candidate id"),
+    session_id: str | None = typer.Option(None, "--session", help="Optimization session id"),
+    scenario_id: str | None = typer.Option(None, "--scenario", help="Scenario id"),
+    constraint_set_hash: str | None = typer.Option(None, "--constraint-set", help="Constraint-set hash"),
+    best: str | None = typer.Option(None, "--best", help="setup_wns|area|power"),
+    import_legacy: bool = typer.Option(False, "--import-legacy", help="Explicitly index existing run artifacts"),
+    include_mock: bool = typer.Option(False, "--include-mock", help="Include mock evidence in best queries"),
+    area_source: str | None = typer.Option(None, "--area-source", help="real|proxy for --best area"),
+    output_dir: str = typer.Option("output", "--output-dir", help="Flow output directory containing qor.sqlite3"),
+    config: str | None = typer.Option(None, "--config", help="Project YAML; supplies flow.output_dir"),
+    json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
+):
+    """Query local historical QoR evidence; never executes EDA or cache reuse."""
+    if config:
+        output_dir = str(_load(config).flow.output_dir)
+    selectors = sum(value is not None for value in (
+        run_id, candidate_id, scenario_id, constraint_set_hash, best,
+    ))
+    if import_legacy and selectors:
+        console.print("[red]--import-legacy cannot be combined with a query selector.[/red]")
+        raise typer.Exit(code=2)
+    if selectors > 1:
+        console.print("[red]Choose one of --run-id, --candidate, --scenario, --constraint-set, or --best.[/red]")
+        raise typer.Exit(code=2)
+    if session_id and not candidate_id:
+        console.print("[red]--session requires --candidate.[/red]")
+        raise typer.Exit(code=2)
+    repo = SQLiteQoRRepository.for_output_dir(output_dir)
+    try:
+        if import_legacy:
+            data: Any = repo.import_legacy_artifacts(output_dir)
+        elif run_id:
+            data = repo.get_replay_identity(run_id)
+        elif candidate_id and session_id:
+            candidate = repo.get_candidate(session_id, candidate_id)
+            data = ({"candidate": candidate,
+                     "lineage": repo.candidate_lineage(session_id, candidate_id),
+                     "mcmm": repo.get_mcmm(session_id=session_id, candidate_id=candidate_id)}
+                    if candidate else None)
+        elif candidate_id:
+            data = repo.list_runs(candidate_id=candidate_id)
+        elif scenario_id:
+            data = repo.list_runs(scenario_id=scenario_id)
+        elif constraint_set_hash:
+            data = repo.find_by_constraint_set(constraint_set_hash)
+        elif best:
+            data = repo.best_qor(best, include_mock=include_mock, area_source=area_source)
+        else:
+            data = repo.list_runs()
+    except QoRRepositoryError as exc:
+        console.print(f"[red]QoR history error: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    if json_out:
+        sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+        return
+    if data is None:
+        console.print("[yellow]No matching QoR history record.[/yellow]")
+        return
+    console.print(Panel("[cyan]QoR historical repository[/cyan] — artifacts/cache remain authoritative"))
+    console.print_json(json.dumps(data, indent=2, sort_keys=True, default=str))
 
 
 @app.command()

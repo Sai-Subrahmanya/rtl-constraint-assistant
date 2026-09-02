@@ -49,10 +49,13 @@ rca run-sta project.yaml --backend yosys_opensta
 # 7. Multi-objective optimization (mock EDA backend works without tools)
 rca optimize project.yaml --backend mock
 
-# 8. Full human-readable report
+# 8. Query the local historical QoR repository (never executes EDA)
+rca history --config project.yaml --best setup_wns
+
+# 9. Full human-readable report
 rca report project.yaml
 
-# 9. Launch the web dashboard
+# 10. Launch the web dashboard
 rca dashboard project.yaml
 ```
 
@@ -103,7 +106,8 @@ GENERATED CONSTRAINTS (3)
                                        Yosys / OpenSTA / commercial STA
                                                      │
                                                      ▼
-                                                 QoR DB
+                    QoR artifacts + local SQLite history sidecar
+                    (artifacts/provenance and filesystem cache remain authoritative)
                                                      │
                                                      ▼
                                    Pareto multi-objective Optimizer
@@ -149,7 +153,7 @@ rtl-constraint-assistant/
 │   ├── sdc/             # SDC importer + generic/OpenSTA/Synopsys/Cadence backends
 │   ├── eda/             # ToolBackend interface + Yosys/OpenSTA/Mock adapters
 │   ├── reports/         # STA report parser (OpenSTA format)
-│   ├── qor/             # QoR model, Pareto filter, candidate scoring
+│   ├── qor/             # Canonical QoR model, Pareto utilities, SQLite history repository
 │   ├── optimizer/       # Budget, candidate generation, closed-loop optimizer
 │   ├── scenarios/       # MCMM scenario handling
 │   ├── explanation/     # Human/machine-readable explanation generator
@@ -182,7 +186,8 @@ rtl-constraint-assistant/
 | `rca compare --a A.sdc --b B.sdc` | Semantic UCM-level diff between two SDC files with scenario and provenance context; unsupported or unresolved intent is reported as `UNKNOWN`, never equivalent. |
 | `rca explain -c CID` | Explain why a constraint exists and its evidence. |
 | `rca run-sta`      | Run synthesis + STA and collect QoR. |
-| `rca optimize`     | Closed-loop multi-objective optimization. |
+| `rca optimize`     | Closed-loop multi-objective optimization; records a session-scoped historical QoR index after its established artifacts are written. |
+| `rca history`      | Query/import the local SQLite QoR history sidecar. Never runs EDA, optimization, or cache reuse. |
 | `rca inspect`      | Inspect clocks/resets/ports/registers/modules. |
 | `rca report`       | Full human-readable design + constraints report. |
 | `rca dashboard`    | Launch the FastAPI web UI. |
@@ -248,6 +253,43 @@ This feature ingests a **configured tool report**. It does not run a power tool,
 produce activity data, or claim physical/silicon measurement. Mock flow remains
 explicitly mock and power-unavailable. See `STEP20_POWER_REPORT.md` for the
 complete supported grammar, status policy, MCMM behavior, and limitations.
+
+---
+
+## Local QoR history repository (Step 21)
+
+RCA writes a local SQLite sidecar at `<flow.output_dir>/qor.sqlite3` after an
+existing real-flow manifest/artifact set is complete, and after existing
+optimizer artifacts are written. It is a query/index layer only:
+
+- `QoRResult` remains the canonical QoR model.
+- `RunManifest` and `ArtifactManager` remain artifact/provenance authorities.
+- The filesystem manifest/hash cache remains the only experiment-reuse authority.
+- SQLite never copies artifacts and never causes a cache hit or an EDA run.
+
+Use the focused read-only history interface:
+
+```bash
+rca history --config project.yaml --run-id RUN_ID
+rca history --config project.yaml --candidate C001 --session SESSION_ID
+rca history --config project.yaml --scenario FUNC_SLOW
+rca history --config project.yaml --constraint-set HASH
+rca history --config project.yaml --best power --json
+rca history --config project.yaml --import-legacy
+```
+
+`--import-legacy` is explicit and idempotently indexes existing manifests and
+`qor.json` files without rewriting them. It also indexes the retained root
+`candidates.jsonl` optimizer snapshot (or `optimizer_state.json` when JSONL is
+absent) as a clearly legacy, session-scoped record. It reports missing or
+conflicting historical evidence; summaries cannot recreate fields that were
+never written.
+Power best queries require canonical `AVAILABLE` report-derived power and omit
+mock results by default. Area queries use real mapped area by default; proxy
+area requires `--area-source proxy` and is never mixed with real area. Replay
+output is retained identity and artifact-integrity evidence, not a promise that
+RCA can rerun an EDA experiment. See `STEP21_QOR_DATABASE.md` and
+`docs/decisions/ADR-004-qor-history-sqlite.md`.
 
 ---
 

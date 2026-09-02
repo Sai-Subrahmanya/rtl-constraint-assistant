@@ -1,4 +1,4 @@
-# Test Plan — RCA Validation, Formal Exception Verification, Semantic Comparison, and Power Reports (Steps 13–15, 20)
+# Test Plan — RCA Validation, Formal, Semantic Comparison, Power, and QoR History (Steps 11–15, 20–21)
 
 This test plan describes validation-engine, concrete formal-adapter,
 semantic-comparison, and conservative power-report-ingestion coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
@@ -19,6 +19,7 @@ semantic-comparison, and conservative power-report-ingestion coverage. Tests are
 | Step-12 MCMM | `tests/unit/test_mcmm.py` | 70 | MCMM aggregation, per-scenario identity, cache, evaluator. |
 | Step-11 Pareto | `tests/unit/test_pareto.py` | 125 | Multi-objective Pareto/scalar/final selection. |
 | Step-20 power-report ingestion | `tests/unit/test_power_reports.py` | 38 | One representative OpenROAD/OpenSTA `report_power` fixture; parsing, units, parser classification/canonical QoR compatibility, provenance, artifact/cache, MCMM, Pareto, mock, and CLI/report regressions. |
+| Step-21 QoR history repository | `tests/unit/test_qor_repository.py` | 37 | SQLite initialization/versioning, transactional historical graph persistence, canonical QoR/power/provenance/artifact/MCMM indexing, deterministic parameterized queries, explicit legacy import, flow failure safety, cache separation, CLI history, and WAL reader behavior. |
 
 ## Step-13 named scenarios
 
@@ -128,6 +129,37 @@ only backward-compatible `PowerStatus` availability (`AVAILABLE`,
 36. Available report-derived lower power participates in existing Pareto comparison.
 37. Rebinding a report to another MCMM scenario, and missing-versus-present evidence, change the existing cache identity.
 38. CLI and human report present tool-reported wording/provenance and show a detailed parser classification beside canonical unavailable power.
+
+## Step-21 QoR history repository scenarios
+
+`tests/unit/test_qor_repository.py` uses temporary SQLite sidecars and no live
+EDA tool. Its 37 named cases cover:
+
+1. database creation, current schema version, and application identifier;
+2. transactional schema initialization/migration and migration rollback;
+3. unsupported-newer and ledger/user-version mismatch rejection;
+4. flow-record insertion, idempotency, and same-run changed-evidence conflict;
+5. full canonical QoR column projection, including detailed area/cell/timing data;
+6. nullable unknown metric storage and valid numeric zero;
+7. canonical `PowerStatus`, separate `PowerParseStatus`, provenance, report SHA-256, and components;
+8. artifact references/hashes and replay-time integrity validation;
+9. replay identity inputs, commands, and explicit non-executable replay limitation;
+10. session-scoped candidate identity, mutations, constraint-set identity, and lineage;
+11. physical evaluation linkage to a later optimizer candidate;
+12. distinct MCMM scenario evidence and derived aggregate/objective persistence;
+13. conservative MCMM unknown/incomparable aggregate fields;
+14. candidate/scenario/status/constraint-set query filtering;
+15. real/proxy area separation and power availability rules in best-QoR queries;
+16. deterministic list, artifact, best, candidate, MCMM, and CLI JSON ordering;
+17. transaction rollback for evaluation and MCMM graphs;
+18. explicit legacy import, missing-field NULL handling, idempotency, current-record recognition, and conflicts;
+19. legacy power parser provenance retention;
+20. WAL two-connection reader behavior;
+21. real-flow blocked-manifest indexing after existing artifact output;
+22. explicit database-failure warning while QoR/artifacts stay intact;
+23. no sidecar for ordinary mock flow unless a repository is explicitly supplied;
+24. passive cache-key indexing and proof that repository queries do not invoke filesystem cache lookup;
+25. CLI `history` query, JSON, candidate/session, selector validation, and explicit legacy-import behavior.
 
 ## Gate criteria
 

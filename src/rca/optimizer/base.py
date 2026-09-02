@@ -489,7 +489,10 @@ def _normalize_eval(out: Any) -> tuple[QoRResult | None, str, str, str]:
     if out is None:
         return None, "", "", ""
     if isinstance(out, QoRResult):
-        return out, "", "MISS", ""
+        # Preserve a physical flow's run identity when a callback returns the
+        # canonical QoR object directly.  This is provenance propagation, not
+        # a new optimizer/cache identity.
+        return out, "", "MISS", str(getattr(out, "run_id", "") or "")
     if isinstance(out, dict):
         qor = out.get("qor") if isinstance(out.get("qor"), QoRResult) else None
         return (qor,

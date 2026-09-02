@@ -423,14 +423,15 @@ A timing exception selector is not itself a formal property. RCA therefore never
 | `common/__init__.py` | — | Re-exports shared EDA helpers. |
 | `common/mock.py` | ~120 | **Mock EDA backend** — a fast, deterministic surrogate used for CI, unit tests, and optimization smoke runs. It returns plausible timing results derived from clock period, register count, and SDC budgets (setup/hold slacks are modeled as `period - delay_estimate - budget`), and deterministically produces area/power numbers for Pareto smoke tests. It deliberately never crashes, so closed-loop tests always run. Imports guarded by `TYPE_CHECKING` to avoid a circular import with `qor.model`. |
 
-### 5.16 `src/rca/qor/` — QoR database + Pareto (WP-N, WP-O)
+### 5.16 `src/rca/qor/` — canonical QoR, Pareto, and history repository (WP-N, WP-O)
 
-| File | Lines | Purpose |
-|---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `model.py` | ~100 | `QoRResult`: per-candidate metrics (`constraint_set_id`, `wns_setup`, `tns_setup`, `wns_hold`, `tns_hold`, `area`, `dynamic_power`, `leakage_power`, `fmax`, `runtime_seconds`, `feasible`, `fail_reason`, `raw_report_path`, `scenario`). Knows how to serialize to JSON lines and deserialize. |
-| `metrics.py` | ~60 | Metric aggregation helpers: `combine_scenario_results(...)`, `score(cset, qor)` scalarization for ranking. |
-| `pareto.py` | ~170 | `ParetoFront`: non-dominated-sort over (setup-slack, hold-slack, -area, -power). `dominates(a,b)` returns true if a is no worse in all objectives and strictly better in at least one (using epsilon tolerance). `feasible(qr)` rejects candidates with negative WNS (setup or hold) or with constraint violations. Used by the optimizer to select the Pareto set (WP-O). Unit tested. |
+| File | Purpose |
+|---|---|
+| `model.py` | Canonical `QoRResult`, `CriticalPath`, and `Feasibility` model. Internal timing values are seconds and absent metrics remain `None`; persisted summaries are compatibility artifacts, not a second QoR model. |
+| `metrics.py`, `objectives.py`, `pareto.py` | Existing QoR comparison, objective, feasibility, and Pareto utilities. |
+| `repository.py` | **Step 21.** Local `sqlite3` historical-query sidecar at `<flow.output_dir>/qor.sqlite3`. It indexes existing QoR/manifests/candidates/MCMM evidence with schema migrations (`PRAGMA user_version` plus `schema_migrations`), WAL, foreign keys, FULL synchronous writes, and parameterized deterministic queries. It is not an EDA cache or artifact store. |
+
+The repository preserves run/candidate/session/scenario/cache/tool/constraint identity, artifacts/hashes, real-vs-proxy area distinction, nullable metrics, and report-derived power provenance. Existing `qor.json`, manifests, candidate JSONL, and optimizer JSON remain supported file artifacts. Its `rca history --import-legacy` path is explicit, deterministic, idempotent, and never rewrites those inputs; it prefers a retained `candidates.jsonl` snapshot and uses `optimizer_state.json` only when JSONL is absent.
 
 ### 5.17 `src/rca/optimizer/` — closed-loop multi-objective optimizer (WP-O)
 
@@ -460,12 +461,13 @@ A timing exception selector is not itself a formal property. RCA therefore never
 |---|---|---|
 | `__init__.py` | — | Reserved package for future "search for existing constraints" / knowledge-base lookup (Manual §146-149). |
 
-### 5.21 `src/rca/artifacts/` — artifact & cache manager (WP-A, WP-N)
+### 5.21 `src/rca/artifacts/` — artifact/provenance and cache authority (WP-A, WP-N)
 
 | File | Lines | Purpose |
 |---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `manager.py` | ~140 | `ArtifactManager`: writes runs into `<results_dir>/runs/<timestamp>-<slug>/`, writes SDC files, QoR JSONL, manifests, optimization history, and UCM snapshots. Uses the deterministic hashes from `utils.hashing` to skip redundant EDA runs when inputs are identical (Manual §66, §153). |
+| `manager.py` | `ArtifactManager` writes run directories and JSON/text artifacts; `RunManifest` records hashes, tool identity, artifact locators, and cache-relevant input evidence. Filesystem manifest/hash validation remains the experiment-reuse/cache authority. |
+
+The Step-21 SQLite sidecar indexes these existing artifacts only after they are written. It neither stores artifact contents nor changes cache lookup. A SQLite write failure leaves the physical artifact set, QoR, run status, and cache identity unchanged and is surfaced as a persistence warning for later explicit import/reconciliation.
 
 ### 5.22 `src/rca/reports/` — timing and power report parsing
 
@@ -758,7 +760,8 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca coverage [CONFIG]` | Print only the coverage metrics (clock/in/out %). |  |
 | `rca explain [CONFIG] [CONSTRAINT_ID]` | Print natural-language explanation(s) of one or all constraints (evidence, assumptions, source). |  |
 | `rca run-sta [CONFIG]` | Synthesize with Yosys and/or run OpenSTA with current SDC; print timing report. | `--eda {yosys,opensta,mock}`, `--sdc FILE` |
-| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization. | `--backend`, `--iterations N`, `--eda-runs-per-iter N`, `--timeout SECS`, `--eda {mock,yosys,opensta}` |
+| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization; after its established files are written, records a session-scoped local historical index. | `--backend`, `--iterations N`, `--eda-runs-per-iter N`, `--timeout SECS`, `--eda {mock,yosys,opensta}` |
+| `rca history` | Query the local `<flow.output_dir>/qor.sqlite3` sidecar or explicitly import existing run artifacts. Never executes EDA, optimization, or cache reuse. | `--config`, `--output-dir`, `--run-id`, `--candidate --session`, `--scenario`, `--constraint-set`, `--best {setup_wns,area,power}`, `--area-source {real,proxy}`, `--import-legacy`, `--json` |
 | `rca inspect [CONFIG] {module,port,net,register,clock,path}` | Structured inspection sub-tables of the design model (e.g. `rca inspect project.yaml port` prints all ports). |  |
 | `rca report [CONFIG]` | Human-readable design report (clocks, resets, domains, missing info, validation, constraint list) — Rich formatted. |  |
 | `rca dashboard [CONFIG]` | Start the FastAPI web dashboard (uvicorn). | `--port 8765`, `--open-browser/--no-open-browser`, `--host 0.0.0.0` |
@@ -1060,6 +1063,25 @@ docker run --rm -v $PWD:/work -p 8765:8765 rca dashboard project.yaml --host 0.0
 ```
 
 ---
+
+## 18.1 Local QoR history repository (Step 21)
+
+SQLite is selected as a portable, dependency-free local sidecar; it does not
+provide distributed/cross-machine database semantics. The schema normalizes
+optimization sessions, session-scoped candidates and mutations, constraint-set
+identities, evaluations, canonical QoR measurements, power evidence, artifact
+references, MCMM aggregates/objectives/members, and an append-only migration
+ledger. Sparse diagnostics, report metadata, timing distributions, and manifest
+extra fields retain structured JSON where relational filtering is not useful.
+
+`record_flow_evaluation`, `record_optimizer_session`, and
+`record_mcmm_aggregate` use `BEGIN IMMEDIATE` transactions. Matching evidence
+fingerprints are no-ops; changed evidence for an existing stable ID is a clear
+conflict. `list_runs`, `best_qor`, candidate-lineage, MCMM, artifact,
+provenance, and replay-identity queries have fixed ordering and whitelisted
+fields. `get_replay_identity` validates retained artifact paths/hashes and
+reports absent evidence, but does not execute or promise a reproducible EDA
+rerun. See `STEP21_QOR_DATABASE.md` for the complete contract.
 
 ## 19. Known Gaps and Roadmap
 
