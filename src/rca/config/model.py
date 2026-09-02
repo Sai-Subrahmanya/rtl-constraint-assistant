@@ -8,17 +8,15 @@ Validates and normalises project YAML files into a strongly-typed
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..utils.enums import (
     FlowStage,
-    OperationMode,
     Priority,
     SafeMode,
-    TimeUnit,
 )
 from ..utils.logging import get_logger
 from ..utils.units import parse_frequency_string, parse_time_string
@@ -169,7 +167,7 @@ class ScenarioSpec(BaseModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _reject_nonempty_constraints(self) -> "ScenarioSpec":
+    def _reject_nonempty_constraints(self) -> ScenarioSpec:
         """Do not silently accept scenario-specific constraint definitions.
 
         ``scenarios[].constraints`` is a reserved, currently-unsupported
@@ -202,6 +200,55 @@ class MCMMConfig(BaseModel):
     active_scenario_ids: list[str] = Field(default_factory=list)
 
 
+class FormalProofSpec(BaseModel):
+    """Explicit, user-authored SymbiYosys proof mapped to one UCM exception.
+
+    RCA deliberately requires the constraint ID and exception kind rather than
+    guessing which generated property could establish timing intent.  The SBY
+    file contains the design-specific assumptions and assertion(s).
+    """
+
+    constraint_id: str = Field(min_length=1)
+    exception_kind: Literal["false_path", "multicycle"]
+    sby_file: str = Field(min_length=1)
+    task: str | None = None
+
+    @field_validator("task")
+    @classmethod
+    def _validate_task(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized or normalized.startswith("-"):
+            raise ValueError("formal.proofs[].task must be a non-option task name")
+        return normalized
+
+
+class FormalConfig(BaseModel):
+    """Optional formal-exception verification configuration (Step 14).
+
+    The default remains the conservative backend, preserving the historical
+    behavior where no real proof is available and exceptions stay UNRESOLVED.
+    """
+
+    backend: Literal["conservative", "symbiyosys"] = "conservative"
+    symbiyosys_executable: str | None = None
+    work_dir: str = "output/formal"
+    timeout_seconds: int = Field(default=300, ge=1)
+    proofs: list[FormalProofSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_constraint_ids(self) -> FormalConfig:
+        ids = [proof.constraint_id for proof in self.proofs]
+        duplicates = sorted({cid for cid in ids if ids.count(cid) > 1})
+        if duplicates:
+            raise ValueError(
+                "formal.proofs must contain at most one mapping per constraint_id: "
+                + ", ".join(duplicates)
+            )
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -217,13 +264,14 @@ class ProjectConfig(BaseModel):
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     scenarios: list[ScenarioSpec] = Field(default_factory=list)
     mcmm: MCMMConfig = Field(default_factory=MCMMConfig)
+    formal: FormalConfig = Field(default_factory=FormalConfig)
 
     # Resolved (not from YAML directly)
     config_path: Path | None = Field(default=None, exclude=True)
     project_root: Path | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
-    def _resolve_top(self) -> "ProjectConfig":
+    def _resolve_top(self) -> ProjectConfig:
         # Allow top to come from either project.top or analysis.top
         if self.project.top is None and self.analysis.top is not None:
             self.project.top = self.analysis.top
@@ -259,6 +307,16 @@ class ProjectConfig(BaseModel):
         self.flow.liberty = resolved_libs
         out = self.flow.output_dir
         self.flow.output_dir = str((root / out).resolve()) if not Path(out).is_absolute() else out
+        formal_work_dir = self.formal.work_dir
+        self.formal.work_dir = (
+            str((root / formal_work_dir).resolve())
+            if not Path(formal_work_dir).is_absolute()
+            else formal_work_dir
+        )
+        for proof in self.formal.proofs:
+            proof_path = Path(proof.sby_file)
+            if not proof_path.is_absolute():
+                proof.sby_file = str((root / proof_path).resolve())
 
     def output_dir(self) -> Path:
         p = Path(self.flow.output_dir)

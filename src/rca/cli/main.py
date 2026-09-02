@@ -26,7 +26,7 @@ from ..constraint_model import ConstraintSet
 from ..design_model import Design
 from ..eda import MockEDA, OpenSTABackend, YosysBackend, get_tool, run_flow
 from ..equivalence import compare as compare_sets
-from ..exceptions import analyze_exceptions, verify_exceptions
+from ..exceptions import analyze_exceptions, formal_backend_from_config, verify_exceptions
 from ..explanation import design_report, explain_candidate, explain_constraint
 from ..inference import InferenceEngine
 from ..mcmm import (
@@ -115,6 +115,11 @@ def _am(cfg: ProjectConfig) -> ArtifactManager:
     out = Path(cfg.flow.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     return ArtifactManager(out)
+
+
+def _formal_backend(cfg: ProjectConfig):
+    """Construct the opt-in formal backend from config without changing UCM state."""
+    return formal_backend_from_config(cfg.formal)
 
 
 # ---- MCMM helpers (Step 12 §13, §14) --------------------------------
@@ -398,7 +403,7 @@ def validate(config: str = typer.Argument(..., help="Path to project YAML"),
     active = matrix.active_ids if matrix.is_enabled else None
     result = run_validation(design, tg, cset, backend=backend,
                             active_scenarios=set(active) if active else None,
-                            parser=parser_obj)
+                            parser=parser_obj, formal_backend=_formal_backend(cfg))
     am = _am(cfg)
     am.write_json("validation_report.json", result.as_dict())
     if result.coverage:
@@ -453,7 +458,7 @@ def coverage(config: str = typer.Argument(..., help="Path to project YAML")):
     tg = _do_timing(cfg, design)
     ledger = AssumptionLedger()
     cset, _ = _do_inference(cfg, design, tg, ledger)
-    result = run_validation(design, tg, cset)
+    result = run_validation(design, tg, cset, formal_backend=_formal_backend(cfg))
     cov = result.coverage
     am = _am(cfg)
     am.write_json("coverage_report.json", cov.as_dict() if cov else {})
@@ -822,7 +827,7 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
     tg = _do_timing(cfg, design)
     ledger = AssumptionLedger()
     cset, _ = _do_inference(cfg, design, tg, ledger)
-    val_result = run_validation(design, tg, cset)
+    val_result = run_validation(design, tg, cset, formal_backend=_formal_backend(cfg))
     missing = tg.missing_information()
     text = design_report(design.summary(), tg.summary(), val_result.as_dict(),
                          val_result.coverage.as_dict() if val_result.coverage else None,

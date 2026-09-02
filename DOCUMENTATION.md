@@ -372,18 +372,21 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | `conflicts.py` | ~420 | Conflict and overlap/shadow detection (§42): duplicate/conflicting clocks, IO delays, latency/uncertainty, min/max delay, plus Step-13 precedence-aware user-vs-inference conflicts and contradictory exceptions. |
 | `coverage.py` | ~661 | Coverage analyzer (§43): clock-source, input/output timing path, reg-to-reg, CDC path, and clock-relationship coverage. `UNKNOWN` when graph unavailable; `NOT_APPLICABLE` when zero applicable; retains numerator/denominator evidence. |
 | `completeness.py` | ~150 | Step-13 completeness / missing-info: unresolved clock relationships, generated-clock transforms, missing IO timing, unresolved timing environment. Never invents a value. |
-| `exceptions.py` | ~260 | Exception sanity (§14) + scenario coherence (§15). Step-13: records formal-verification state via `verify_exceptions`; unverified ⇒ `EXCEPTION_UNVERIFIED`, never concluded safe. |
+| `exceptions.py` | ~300 | Exception sanity (§14) + scenario coherence (§15). Step-13 records formal-verification state via `verify_exceptions`; Step-14 accepts an optional `FormalBackend`, exposes counterexamples as blocking `EXCEPTION_FORMAL_INVALID`, backend errors as blocking `EXCEPTION_VERIFICATION_ERROR`, and retains unproven evidence as `EXCEPTION_UNVERIFIED`. |
 | `sdc_import.py` | ~120 | Step-13 SDC import/parse classification (§16/Req 10): consumes importer diagnostics and classifies `SYNTAX_INVALID / SEMANTIC_INVALID / INCOMPLETE / COMPLETE / UNRESOLVED` without re-parsing. |
 | `backend.py` | ~50 | Backend capability (§16): preflight via the chosen `SDCBackend`; vendor syntax checks stay behind the backend abstraction. |
 
-### 5.11 `src/rca/exceptions/` — exception effectiveness & formal (WP-K)
+### 5.11 `src/rca/exceptions/` — exception effectiveness & formal (WP-K, Step 14 adapter)
 
-| File | Lines | Purpose |
-|---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `analyzer.py` | ~70 | Classifies false paths and multicycle paths by effectiveness: *necessary* (blocks a real failing path), *useless* (does not intersect any failing path — shadowed or redundant), *harmful* (hides a real timing problem that would otherwise be caught). Hooks into the QoR loop. |
-| `verifier.py` | ~60 | Orchestrates formal verification of exceptions via `FormalBackend`; defaults to "unverified" with a CONFIDENCE.LOW marker if no formal backend is connected. |
-| `formal_backend.py` | ~50 | Abstract formal backend (interface reserved for SymbiYosys/VC Formal/Conformal LEC plug-in). The default implementation returns `UNVERIFIED`. |
+| File | Purpose |
+|---|---|
+| `__init__.py` | Re-exports the structural, verification, and concrete adapter APIs. |
+| `analyzer.py` | Classifies false paths and multicycle paths by effectiveness: *necessary* (blocks a real failing path), *useless* (does not intersect any failing path — shadowed or redundant), *harmful* (hides a real timing problem that would otherwise be caught). Hooks into the QoR loop. |
+| `verifier.py` | Sole formal orchestration path. Retains UCM `scenario_ids` in the proof input, dispatches false-path/multicycle proofs through `FormalBackend`, and defaults to the conservative UNRESOLVED backend. |
+| `formal_backend.py` | Vendor-neutral `FormalBackend` / `VerificationResult` contract plus conservative and deterministic mock implementations. |
+| `symbiyosys.py` | **Step 14.** Concrete `SymbiYosysFormalBackend`: safely invokes explicit user-authored `.sby` jobs, requires an unambiguous SBY `PASS` plus exit code 0 for `VERIFIED`, retains job/tool/run/counterexample provenance, and otherwise stays UNRESOLVED or reports an error. |
+
+A timing exception selector is not itself a formal property. RCA therefore never synthesizes an assertion from an SDC selector: the user-owned `.sby` collateral supplies design-specific temporal assumptions and assertions, and `formal.proofs` maps that job to the exact UCM exception ID. This keeps UCM/SDC vendor-neutral and preserves the no-fabrication invariant.
 
 ### 5.12 `src/rca/equivalence/` — semantic constraint comparison (WP-L)
 
@@ -405,7 +408,7 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | 3 | Re-exports `ProjectConfig`, `load_config`, `default_config`, `write_config`, `PROJECT_SCHEMA`, `SCHEMA_VERSION`, `write_schema`. |
-| `model.py` | 286 | Pydantic v2 models: `ProjectConfig` (project, rtl, clocks, constraints, io, scenarios, optimization, eda, output, validation, dashboard sections with nested models `ProjectMeta`, `RTLConfig`, `ClockSpec`, `IOSpec`, `ConstraintDefaults`, `ScenarioSpec`, `OptimizationConfig`, `EDAConfig`, `OutputConfig`, `ValidationConfig`, `DashboardConfig`). `load_config(path) → ProjectConfig` reads YAML and validates; `default_config(top)` returns a starter config (used by `rca init`); `write_config(cfg, path)` writes YAML. |
+| `model.py` | ~340 | Pydantic v2 models: `ProjectConfig` (project, sources, constraints, analysis, flow, optimization, scenarios, MCMM, and optional `formal` sections). Step 14 adds `FormalConfig` and `FormalProofSpec` for explicit SymbiYosys job mappings; paths resolve from the project YAML. `load_config(path) → ProjectConfig` reads YAML and validates; `default_config(top)` returns a starter config (used by `rca init`); `write_config(cfg, path)` writes YAML. |
 | `schema.py` | 282 | Derives a **JSON Schema** (draft 2020-12) from the Pydantic model for editor support / external validation. `PROJECT_SCHEMA` is the schema dict; `SCHEMA_VERSION` is a monotonic integer; `write_schema(path)` serializes it to disk (already written to `configs/schemas/project.schema.json`). |
 
 ### 5.15 `src/rca/eda/` — EDA backends: synthesis / STA / PPA (WP-M)
@@ -615,6 +618,8 @@ packages (empty `__init__.py`) to be populated with:
 |---|---|
 | `docs/references.md` | Reference URLs per Manual §152: Synopsys TCM and white paper, Cadence Conformal CCD, OpenSTA, OpenROAD, Surelog/UHDM, slang, Yosys, and the UCSD timing-exceptions paper. |
 | `docs/decisions/ADR-001-universal-constraint-model.md` | Architecture Decision Record: why the UCM exists (vendor-neutral source of truth; SDC as derived rendering; strong typing with provenance), alternatives rejected (direct SDC strings, vendor-specific models with translators), consequences. |
+| `docs/decisions/ADR-002-validation-engine.md` | Architecture Decision Record: strengthen the one existing validation model rather than adding a competing Step-13 model. |
+| `docs/decisions/ADR-003-symbiyosys-formal-adapter.md` | Architecture Decision Record: use explicit user-authored SymbiYosys jobs through existing formal/validation abstractions; never generate a proof property from an SDC selector. |
 
 Placeholders for future docs:
 
@@ -824,6 +829,39 @@ output:
 
 All values are validated by Pydantic; unknown keys raise an error.
 
+### Optional SymbiYosys exception verification (Step 14)
+
+Formal verification is opt-in and preserves the conservative default. To run a
+reviewed, user-authored SymbiYosys proof job when validating a particular UCM
+exception, add a top-level `formal:` block:
+
+```yaml
+formal:
+  backend: symbiyosys                 # default: conservative
+  symbiyosys_executable: sby          # optional; RCA_SYMBIYOSYS/PATH otherwise
+  work_dir: output/formal
+  timeout_seconds: 300
+  proofs:
+    - constraint_id: FP0001           # exact UCM false-path constraint ID
+      exception_kind: false_path      # false_path | multicycle
+      sby_file: formal/async_fifo.sby # user-authored proof collateral
+      task: async_fifo_fp             # optional SBY task
+```
+
+The `.sby` file owns the RTL/formal source list, top module, assumptions,
+assertions, engines, and any mode/corner setup. RCA does **not** infer a
+property from an SDC path selector. It invokes `sby -f -d <derived-run-dir>
+<file> [task]` without a shell; only a `PASS` marker and exit status zero
+returns `VERIFIED`. `FAIL` returns `INVALID` with preserved counterexample
+artifact paths. Missing mapping/tool/file, timeout, `UNKNOWN`, or no status
+marker stay `UNRESOLVED`; ambiguous/error outcomes are blocking verification
+errors. Relative proof and work paths are resolved from the project YAML.
+
+`rca validate`, `rca report`, and `rca coverage` use this configuration through
+the existing validation engine. By default (`formal.backend: conservative`),
+no external proof process runs and the established `EXCEPTION_UNVERIFIED`
+behavior remains unchanged.
+
 ---
 
 ## 14. Safety, Confidence, Provenance, and Invariants
@@ -894,6 +932,11 @@ Each `Scenario` is stored on the `ConstraintSet.scenarios` dict. The SDC
 generator can render per-scenario SDC with the appropriate `set_operating_conditions`
 / derate commands (backend-dependent). The optimizer loops over active
 scenarios when evaluating a candidate, combining QoR with worst-case WNS.
+
+When Step-14 SymbiYosys verification is configured, an exception's UCM
+`scenario_ids` are retained in proof provenance. RCA does not infer a
+per-corner property from that membership: the user-authored `.sby` job/task
+must explicitly establish the intended mode/corner assumptions.
 
 ---
 
@@ -979,9 +1022,11 @@ Implemented as alpha-grade:
 - Commercial backends (Synopsys PrimeTime/DC, Cadence Tempus/Genus) emit
   correct SDC headers and dialect notes but do not yet produce all the
   tool-specific Tcl prologue/epilogue.
-- Formal verification of false paths / multicycle paths is an interface
-  (`FormalBackend`) with a conservative UNVERIFIED default; a SymbiYosys
-  adapter is planned.
+- Formal verification of false paths / multicycle paths has an optional
+  Step-14 `SymbiYosysFormalBackend` for explicit user-authored `.sby` jobs;
+  the default remains conservative UNRESOLVED. RCA intentionally does not
+  generate formal properties or bundle SymbiYosys/SMT tools. Additional
+  commercial formal adapters remain future work.
 - Hierarchy elaboration (parameter binding, generate-block unrolling) is
   handled by pyslang already; parser-independent elaboration passes in
   `rca.elaboration` are reserved.

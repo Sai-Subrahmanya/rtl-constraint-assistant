@@ -304,6 +304,39 @@ PROJECT_SCHEMA: dict = {
             },
             "default": {},
         },
+        "formal": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "backend": {
+                    "type": "string",
+                    "enum": ["conservative", "symbiyosys"],
+                    "default": "conservative",
+                },
+                "symbiyosys_executable": {"type": "string"},
+                "work_dir": {"type": "string", "default": "output/formal"},
+                "timeout_seconds": {"type": "integer", "minimum": 1, "default": 300},
+                "proofs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["constraint_id", "exception_kind", "sby_file"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "constraint_id": {"type": "string", "minLength": 1},
+                            "exception_kind": {
+                                "type": "string",
+                                "enum": ["false_path", "multicycle"],
+                            },
+                            "sby_file": {"type": "string", "minLength": 1},
+                            "task": {"type": "string", "minLength": 1},
+                        },
+                    },
+                    "default": [],
+                },
+            },
+            "default": {},
+        },
     },
 }
 

@@ -9,7 +9,10 @@ It validates constraints for correctness, coverage and conflicts, and — when
 integrated with Yosys/OpenSTA (or commercial Synopsys/Cadence tools) — runs a
 closed-loop **multi-objective Pareto optimizer** that explores legitimate
 candidate constraints while preserving fixed user intent and enforcing
-correctness before any QoR optimization (Manual §2.2, §39).
+correctness before any QoR optimization (Manual §2.2, §39). For reviewed
+false-path and multicycle exceptions, users can optionally map explicit
+SymbiYosys (`sby`) proof jobs to UCM constraint IDs; RCA records their formal
+outcomes and never treats structural analysis as a proof.
 
 > **Design philosophy**: *Never silently invent design intent. Correctness before QoR. The Universal Constraint Model is the source of truth — SDC is a serialization.*
 
@@ -34,6 +37,7 @@ rca generate project.yaml --backend generic
 rca generate project.yaml --backend opensta
 
 # 4. Validate generated constraints
+#    (also runs mapped SymbiYosys jobs when formal.backend: symbiyosys is configured)
 rca validate project.yaml
 
 # 5. Show coverage
@@ -140,7 +144,7 @@ rtl-constraint-assistant/
 │   ├── provenance/      # Evidence, AssumptionLedger, ProvenanceRecord
 │   ├── inference/       # Rule registry + clock/reset/IO/gclk rules + engine
 │   ├── validation/      # References, conflicts, coverage, master validator
-│   ├── exceptions/      # Exception analyzer, formal backend interface, verifier
+│   ├── exceptions/      # Exception analysis + conservative/SymbiYosys formal backends
 │   ├── equivalence/     # Normalization + semantic comparison
 │   ├── sdc/             # SDC importer + generic/OpenSTA/Synopsys/Cadence backends
 │   ├── eda/             # ToolBackend interface + Yosys/OpenSTA/Mock adapters
@@ -173,7 +177,7 @@ rtl-constraint-assistant/
 | `rca analyze`      | Parse/elaborate RTL, report structural findings & missing info. |
 | `rca infer`        | Run inference engine and print proposed constraints. |
 | `rca generate`     | Emit SDC (generic/opensta/synopsys/cadence backend). |
-| `rca validate`     | Validate generated or imported SDC against the design. |
+| `rca validate`     | Validate generated or imported SDC; runs configured SymbiYosys exception proofs if opted in. |
 | `rca coverage`     | Per-category coverage report with uncovered objects. |
 | `rca compare --a A.sdc --b B.sdc` | Semantic diff between two SDC files. |
 | `rca explain -c CID` | Explain why a constraint exists and its evidence. |
@@ -186,6 +190,32 @@ rtl-constraint-assistant/
 
 ---
 
+## Optional formal exception verification
+
+Step 14 adds an opt-in SymbiYosys adapter for reviewed false-path and
+multicycle proof jobs. It uses the existing formal/validation abstractions:
+`formal.backend` defaults to `conservative`, so projects do not invoke an
+external tool or claim a proof unless they choose `symbiyosys` and map an
+explicit user-authored `.sby` file to a UCM exception ID.
+
+```yaml
+formal:
+  backend: symbiyosys
+  proofs:
+    - constraint_id: FP0001
+      exception_kind: false_path
+      sby_file: formal/async_fifo.sby
+      task: async_fifo_fp
+```
+
+Only `sby` **PASS** with exit code zero is `VERIFIED`; `FAIL` is `INVALID`
+and preserves counterexample artifact paths. A missing mapping/tool/file,
+timeout, `UNKNOWN`, or indeterminate output stays `UNRESOLVED`. See
+`DOCUMENTATION.md` and `STEP14_REPORT.md` for the safety, configuration, and
+MCMM provenance details.
+
+---
+
 ## Enhancements added beyond the manual
 
 With your permission, the following enhancements were incorporated (documented here):
@@ -194,7 +224,7 @@ With your permission, the following enhancements were incorporated (documented h
 2. **Rich CLI** for beautiful, structured console output.
 3. **FastAPI web dashboard** with live constraint/coverage/QoR views (`rca dashboard`).
 4. **JSON Schema** for the project configuration (versioned).
-5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests) and Step-12 MCMM coverage (70 tests) plus a Step-13 validation-engine scenario suite (40 tests) — full suite **800 collected / 800 passed**. Coverage spans parser, constraints, SDC parsing, SDC generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), exceptions, provenance, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
+5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests), Step-12 MCMM coverage (70 tests), Step-13 validation scenarios (40 tests), and Step-14 SymbiYosys formal-adapter coverage (11 tests) — full suite **811 collected / 811 passed**. Coverage spans parser, constraints, SDC parsing/generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), formal proof verdicts/provenance, exceptions, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
 6. **Deterministic hashing** utilities for reproducibility/caching.
 
 ---

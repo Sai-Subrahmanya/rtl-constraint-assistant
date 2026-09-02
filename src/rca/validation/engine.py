@@ -11,18 +11,19 @@ from typing import Any
 
 from ..constraint_model import ConstraintSet
 from ..design_model import Design
+from ..exceptions.formal_backend import FormalBackend
 from ..timing_model import TimingGraph
-from ..utils.enums import Severity, ValidationStatus
+from ..utils.enums import ValidationStatus
 from ..utils.logging import get_logger
+from .backend import validate_backend
 from .base import ValidationReport
-from .references import validate_references
-from .semantic import validate_semantic
+from .completeness import validate_completeness
 from .conflicts import validate_conflicts
 from .coverage import compute_coverage
 from .exceptions import validate_exceptions, validate_scenarios
-from .completeness import validate_completeness
+from .references import validate_references
 from .sdc_import import validate_sdc_import
-from .backend import validate_backend
+from .semantic import validate_semantic
 
 log = get_logger("validation")
 
@@ -78,7 +79,8 @@ def run_validation(design: Design | None = None,
                    backend: str = "generic",
                    mode: str = "balanced",
                    active_scenarios: set[str] | None = None,
-                   parser: Any | None = None) -> ValidationResult:
+                   parser: Any | None = None,
+                   formal_backend: FormalBackend | None = None) -> ValidationResult:
     """Run the full multi-layer validation pipeline.
 
     Layers (in order):
@@ -94,7 +96,9 @@ def run_validation(design: Design | None = None,
     given set of active scenario ids (used when MCMM is enabled);
     ``parser`` optionally supplies SDC importer diagnostics so the import
     is classified (syntactic/semantic/incomplete/complete/unresolved)
-    without re-parsing.
+    without re-parsing; ``formal_backend`` optionally supplies a concrete
+    proof backend.  If omitted, the conservative UNRESOLVED default keeps
+    historical behavior unchanged.
     """
     cset = cset or ConstraintSet()
     rep = ValidationReport()
@@ -110,7 +114,7 @@ def run_validation(design: Design | None = None,
     validate_conflicts(cset, rep)
 
     # 4. exceptions + scenarios
-    validate_exceptions(design, tg, cset, rep)
+    validate_exceptions(design, tg, cset, rep, formal_backend=formal_backend)
     validate_scenarios(cset, rep, active_scenarios=active_scenarios)
 
     # 5. completeness / missing-information
@@ -119,7 +123,7 @@ def run_validation(design: Design | None = None,
     # 6. backend capability
     try:
         validate_backend(cset, backend, rep, mode)
-    except Exception as exc:  # backend may be unavailable in tests
+    except Exception as exc:  # noqa: BLE001 - vendor backend isolation boundary
         log.warning("backend validation skipped: %s", exc)
 
     # 7. coverage
@@ -170,7 +174,6 @@ def _hydrate_provenance(cset: ConstraintSet, rep: ValidationReport) -> None:
 
 
 def _origin_for(c: Any, issue: Any) -> str:
-    from ..utils.enums import ValidationCategory
     prov = getattr(c, "provenance", None)
     rule_id = getattr(prov, "rule_id", None) if prov is not None else None
     if rule_id:

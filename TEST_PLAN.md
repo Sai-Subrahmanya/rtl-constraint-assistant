@@ -1,8 +1,9 @@
-# Test Plan — RCA Constraint Validation Engine (Step 13)
+# Test Plan — RCA Validation and Formal Exception Verification (Steps 13–14)
 
-This test plan describes the validation-engine test coverage. Tests are
-kept in `tests/unit/test_validation.py` (Step 7) and
-`tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios).
+This test plan describes the validation-engine and concrete formal-adapter
+coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
+`tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios), and
+`tests/unit/test_symbiyosys.py` (Step 14, 11 named scenarios).
 
 ## Suites
 
@@ -10,6 +11,7 @@ kept in `tests/unit/test_validation.py` (Step 7) and
 |---|---|---|---|
 | Step-7 validation | `tests/unit/test_validation.py` | 74 | Deterministic IDs, clocks, gclks, IO, groups, conflicts, coverage, exceptions, scenarios, backend, immutability. |
 | Step-13 validation | `tests/unit/test_validation_step13.py` | 40 | Strengthened reference/semantic/conflict/completeness/exception-safety/scenario/SDC-import/backend/provenance/determinism. |
+| Step-14 SymbiYosys formal adapter | `tests/unit/test_symbiyosys.py` | 11 | PASS/FAIL/UNKNOWN/error/timeout verdicts, counterexamples, configuration, scenario provenance, validation integration, and immutability. |
 | Step-12 MCMM | `tests/unit/test_mcmm.py` | 70 | MCMM aggregation, per-scenario identity, cache, evaluator. |
 | Step-11 Pareto | `tests/unit/test_pareto.py` | 125 | Multi-objective Pareto/scalar/final selection. |
 
@@ -56,13 +58,32 @@ kept in `tests/unit/test_validation.py` (Step 7) and
 39. `test_13_39` — UNKNOWN/UNRESOLVED in `to_dict`.
 40. `test_13_40` — issue_id stable with provenance fields.
 
+## Step-14 named scenarios
+
+1. `test_14_01` — only SBY PASS plus zero exit is formally VERIFIED.
+2. `test_14_02` — SBY FAIL is INVALID and preserves counterexample artifacts.
+3. `test_14_03` — SBY UNKNOWN or missing marker stays UNRESOLVED.
+4. `test_14_04` — missing mapping, proof file, or executable stays UNRESOLVED.
+5. `test_14_05` — timeout and PASS/non-zero discrepancy are never VERIFIED.
+6. `test_14_06` — false-path/multicycle proof-kind mismatch is explicit ERROR.
+7. `test_14_07` — multicycle proof provenance preserves the cycle count.
+8. `test_14_08` — stable run ID, scenario provenance, and no UCM mutation.
+9. `test_14_09` — formal counterexample becomes a blocking existing-validation finding.
+10. `test_14_10` — YAML formal config resolves proof paths and constructs the adapter.
+11. `test_14_11` — duplicate UCM proof mappings are deterministically rejected.
+
+The test fixture is a local fake `sby` executable. It exercises the adapter's
+actual argument-list subprocess, status-marker, timeout, artifact, and
+provenance handling without substituting a fake result for a real formal proof.
+
 ## Gate criteria
 
 - `tests/unit/test_validation.py` : **74 passed** (no weakened assertions).
 - `tests/unit/test_validation_step13.py` : **40 passed**.
+- `tests/unit/test_symbiyosys.py` : **11 passed** (Step-14 gate; no real formal tool required).
 - `tests/unit/test_pareto.py` : **125 passed** (Step-11 regression).
 - `tests/unit/test_mcmm.py` : **70 passed** (Step-12 regression).
-- Full `python -m pytest -q` : **800 collected, 800 passed**.
+- Full `python -m pytest -q` : **811 collected, 811 passed, 0 failed, 0 skipped, 0 errors**.
 
 ## Environment notes
 
