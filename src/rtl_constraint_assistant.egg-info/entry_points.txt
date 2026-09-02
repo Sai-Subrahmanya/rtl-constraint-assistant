@@ -1,2 +1,0 @@
-[console_scripts]
-rca = rca.cli.main:app
