@@ -20,16 +20,20 @@ class GenericSDCBackend(SdcRenderer, SDCBackend):
     # MRO: SdcRenderer first, then SDCBackend (ABC).
     def render(self, cset: ConstraintSet, design_name: str = "top",
                mode: SafeMode = SafeMode.BALANCED,
-               with_provenance: bool = True) -> str:
+               with_provenance: bool = True,
+               scenario: str | None = None) -> str:
         """Backward-compatible: return SDC text."""
         return self.generate(cset, design_name=design_name, mode=mode,
-                             with_provenance=with_provenance).text
+                             with_provenance=with_provenance,
+                             scenario=scenario).text
 
     def generate(self, cset: ConstraintSet, design_name: str = "top",
                  mode: SafeMode = SafeMode.BALANCED,
-                 with_provenance: bool = True):
+                 with_provenance: bool = True,
+                 scenario: str | None = None):
         return SdcRenderer.render(self, cset, design_name=design_name, mode=mode,
-                                  with_provenance=with_provenance)
+                                  with_provenance=with_provenance,
+                                  scenario=scenario)
 
     def capabilities(self) -> dict[str, bool]:
         return {

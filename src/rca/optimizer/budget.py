@@ -54,8 +54,14 @@ class OptimizationBudget:
     def tick_iteration(self) -> None:
         self.iterations += 1
 
-    def tick_eda_run(self) -> None:
-        self.eda_runs += 1
+    def tick_eda_run(self, count: int = 1) -> None:
+        """Record ``count`` EDA runs (default 1).
+
+        MCMM candidates account for one run per evaluated scenario, so a
+        Step-12 candidate may tick more than once while still counting as a
+        single generated mutation (Step 12 §11).
+        """
+        self.eda_runs += max(1, int(count))
 
     def elapsed(self) -> float:
         return time.time() - self.start_time

@@ -163,7 +163,24 @@ class ScenarioSpec(BaseModel):
     corner: str = "slow"
     libraries: list[str] = Field(default_factory=list)
     parasitics: str | None = None
+    sdc_set_id: str | None = None
+    environment: dict[str, Any] = Field(default_factory=dict)
+    active: bool = True
     constraints: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCMMConfig(BaseModel):
+    """MCMM (Multi-Mode / Multi-Corner) configuration (Step 12 §12).
+
+    ``enabled`` toggles MCMM evaluation; ``active_scenario_ids`` selects which
+    scenarios (from ``scenarios``) are evaluated.  An empty
+    ``active_scenario_ids`` means all ``active`` scenarios are evaluated.  When
+    disabled or only one scenario is active, behaviour collapses to the legacy
+    single-scenario path.
+    """
+
+    enabled: bool = False
+    active_scenario_ids: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +197,7 @@ class ProjectConfig(BaseModel):
     flow: FlowConfig = Field(default_factory=FlowConfig)
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     scenarios: list[ScenarioSpec] = Field(default_factory=list)
+    mcmm: MCMMConfig = Field(default_factory=MCMMConfig)
 
     # Resolved (not from YAML directly)
     config_path: Path | None = Field(default=None, exclude=True)

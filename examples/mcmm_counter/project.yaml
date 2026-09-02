@@ -1,0 +1,76 @@
+schema_version: "1.0"
+project:
+  name: mcmm_counter
+  top: counter
+  description: |
+    Deterministic MCMM (Multi-Mode / Multi-Corner) demonstrator for RCA.
+    Two active scenarios (functional/slow and functional/fast) are evaluated
+    for every candidate using the clearly-labelled mock backend (no real EDA
+    invoked).  This example exists to exercise the Step-12 scenario matrix,
+    per-scenario QoR, conservative global objectives, limiting-scenario
+    reporting and scenario-aware cache identity.
+sources:
+  files:
+    - rtl/counter.sv
+  include_dirs: []
+  defines: []
+parameters:
+  WIDTH: 8
+constraints:
+  user:
+    clocks:
+      - name: clk
+        period: 10ns
+        fixed: true
+    io:
+      inputs:
+        en:
+          delay: 2ns
+          clock: clk
+      outputs:
+        q:
+          delay: 2ns
+          clock: clk
+  existing_sdc: []
+analysis:
+  language: systemverilog
+  safe_mode: balanced
+flow:
+  backend: generic
+  stage: pre_layout_sta
+  output_dir: output
+optimization:
+  enabled: true
+  max_iterations: 4
+  max_eda_runs: 30
+  max_runtime_minutes: 5
+  convergence_patience: 3
+  priorities:
+    timing: high
+    area: medium
+    power: medium
+    timing_margin_utilization: medium
+    runtime: low
+# ---- MCMM (Step 12 §12) ----
+scenarios:
+  - id: FUNC_SLOW
+    mode: functional
+    corner: slow
+    libraries: []
+    parasitics: rc_slow
+    environment:
+      temp: 125
+      voltage: 0.90
+    active: true
+  - id: FUNC_FAST
+    mode: functional
+    corner: fast
+    libraries: []
+    parasitics: rc_fast
+    environment:
+      temp: -40
+      voltage: 1.10
+    active: true
+mcmm:
+  enabled: true
+  active_scenario_ids: [FUNC_SLOW, FUNC_FAST]

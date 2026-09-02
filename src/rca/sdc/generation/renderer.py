@@ -90,6 +90,18 @@ _ALL_CMD = {
 }
 
 
+def _scenario_applies(c: "Constraint", scenario_id: str) -> bool:
+    """Return True when a constraint applies to an MCMM scenario (Step 12 §2).
+
+    empty ``scenario_ids`` => applies to all active scenarios; non-empty
+    ``scenario_ids`` => applies only to the listed scenarios.
+    """
+    sids = list(getattr(c, "scenario_ids", None) or [])
+    if not sids:
+        return True
+    return scenario_id in sids
+
+
 def render_target(ref: TargetRef) -> str | None:
     """Render a :class:`TargetRef` as an SDC selector expression."""
     k = ref.collection_kind
@@ -244,7 +256,15 @@ class SdcRenderer:
 
     def render(self, cset: ConstraintSet, design_name: str = "top",
                mode: SafeMode | str = SafeMode.BALANCED,
-               with_provenance: bool = True) -> SdcGenerationResult:
+               with_provenance: bool = True,
+               scenario: str | None = None) -> SdcGenerationResult:
+        """Render SDC, optionally restricted to one MCMM scenario (Step 12 §2).
+
+        When ``scenario`` is provided, only constraints whose ``scenario_ids``
+        are empty (apply to all scenarios) or contain ``scenario`` are emitted.
+        Fixed user constraints remain immutable and unaffected.  When
+        ``scenario`` is None, legacy behaviour (all constraints) is preserved.
+        """
         if isinstance(mode, str):
             mode = SafeMode(mode)
         result = SdcGenerationResult(
@@ -257,6 +277,8 @@ class SdcRenderer:
             buf.write(line + "\n")
 
         eligible = list(cset.emittable(mode))
+        if scenario is not None:
+            eligible = [c for c in eligible if _scenario_applies(c, scenario)]
         ordered = sorted(eligible,
                          key=lambda c: (EMISSION_ORDER.get(c.type, 99), c.id))
         emitted_any = False

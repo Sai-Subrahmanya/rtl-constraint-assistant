@@ -89,9 +89,9 @@ def design_report(design_summary: dict[str, Any], tg_summary: dict[str, Any],
     a("CONSTRAINT QUALITY")
     a("------------------")
     if coverage:
-        a(f"  Clock source coverage: {coverage['clock_source_coverage_pct']}%")
-        a(f"  Input timing coverage:  {coverage['input_timing_coverage_pct']}%")
-        a(f"  Output timing coverage: {coverage['output_timing_coverage_pct']}%")
+        a(f"  Clock source coverage: {coverage.get('clock_source_coverage_pct', 'UNKNOWN')}%")
+        a(f"  Input timing coverage:  {coverage.get('input_timing_path_coverage_pct', 'UNKNOWN')}%")
+        a(f"  Output timing coverage: {coverage.get('output_timing_path_coverage_pct', 'UNKNOWN')}%")
     if validation:
         summary = validation.get("summary", {})
         a(f"  Validation errors: {summary.get('errors', 0)}")

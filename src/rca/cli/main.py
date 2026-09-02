@@ -29,6 +29,13 @@ from ..equivalence import compare as compare_sets
 from ..exceptions import analyze_exceptions, verify_exceptions
 from ..explanation import design_report, explain_candidate, explain_constraint
 from ..inference import InferenceEngine
+from ..mcmm import (
+    MCMMResult,
+    build_scenario_matrix,
+    mock_mcmm_evaluator,
+    scenario_cache_key,
+    scenario_semantic_key,
+)
 from ..optimizer import Optimizer
 from ..parser import SlangAdapter
 from ..provenance import AssumptionLedger
@@ -110,6 +117,88 @@ def _am(cfg: ProjectConfig) -> ArtifactManager:
     return ArtifactManager(out)
 
 
+# ---- MCMM helpers (Step 12 §13, §14) --------------------------------
+
+def _mcmm_matrix(cfg: ProjectConfig, cset: ConstraintSet):
+    """Build the active scenario matrix from config + UCM (MCMM-aware)."""
+    from ..mcmm import build_scenario_matrix
+    return build_scenario_matrix(cfg, cset)
+
+
+def _print_scenario_matrix(console, matrix) -> None:
+    from rich.table import Table
+    s = matrix.summary()
+    t = Table(title="Active scenario matrix (MCMM)")
+    t.add_column("ID"); t.add_column("Mode"); t.add_column("Corner")
+    t.add_column("Libraries"); t.add_column("Parasitics")
+    for sc in s.get("active_scenarios", []):
+        libs = ", ".join(sc.get("libraries", [])) or "-"
+        t.add_row(sc["id"], sc["mode"], sc["corner"], libs,
+                  sc.get("parasitics") or "-")
+    console.print(t)
+    console.print(f"[dim]MCMM {'enabled' if s.get('enabled') else 'disabled'} "
+                  f"| {s.get('scenario_count')} active "
+                  f"| single-scenario={s.get('single_scenario')}[/]")
+
+
+def _maybe_print_matrix(cfg: ProjectConfig, cset: ConstraintSet, console) -> bool:
+    """Print the active scenario matrix when MCMM is enabled; return enabled."""
+    matrix = _mcmm_matrix(cfg, cset)
+    if matrix.is_enabled and matrix.scenario_count > 1:
+        _print_scenario_matrix(console, matrix)
+        return True
+    return False
+
+
+def _mcmm_per_scenario_sdc(cset: ConstraintSet, backend, design_name: str,
+                           matrix, scenario_id: str) -> str:
+    """Render the SDC restricted to a single MCMM scenario."""
+    from ..utils.enums import SafeMode
+    res = backend.generate(cset, design_name=design_name,
+                           mode=SafeMode.BALANCED, with_provenance=True,
+                           scenario=scenario_id)
+    return res.text
+
+
+def _print_mcmm_result(console, m: "MCMMResult", matrix) -> None:
+    """Print an MCMMResult with full per-scenario auditability (Step 12 §14)."""
+    from rich.table import Table
+    _print_scenario_matrix(console, matrix)
+    console.print(Panel(f"[cyan]MCMM evaluation[/cyan] — candidate {m.candidate_id}"))
+    status_color = {"feasible": "green", "infeasible": "yellow",
+                    "blocked": "red", "invalid": "red"}.get(
+        m.global_status, "white")
+    console.print(f"  Global status: [{status_color}]{m.global_status}[/]")
+    console.print(f"  Limiting scenarios: {', '.join(m.limiting_scenarios) or '-'}")
+    console.print(f"  EDA runs: {m.eda_runs}  Cache hits: {m.cache_hits}  "
+                  f"Cache misses: {m.cache_misses}")
+    t = Table(title="Per-scenario QoR")
+    for col in ("Scenario", "Mode", "Corner", "Status", "Setup WNS (ns)",
+                "Hold WNS (ns)", "Margin util", "Cache", "Run id"):
+        t.add_column(col)
+    for sid in m.active_scenario_ids:
+        sq = m.scenario_results.get(sid)
+        if sq is None:
+            continue
+        s_wns = f"{sq.qor.setup_wns*1e9:.3f}" if sq.qor and sq.qor.setup_wns is not None else "-"
+        h_wns = f"{sq.qor.hold_wns*1e9:.3f}" if sq.qor and sq.qor.hold_wns is not None else "-"
+        util = f"{sq.margin_utilization:.2f}" if sq.margin_utilization is not None else "-"
+        t.add_row(sid, sq.mode, sq.corner, sq.status, s_wns, h_wns, util,
+                  sq.cache_status, sq.run_id or "-")
+    console.print(t)
+    for name, agg in m.objectives.items():
+        limiting = ", ".join(agg.limiting) or "-"
+        val = f"{agg.value:.6g}" if agg.value is not None else "UNKNOWN"
+        console.print(f"  Objective {name}: {val}  "
+                      f"(unknown={agg.unknown}, limiting={limiting})")
+    if m.provenance:
+        console.print(f"  Provenance: {json.dumps(m.provenance, default=str)[:200]}")
+    if m.diagnostics:
+        console.print("  Diagnostics:")
+        for d in m.diagnostics:
+            console.print(f"    - {d}")
+
+
 # ---- Commands ---------------------------------------------------------------
 
 @app.command()
@@ -167,6 +256,7 @@ def analyze(config: str = typer.Argument(..., help="Path to project YAML"),
         for m in missing:
             mt.add_row(m.get("severity", "?"), m.get("category", "?"), m.get("message", ""))
         console.print(mt)
+    _maybe_print_matrix(cfg, ConstraintSet(name=cfg.project.name), console)
     console.print(f"\n[dim]Artifacts written to {am.output_dir}/[/dim]")
 
 
@@ -210,6 +300,7 @@ def infer(config: str = typer.Argument(..., help="Path to project YAML")):
         console.print(f"\n[magenta]Conflicts (user vs inference): {len(report.conflicts)}[/magenta]")
         for c in report.conflicts[:10]:
             console.print(f"  - {c.get('message', c)}")
+    _maybe_print_matrix(cfg, cset, console)
 
 
 @app.command()
@@ -217,7 +308,9 @@ def generate(config: str = typer.Argument(..., help="Path to project YAML"),
              backend: str = typer.Option("generic", help="SDC backend: generic|opensta|synopsys|cadence"),
              output: str | None = typer.Option(None, help="Output SDC path (default: output/design.sdc)"),
              safe_mode: str = typer.Option("balanced", help="strict|balanced|aggressive"),
-             provenance_comments: bool = typer.Option(True, "--provenance/--no-provenance")):
+             provenance_comments: bool = typer.Option(True, "--provenance/--no-provenance"),
+             scenario: str | None = typer.Option(None, "--scenario",
+                                                 help="MCMM scenario id; restrict SDC to one scenario")):
     """Generate SDC from inferred + user-specified constraints (Step 6)."""
     configure_logging(level="INFO")
     cfg = _load(config)
@@ -231,13 +324,20 @@ def generate(config: str = typer.Argument(..., help="Path to project YAML"),
     except ValueError:
         mode = SafeMode.BALANCED
     result = sdc_backend.generate(cset, design_name=cfg.project.name, mode=mode,
-                                   with_provenance=provenance_comments)
+                                   with_provenance=provenance_comments,
+                                   scenario=scenario)
     am = _am(cfg)
-    out_path = Path(output) if output else am.path(f"design.{backend}.sdc")
+    suffix = f".{scenario}" if scenario else ""
+    out_path = Path(output) if output else am.path(f"design{'.' + backend if backend else ''}{suffix}.sdc")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(result.text, encoding="utf-8")
     am.write_json("constraint_model.json", cset.snapshot())
     am.write_json("assumptions.json", ledger.to_list())
+    if scenario:
+        _maybe_print_matrix(cfg, cset, console)
+        console.print(f"[dim]Scenario-specific SDC for {scenario} "
+                      f"(emitted {len(result.emitted_constraint_ids)}/"
+                      f"{len(cset)} constraints).[/]")
 
     # Step 6 §29 summary block
     console.print("SDC GENERATION")
@@ -295,6 +395,7 @@ def validate(config: str = typer.Argument(..., help="Path to project YAML"),
     am.write_json("validation_report.json", result.as_dict())
     if result.coverage:
         am.write_json("coverage_report.json", result.coverage.as_dict())
+    _maybe_print_matrix(cfg, cset, console)
     _print_validation_summary(console, result)
 
 
@@ -348,6 +449,7 @@ def coverage(config: str = typer.Argument(..., help="Path to project YAML")):
     cov = result.coverage
     am = _am(cfg)
     am.write_json("coverage_report.json", cov.as_dict() if cov else {})
+    _maybe_print_matrix(cfg, cset, console)
     console.print(Panel("[cyan]Coverage Report[/cyan]"))
     if cov:
         for k, v in cov.as_dict().items():
@@ -484,6 +586,45 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
     sdc_backend = get_backend("opensta" if "opensta" in backend else "generic")
     am = _am(cfg)
 
+    # ---- MCMM (Step 12 §13, §14) ----
+    matrix = _mcmm_matrix(cfg, cset)
+    mcmm_enabled = bool(matrix.is_enabled and matrix.scenario_count > 1)
+    if mcmm_enabled:
+        from ..optimizer import Candidate
+        base_cand = Candidate(id="baseline", constraint_set=cset)
+        if backend == "mock":
+            ev = mock_mcmm_evaluator(matrix, base_cset=cset)
+            m = ev(base_cand, Path(cfg.flow.output_dir))
+            am.write_json("mcmm_report.json", m.to_dict())
+            _print_mcmm_result(console, m, matrix)
+            return
+        # Real backend: run the flow once per active scenario, then aggregate.
+        sources = resolve_sources(cfg)
+        include_dirs = resolve_include_dirs(cfg)
+        defines = dict(getattr(cfg, "sources", None).defines or {}) if getattr(cfg, "sources", None) else {}
+        per_scenario: dict[str, dict] = {}
+        for scenario in matrix.active_scenarios():
+            sdc_text = _mcmm_per_scenario_sdc(cset, sdc_backend, cfg.project.name,
+                                              matrix, scenario.id)
+            sdc_path = am.path(f"design.{scenario.id}.sdc")
+            sdc_path.parent.mkdir(parents=True, exist_ok=True)
+            sdc_path.write_text(sdc_text, encoding="utf-8")
+            res = run_flow(
+                cfg=cfg, cset=cset, sdc_text=sdc_text,
+                sdc_generation_status="COMPLETE",
+                sources=sources, include_dirs=include_dirs, defines=defines,
+                output_dir=Path(cfg.flow.output_dir), backend=backend,
+                candidate_id=f"baseline_{scenario.id}",
+                scenario=scenario.id, corner=scenario.corner,
+                allow_partial_sdc=allow_partial_sdc, force=force,
+            )
+            per_scenario[scenario.id] = res
+        am.write_json("mcmm_report.json", per_scenario)
+        for sid, res in per_scenario.items():
+            console.print(f"[cyan]Scenario {sid}[/cyan]  status={res.get('status')}  "
+                          f"run_id={res.get('run_id')}  qor={res.get('qor')}")
+        return
+
     # Generate SDC (using balanced safe mode by default; user can switch via --allow-partial)
     from ..utils.enums import SafeMode
     gen = sdc_backend.generate(cset, design_name=cfg.project.name,
@@ -579,18 +720,46 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
     libs = [Path(p) for p in cfg.flow.liberty_files()]
     sources = resolve_sources(cfg)
 
-    def evaluate(cand, work):
-        cand_cset = cand.constraint_set or cset
-        sdc_text = sdc_backend.render(cand_cset, design_name=cfg.project.name)
-        sdc_p = work / f"{cand.id}.sdc"
-        sdc_p.write_text(sdc_text, encoding="utf-8")
+    # ---- MCMM (Step 12 §13) ----
+    matrix = _mcmm_matrix(cfg, cset)
+    mcmm_enabled = bool(matrix.is_enabled and matrix.scenario_count > 1)
+
+    if mcmm_enabled:
+        from ..mcmm import MCMMEvaluator
+
+        def _real_scenario_evaluate(scenario, cand, work):
+            cand_cset = cand.constraint_set or cset
+            sdc_text = _mcmm_per_scenario_sdc(
+                cand_cset, sdc_backend, cfg.project.name, matrix, scenario.id)
+            sdc_p = work / f"{cand.id}.{scenario.id}.sdc"
+            sdc_p.parent.mkdir(parents=True, exist_ok=True)
+            sdc_p.write_text(sdc_text, encoding="utf-8")
+            yosys = YosysBackend()
+            ndir = work / f"{cand.id}_{scenario.id}"
+            netlist = yosys.synthesize(sources, cfg.top_module(), libs, ndir)
+            sta = OpenSTABackend()
+            return sta.run_sta(netlist, sdc_p, libs, ndir, cfg.top_module(),
+                               corner=scenario.corner)
+
         if backend == "mock":
-            tool = MockEDA()
-            return tool.evaluate_candidate(cand, work)
-        yosys = YosysBackend()
-        netlist = yosys.synthesize(sources, cfg.top_module(), libs, work / cand.id)
-        sta = OpenSTABackend()
-        return sta.run_sta(netlist, sdc_p, libs, work / cand.id, cfg.top_module())
+            evaluate = mock_mcmm_evaluator(matrix, base_cset=cset)
+        else:
+            evaluate = MCMMEvaluator(
+                matrix, evaluate_scenario=_real_scenario_evaluate,
+                base_cset=cset, name=backend)
+    else:
+        def evaluate(cand, work):
+            cand_cset = cand.constraint_set or cset
+            sdc_text = sdc_backend.render(cand_cset, design_name=cfg.project.name)
+            sdc_p = work / f"{cand.id}.sdc"
+            sdc_p.write_text(sdc_text, encoding="utf-8")
+            if backend == "mock":
+                tool = MockEDA()
+                return tool.evaluate_candidate(cand, work)
+            yosys = YosysBackend()
+            netlist = yosys.synthesize(sources, cfg.top_module(), libs, work / cand.id)
+            sta = OpenSTABackend()
+            return sta.run_sta(netlist, sdc_p, libs, work / cand.id, cfg.top_module())
 
     opt = Optimizer(cfg, evaluate_fn=evaluate, work_dir=runs_dir)
     result = opt.run(cset)
@@ -610,10 +779,25 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
     console.print(f"  Stop reason: {result.stop_reason.value if result.stop_reason else 'n/a'}")
     console.print(f"  Iterations:  {result.iterations}  EDA runs: {result.eda_runs}  Elapsed: {result.elapsed_seconds:.1f}s")
     console.print(f"  Pareto size: {len(result.pareto)}")
+    if mcmm_enabled:
+        _print_scenario_matrix(console, matrix)
     if result.final:
         q = result.final.qor
         console.print(f"\n[green]Final candidate: {result.final.id}[/green]")
-        if q:
+        if mcmm_enabled and result.final.mcmm is not None:
+            m = result.final.mcmm
+            console.print(f"  Global status: {m.global_status}")
+            console.print(f"  Limiting scenarios: {', '.join(m.limiting_scenarios) or '-'}")
+            for sid in m.active_scenario_ids:
+                sq = m.scenario_results.get(sid)
+                if sq is None:
+                    continue
+                s_wns = sq.qor.setup_wns * 1e9 if sq.qor and sq.qor.setup_wns is not None else None
+                h_wns = sq.qor.hold_wns * 1e9 if sq.qor and sq.qor.hold_wns is not None else None
+                console.print(f"    [{sid} {sq.mode}/{sq.corner}] {sq.status}  "
+                              f"setup={s_wns:.3f}ns  hold={h_wns:.3f}ns  "
+                              f"util={('%.2f' % sq.margin_utilization) if sq.margin_utilization is not None else '-'}")
+        elif q:
             console.print(f"  Setup WNS: {q.setup_wns*1e9 if q.setup_wns is not None else '-':.3f} ns")
             console.print(f"  Hold WNS:  {q.hold_wns*1e9 if q.hold_wns is not None else '-':.3f} ns")
             console.print(f"  Area:      {q.area_total}  Power: {q.power_total}")
@@ -637,6 +821,7 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
                          cset, missing)
     am = _am(cfg)
     am.write_text("inference_report.txt", text)
+    _maybe_print_matrix(cfg, cset, console)
     am.write_json("inference_report.json",
                   {"design": design.summary(), "timing": tg.summary(),
                    "validation": val_result.as_dict(),
