@@ -26,6 +26,12 @@ from typing import Any
 from ..constraint_model import ConstraintSet, Scenario, stable_hash_cset
 from ..utils.hashing import hash_file, stable_hash
 
+# Canonical MCMM cache-identity versioning policy (Step 12 §10, §5).
+# This single constant is used by every scenario-aware cache key so the code,
+# tests and documentation stay consistent.  Bump it only when the identity
+# composition itself changes semantics.
+CACHE_VERSION = 3
+
 
 def scenario_semantic_key(scenario: Scenario) -> tuple:
     """Deterministic semantic identity of one scenario (cache-relevant)."""
@@ -70,7 +76,7 @@ def scenario_cache_key(scenario: Scenario,
     result is not re-used across tools/versions.
     """
     data: dict[str, Any] = {
-        "version": 1,
+        "version": CACHE_VERSION,
         "scenario": scenario_semantic_key(scenario),
         "cset": stable_hash_cset(cset) if cset is not None else "",
         "backend": backend,
@@ -96,7 +102,7 @@ def mcmm_run_cache_key(cset: ConstraintSet,
     and the backend/tool identity.  Useful for coarse experiment-level invalidation.
     """
     data: dict[str, Any] = {
-        "version": 1,
+        "version": CACHE_VERSION,
         "cset": stable_hash_cset(cset),
         "matrix": {
             "active": list(matrix_summary.get("active_scenarios", [])),
@@ -114,5 +120,6 @@ def mcmm_run_cache_key(cset: ConstraintSet,
 
 
 __all__ = [
-    "scenario_semantic_key", "scenario_cache_key", "mcmm_run_cache_key",
+    "CACHE_VERSION", "scenario_semantic_key", "scenario_cache_key",
+    "mcmm_run_cache_key",
 ]

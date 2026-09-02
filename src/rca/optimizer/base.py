@@ -237,7 +237,8 @@ class Optimizer:
 
             # Recompute Pareto across ALL feasible candidates so far
             feasible = [c for c in result.all_candidates if c.hard_feasible]
-            if mcmm:
+            use_mcmm = mcmm or self._any_mcmm(feasible)
+            if use_mcmm:
                 front = mcmm_pareto_front(feasible)
                 best_cand = mcmm_select_final(front, baseline, self._priorities)
                 best_score = (mcmm_scalar_score(best_cand, baseline, self._priorities)
@@ -268,7 +269,8 @@ class Optimizer:
 
         # ----- final selection -----
         feasible_all = [c for c in result.all_candidates if c.hard_feasible]
-        if mcmm:
+        use_mcmm = mcmm or self._any_mcmm(feasible_all)
+        if use_mcmm:
             front = mcmm_pareto_front(feasible_all)
             final = mcmm_select_final(front, baseline, self._priorities)
         else:
@@ -288,7 +290,7 @@ class Optimizer:
         result.final = final
 
         # Assign ranks to feasible candidates by scalar score (deterministic)
-        if mcmm:
+        if use_mcmm:
             ranked = sorted(feasible_all,
                             key=lambda c: (-mcmm_scalar_score(c, baseline, self._priorities), c.id))
             for i, c in enumerate(ranked):
@@ -301,7 +303,7 @@ class Optimizer:
                 c.rank = i
                 c.priority_score = scalar_score(c, baseline, self._priorities)
 
-        if mcmm:
+        if use_mcmm:
             result.explanation = mcmm_explanation_for(final, baseline, front,
                                                       result.all_candidates,
                                                       self._priorities)
@@ -328,8 +330,26 @@ class Optimizer:
     # Evaluation & classification
     # ------------------------------------------------------------------
     def _mcmm_enabled(self) -> bool:
+        """Whether MCMM is active for this optimizer run.
+
+        MCMM is active only when explicitly enabled AND more than one scenario is
+        active.  When disabled or a single active scenario exists the optimizer
+        uses the legacy Step-11 path (backward compatibility, Step 12 §22).
+        """
         mcmm = getattr(self.cfg, "mcmm", None)
-        return bool(getattr(mcmm, "enabled", False)) if mcmm is not None else False
+        if mcmm is None or not bool(getattr(mcmm, "enabled", False)):
+            return False
+        try:
+            from ..mcmm import build_scenario_matrix
+            mat = build_scenario_matrix(self.cfg)
+            return bool(mat.is_enabled and mat.scenario_count > 1)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _any_mcmm(cands) -> bool:
+        """True when any candidate carries an MCMM aggregate result."""
+        return any(getattr(c, "mcmm", None) is not None for c in cands)
 
     def _evaluate(self, cand: Candidate) -> None:
         assert self.evaluate_fn is not None

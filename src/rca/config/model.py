@@ -168,6 +168,25 @@ class ScenarioSpec(BaseModel):
     active: bool = True
     constraints: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _reject_nonempty_constraints(self) -> "ScenarioSpec":
+        """Do not silently accept scenario-specific constraint definitions.
+
+        ``scenarios[].constraints`` is a reserved, currently-unsupported
+        configuration block.  Rather than accept it and have no effect, we
+        reject non-empty content with a clear error.  Scenario-specific
+        constraints must instead be expressed through ``Constraint.scenario_ids``
+        on the UCM (Step 12 §2, §12).  This keeps the field from appearing
+        functional while doing nothing.
+        """
+        if self.constraints:
+            raise ValueError(
+                "scenarios[].constraints is not supported yet; express "
+                "scenario-specific constraints through Constraint.scenario_ids "
+                f"on the UCM instead (scenario id={self.id or '?'})."
+            )
+        return self
+
 
 class MCMMConfig(BaseModel):
     """MCMM (Multi-Mode / Multi-Corner) configuration (Step 12 §12).

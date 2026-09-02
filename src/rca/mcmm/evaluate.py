@@ -48,6 +48,11 @@ class MCMMEvaluator:
     name: str = "mcmm"
     tool_path: str = ""
     tool_version: str = ""
+    # Cache of per-scenario baseline setup/hold WNS (seconds) used for the
+    # Step-11 margin math.  Populated lazily the first time a candidate is
+    # evaluated and reused for all subsequent candidates so every candidate's
+    # margin is measured against the SAME per-scenario baseline.
+    baseline_by_scenario: dict[str, tuple[float | None, float | None]] | None = None
 
     @property
     def enabled(self) -> bool:
@@ -61,19 +66,22 @@ class MCMMEvaluator:
         result = MCMMResult(candidate_id=getattr(cand, "id", ""))
         result.active_scenario_ids = list(self.matrix.active_ids)
 
-        qor_by_scenario: dict[str, Any] = {}
         for scenario in self.matrix.active_scenarios():
             sqor = self._evaluate_scenario(cand, cset, scenario, work_dir)
-            qor_by_scenario[scenario.id] = sqor.qor
             result.scenario_results[scenario.id] = sqor
             if sqor.run_id:
                 result.run_ids.append(sqor.run_id)
         result.eda_runs = len(self.matrix.active_scenarios())
 
-        # Global aggregation.
+        # Global aggregation.  The per-scenario baseline (Step 12 §8) must be
+        # evaluated so the exact Step-11 margin math runs against a real
+        # per-scenario baseline rather than (None, None).
         global_feasibility(result)
         aggregate_objectives(result)
-        global_margin(result)
+        if self.baseline_by_scenario is None:
+            self.baseline_by_scenario = self._baseline_margin_map(
+                cand, cset, work_dir, result)
+        global_margin(result, baseline_by_scenario=self.baseline_by_scenario)
         finalize_limiting(result)
 
         # Experiment cache identity for the whole MCMM run.
@@ -106,6 +114,53 @@ class MCMMEvaluator:
         return result
 
     # ------------------------------------------------------------------
+    def _is_baseline(self, cand: Any, cset: ConstraintSet | None) -> bool:
+        """Return True if the candidate is the (unmutated) MCMM baseline."""
+        changes = getattr(cand, "generated_changes", None) or []
+        if "__baseline__" in changes:
+            return True
+        if getattr(cand, "id", "") in ("C000", "__baseline__"):
+            return True
+        if cset is not None and self.base_cset is not None:
+            try:
+                from ..constraint_model import stable_hash_cset
+                return stable_hash_cset(cset) == stable_hash_cset(self.base_cset)
+            except Exception:
+                pass
+        return False
+
+    def _baseline_margin_map(self, cand: Any, cset: ConstraintSet | None,
+                             work_dir: Path, result: MCMMResult,
+                             ) -> dict[str, tuple[float | None, float | None]]:
+        """Compute per-scenario baseline setup/hold WNS (seconds).
+
+        The MCMM baseline itself must be evaluated per scenario (Step 12 §8) so
+        that the exact Step-11 margin math runs for every candidate against a
+        real per-scenario baseline.  When the candidate IS the baseline we
+        reuse its own per-scenario QoR (avoiding a redundant evaluation);
+        otherwise a single baseline candidate is evaluated once and cached.
+        """
+        if self._is_baseline(cand, cset):
+            m: dict[str, tuple[float | None, float | None]] = {}
+            for sid, sqor in result.scenario_results.items():
+                if sqor.qor is not None:
+                    m[sid] = (sqor.qor.setup_wns, sqor.qor.hold_wns)
+            return m
+        # Evaluate the (unmutated) baseline candidate once per scenario and cache.
+        from types import SimpleNamespace
+        baseline_cand = SimpleNamespace(
+            id="__baseline__", constraint_set=self.base_cset or cset,
+            generated_changes=["__baseline__"],
+        )
+        m = {}
+        for scenario in self.matrix.active_scenarios():
+            sqor = self._evaluate_scenario(baseline_cand,
+                                           self.base_cset or cset,
+                                           scenario, work_dir)
+            if sqor.qor is not None:
+                m[scenario.id] = (sqor.qor.setup_wns, sqor.qor.hold_wns)
+        return m
+
     def _evaluate_scenario(self, cand: Any, cset: ConstraintSet | None,
                            scenario: Scenario, work_dir: Path) -> ScenarioQoR:
         sqor = ScenarioQoR(
@@ -188,6 +243,10 @@ class MCMMEvaluator:
             "backend": self.name,
             "tool_path": self.tool_path,
             "tool_version": self.tool_version,
+            "baseline_by_scenario": {
+                sid: {"setup_wns": v[0], "hold_wns": v[1]}
+                for sid, v in (self.baseline_by_scenario or {}).items()
+            },
         }
 
 

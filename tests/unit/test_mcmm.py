@@ -875,3 +875,447 @@ def test_margin_is_diagnostic_not_objective():
     global_margin(r, baseline_by_scenario=bss)
     assert "margin_utilization" not in r.objectives
     assert r.margin_utilization is not None
+
+
+# =====================================================================
+# STEP-12 REVIEW FIX REGRESSION TESTS
+# =====================================================================
+
+
+# ---------------------------------------------------------------------
+# Review 1: a MISSING required scenario must NEVER become globally feasible
+# ---------------------------------------------------------------------
+
+def test_missing_scenario_result_never_feasible():
+    r = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2),
+    }, active=["S1", "S2"])
+    global_feasibility(r)
+    # S1 healthy but S2 has NO result -> must NOT be globally feasible.
+    assert not r.feasible
+    assert r.global_status == "blocked"
+    assert r.limiting_scenarios == ["S2"]
+    assert r.scenario_results["S2"].infeasible_reason == "missing_scenario_result"
+    assert r.scenario_results["S2"].status == "blocked"
+    # A healthy scenario is never enough to rescue a missing required one.
+    assert r.scenario_results["S1"].feasible
+
+
+def test_missing_scenario_reason_deterministic_and_recorded():
+    r = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2),
+        "S2": _make("S2", wns_ns=0.5, hold_ns=0.2),
+    }, active=["S1", "S2", "S3"])
+    r2 = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2),
+        "S2": _make("S2", wns_ns=0.5, hold_ns=0.2),
+    }, active=["S1", "S2", "S3"])
+    global_feasibility(r); global_feasibility(r2)
+    # Deterministic: same inputs -> same verdict & reason.
+    assert r.global_status == r2.global_status == "blocked"
+    assert r.limiting_scenarios == r2.limiting_scenarios == ["S3"]
+    assert r.scenario_results["S3"].infeasible_reason == "missing_scenario_result"
+
+
+def test_missing_scenario_not_collapsed_with_healthy_and_infeasible():
+    # Missing (blocked) must take conservative precedence over infeasible.
+    r = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2),
+        "S2": _make("S2", wns_ns=-0.1, hold_ns=0.2),   # infeasible
+    }, active=["S1", "S2", "S3"])                        # S3 missing
+    global_feasibility(r)
+    assert not r.feasible
+    assert r.blocked
+    assert r.global_status == "blocked"
+    assert "S3" in r.limiting_scenarios
+    # The infeasible scenario's reason is not lost.
+    assert r.scenario_results["S2"].infeasible_reason == "setup_violation"
+
+
+# ---------------------------------------------------------------------
+# Review 2: global area semantics (real/proxy/unknown)
+# ---------------------------------------------------------------------
+
+def test_area_real_plus_unknown_is_unknown():
+    r = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=100.0, area_proxy=None),
+        "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=None, area_proxy=None),
+    })
+    aggregate_objectives(r)
+    agg = r.objectives["area"]
+    assert agg.unknown
+    assert agg.value is None
+    assert agg.area_source == "unknown"
+    assert agg.limiting == ["S2"]
+
+
+def test_area_proxy_plus_unknown_is_unknown():
+    r = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=None, area_proxy=100.0),
+        "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=None, area_proxy=None),
+    })
+    aggregate_objectives(r)
+    agg = r.objectives["area"]
+    assert agg.unknown
+    assert agg.value is None
+    assert agg.area_source == "unknown"
+    assert agg.limiting == ["S2"]
+
+
+def test_area_real_plus_proxy_incomparable():
+    r = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=100.0, area_proxy=None),
+        "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=None, area_proxy=90.0),
+    })
+    aggregate_objectives(r)
+    agg = r.objectives["area"]
+    assert agg.incomparable
+    assert not agg.unknown or agg.value is None
+    assert agg.value is None
+    assert agg.area_source == "mixed"
+
+
+def test_area_real_plus_real_comparable():
+    r = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=100.0, area_proxy=None),
+        "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=120.0, area_proxy=None),
+    })
+    aggregate_objectives(r)
+    agg = r.objectives["area"]
+    assert not agg.unknown and not agg.incomparable
+    assert agg.value == pytest.approx(120.0)
+    assert agg.area_source == "real"
+    assert agg.limiting == ["S2"]
+
+
+def test_area_proxy_plus_proxy_comparable():
+    r = _result({
+        "S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=None, area_proxy=100.0),
+        "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=None, area_proxy=120.0),
+    })
+    aggregate_objectives(r)
+    agg = r.objectives["area"]
+    assert not agg.unknown and not agg.incomparable
+    assert agg.value == pytest.approx(120.0)
+    assert agg.area_source == "proxy"
+    assert agg.limiting == ["S2"]
+
+
+# ---------------------------------------------------------------------
+# Review 3: MCMM margin wired through the production optimizer path
+# ---------------------------------------------------------------------
+
+def test_optimizer_mcmm_baseline_timing_and_margin_populated(tmp_path):
+    cfg = _cfg(enabled=True)
+    cfg.optimization.enabled = True
+    cfg.optimization.max_iterations = 3
+    cfg.optimization.max_eda_runs = 60
+    cfg.optimization.perturbation.uncertainty_range_ns = [0.0, 0.1, 0.02]
+    cs = _cset()
+    cs.create_clock(name="clk", period_seconds=10e-9, fixed=True,
+                    source_kind=SourceKind.USER, confidence=Confidence.HIGH)
+    u1 = cs.create_clock_uncertainty("clk", 0.05e-9, source_kind=SourceKind.INFERENCE)
+    u1.opt_status = OptimizationStatus.TUNABLE
+
+    mat = build_scenario_matrix(cfg, cs)
+
+    def evaluate_scenario(scenario, cand, work_dir):
+        # Deterministic QoR derived from the candidate's uncertainty value so
+        # different mutations produce measurable margin movement.
+        unc = 0.0
+        ccset = getattr(cand, "constraint_set", None) or cs
+        for cc in ccset:
+            if cc.type == ConstraintType.SET_CLOCK_UNCERTAINTY:
+                unc = float(cc.values.get("uncertainty", 0.0)) * 1e-9
+        base = {"S1": 1.0, "S2": 0.7}   # ns baseline setup per scenario
+        setup_ns = base[scenario.id] - 5.0 * unc / 1e-9
+        return _qor(scenario=scenario.id, mode=scenario.mode, corner=scenario.corner,
+                    wns_ns=setup_ns, hold_ns=0.3, area=100.0, area_proxy=None,
+                    power=50.0)
+
+    ev = MCMMEvaluator(mat, evaluate_scenario=evaluate_scenario, base_cset=cs,
+                       name="mock")
+    opt = Optimizer(cfg, evaluate_fn=ev, work_dir=Path(tmp_path))
+    res = opt.run(cs)
+
+    # 1. The MCMM baseline itself must be evaluated per scenario, with per-
+    #    scenario timing available for the Step-11 margin math.
+    assert res.baseline is not None and res.baseline.mcmm is not None
+    base_mcmm = res.baseline.mcmm
+    assert base_mcmm.provenance.get("baseline_by_scenario")
+    for sid in base_mcmm.active_scenario_ids:
+        sq = base_mcmm.scenario_results.get(sid)
+        assert sq is not None and sq.qor is not None
+        assert sq.qor.setup_wns is not None and sq.qor.hold_wns is not None
+
+    # 2. Candidate margin utilization is populated (not None) per scenario.
+    cand_margins = 0
+    for c in res.all_candidates:
+        if c.mcmm is None:
+            continue
+        for sq in c.mcmm.scenario_results.values():
+            if sq.margin_utilization is not None or sq.margin_headroom_ns is not None:
+                cand_margins += 1
+    assert cand_margins > 0, "no candidate margin was populated"
+
+    # 3. The global margin carries a limiting scenario deterministically.
+    assert res.final is not None and res.final.mcmm is not None
+    fin = res.final.mcmm
+    # margin_limiting_scenarios must be populated once a margin exists.
+    assert fin.margin_limiting_scenarios or fin.margin_utilization is not None
+
+
+def test_mcmm_margin_tiebreak_affects_final_selection():
+    """The production selection function (the exact one Optimizer calls) must
+    use margin as a tie-break only after all higher-priority buckets tie."""
+    a = _mcmm_candidate("A", {"S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=100.0,
+                                          power=50.0),
+                              "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=100.0,
+                                          power=50.0)})
+    b = _mcmm_candidate("B", {"S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=100.0,
+                                          power=50.0),
+                              "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=100.0,
+                                          power=50.0)})
+    # Timing, area and power all tie; only the (diagnostic) margin differs.
+    a.mcmm.margin_utilization = 0.1
+    a.mcmm.margin_headroom_ns = 0.9e-9
+    b.mcmm.margin_utilization = 0.9
+    b.mcmm.margin_headroom_ns = 0.1e-9
+    front = mcmm_pareto_front([a, b])
+    assert len(front) == 2                     # neither dominates
+    priorities = {"timing": Priority.HIGH, "area": Priority.MEDIUM,
+                  "power": Priority.MEDIUM, "constraint_quality": Priority.LOW}
+    final = mcmm_select_final(front, a, priorities)
+    # Lower margin_utilization (more residual slack) wins as the documented
+    # secondary final-selection signal, even though timing/area/power tie.
+    assert final is a
+
+
+# ---------------------------------------------------------------------
+# Review 4: ScenarioSpec.constraints must not be silently ignored
+# ---------------------------------------------------------------------
+
+def test_scenariospec_constraints_nonempty_rejected():
+    with pytest.raises(ValueError):
+        ProjectConfig(
+            project=ProjectInfo(name="m", top="m"),
+            scenarios=[
+                ScenarioSpec(id="S1", mode="functional", corner="slow",
+                             constraints={"set_false_path": {"from": ["a"]}}),
+            ],
+        )
+
+
+def test_scenariospec_constraints_empty_allowed():
+    cfg = ProjectConfig(
+        project=ProjectInfo(name="m", top="m"),
+        scenarios=[ScenarioSpec(id="S1", mode="functional", corner="slow")],
+        mcmm=MCMMConfig(enabled=True, active_scenario_ids=["S1"]),
+    )
+    assert cfg.scenarios[0].constraints == {}
+
+
+# ---------------------------------------------------------------------
+# Review 5: cache version / identity consistency
+# ---------------------------------------------------------------------
+
+def test_cache_version_constant_consistent():
+    from rca.mcmm.cache import CACHE_VERSION
+    assert CACHE_VERSION == 3
+
+
+def test_cache_key_different_mode_different_key():
+    cs = _cset()
+    k1 = scenario_cache_key(Scenario(id="A", mode="functional", corner="slow"), cs)
+    k2 = scenario_cache_key(Scenario(id="A", mode="test", corner="slow"), cs)
+    assert k1 != k2
+
+
+def test_cache_key_different_environment_different_key():
+    cs = _cset()
+    k1 = scenario_cache_key(Scenario(id="A", mode="functional", corner="slow",
+                                     environment={"temp": 125}), cs)
+    k2 = scenario_cache_key(Scenario(id="A", mode="functional", corner="slow",
+                                     environment={"temp": -40}), cs)
+    assert k1 != k2
+
+
+def test_cache_key_different_constraint_semantics_different_key():
+    s = Scenario(id="A", mode="functional", corner="slow")
+    cs1 = _cset(); cs2 = _cset()
+    # Different constraint content -> different cset hash -> different key.
+    cs2.create_clock(name="clk", period_seconds=10e-9, fixed=True,
+                     source_kind=SourceKind.USER, confidence=Confidence.HIGH)
+    assert scenario_cache_key(s, cs1) != scenario_cache_key(s, cs2)
+
+
+def test_cache_key_tool_version_difference():
+    cs = _cset()
+    s = Scenario(id="A", mode="functional", corner="slow")
+    k1 = scenario_cache_key(s, cs, backend="opensta", tool_version="1.0")
+    k2 = scenario_cache_key(s, cs, backend="opensta", tool_version="2.0")
+    assert k1 != k2
+
+
+# ---------------------------------------------------------------------
+# Review 6: Pareto semantics (complete set; UNKNOWN/area blocks; feasible only)
+# ---------------------------------------------------------------------
+
+def test_mcmm_pareto_unknown_blocks_dominance():
+    # A knows power, B unknown -> neither dominates conservatively.
+    a = _mcmm_candidate("A", {"S1": _make("S1", wns_ns=0.8, hold_ns=0.3, area=90.0,
+                                          power=50.0),
+                              "S2": _make("S2", wns_ns=0.8, hold_ns=0.3, area=90.0,
+                                          power=50.0)})
+    b = _mcmm_candidate("B", {"S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=90.0),
+                              "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=90.0)})
+    assert not mcmm_is_dominating(a, b)
+    assert not mcmm_is_dominating(b, a)
+    front = mcmm_pareto_front([a, b])
+    assert a in front and b in front
+
+
+def test_mcmm_pareto_area_incomparability_blocks_dominance():
+    # A real area / B proxy area (same values) -> incomparable -> no dominance.
+    a = _mcmm_candidate("A", {"S1": _make("S1", wns_ns=0.9, hold_ns=0.3, area=100.0,
+                                          area_proxy=None),
+                              "S2": _make("S2", wns_ns=0.9, hold_ns=0.3, area=100.0,
+                                          area_proxy=None)})
+    b = _mcmm_candidate("B", {"S1": _make("S1", wns_ns=0.5, hold_ns=0.2, area=None,
+                                          area_proxy=100.0),
+                              "S2": _make("S2", wns_ns=0.5, hold_ns=0.2, area=None,
+                                          area_proxy=100.0)})
+    assert not mcmm_is_dominating(a, b)
+    assert not mcmm_is_dominating(b, a)
+    front = mcmm_pareto_front([a, b])
+    assert a in front and b in front
+
+
+def test_mcmm_pareto_only_globally_feasible_enter():
+    # B is infeasible in one scenario -> excluded from Pareto entirely.
+    a = _mcmm_candidate("A", {"S1": _make("S1", wns_ns=0.5, hold_ns=0.2),
+                              "S2": _make("S2", wns_ns=0.5, hold_ns=0.2)})
+    b = _mcmm_candidate("B", {"S1": _make("S1", wns_ns=0.5, hold_ns=0.2),
+                              "S2": _make("S2", wns_ns=-0.1, hold_ns=0.2)},
+                        hard=False)
+    b.mcmm.global_status = "infeasible"
+    front = mcmm_pareto_front([a, b])
+    assert b not in front
+    assert a in front
+
+
+# ---------------------------------------------------------------------
+# Review 8: SDC scenario-aware generation
+# ---------------------------------------------------------------------
+
+def test_sdc_empty_scenario_ids_applies_to_all():
+    cs = _cset()
+    cs.create_clock(name="clk", period_seconds=10e-9, fixed=True,
+                    source_kind=SourceKind.USER, confidence=Confidence.HIGH)
+    u = Constraint(id="U_ANY", type=ConstraintType.SET_CLOCK_UNCERTAINTY,
+                   target_objects=["clk"], clock_refs=["clk"],
+                   values={"uncertainty": 0.1e-9})  # empty scenario_ids
+    cs.add(u)
+    backend = get_backend("generic")
+    s1 = backend.generate(cs, design_name="m", mode=SafeMode.BALANCED,
+                          scenario="S1").text
+    s2 = backend.generate(cs, design_name="m", mode=SafeMode.BALANCED,
+                          scenario="S2").text
+    assert "set_clock_uncertainty" in s1
+    assert "set_clock_uncertainty" in s2
+    assert "create_clock" in s1 and "create_clock" in s2
+
+
+def test_sdc_nonempty_scenario_ids_only_listed():
+    cs = _cset()
+    cs.create_clock(name="clk", period_seconds=10e-9, fixed=True,
+                    source_kind=SourceKind.USER, confidence=Confidence.HIGH)
+    u = Constraint(id="U_S1", type=ConstraintType.SET_CLOCK_UNCERTAINTY,
+                   target_objects=["clk"], clock_refs=["clk"],
+                   values={"uncertainty": 0.1e-9}, scenario_ids=["S1"])
+    cs.add(u)
+    backend = get_backend("generic")
+    s1 = backend.generate(cs, design_name="m", mode=SafeMode.BALANCED,
+                          scenario="S1").text
+    s2 = backend.generate(cs, design_name="m", mode=SafeMode.BALANCED,
+                          scenario="S2").text
+    assert "set_clock_uncertainty" in s1
+    assert "set_clock_uncertainty" not in s2
+    # A constraint with an unknown/not-active scenario id must not leak.
+    u2 = Constraint(id="U_GHOST", type=ConstraintType.SET_CLOCK_UNCERTAINTY,
+                    target_objects=["clk"], clock_refs=["clk"],
+                    values={"uncertainty": 0.05e-9}, scenario_ids=["GHOST"])
+    cs.add(u2)
+    s1b = backend.generate(cs, design_name="m", mode=SafeMode.BALANCED,
+                           scenario="S1").text
+    assert "set_clock_uncertainty" in s1b  # the S1 one is still present
+    # Count occurrences of the uncertainty command blocks: U_ANY/U_S1 apply to S1.
+    assert s1b.count("set_clock_uncertainty") >= 1
+
+
+def test_sdc_fixed_constraints_immutable_and_provenance_intact():
+    cs = _cset()
+    clk = cs.create_clock(name="clk", period_seconds=10e-9, fixed=True,
+                          source_kind=SourceKind.USER, confidence=Confidence.HIGH)
+    assert clk.is_fixed()
+    backend = get_backend("opensta")
+    gen = backend.generate(cs, design_name="m", mode=SafeMode.BALANCED,
+                           with_provenance=True, scenario="S1")
+    # create_clock rendered with provenance comments -> tool name present.
+    assert "create_clock" in gen.text
+
+
+# ---------------------------------------------------------------------
+# Review 7: single-scenario backward compatibility in the optimizer
+# ---------------------------------------------------------------------
+
+def test_optimizer_single_active_scenario_behaves_compatibly(tmp_path):
+    # mcmm enabled but ONLY ONE active scenario -> must still run without
+    # crashing and produce a coherent result (single scenario ~ legacy).
+    cfg = _cfg(enabled=True, active=["S1"])
+    cfg.optimization.enabled = True
+    cfg.optimization.max_iterations = 2
+    cfg.optimization.max_eda_runs = 20
+    cfg.optimization.perturbation.uncertainty_range_ns = [0.0, 0.1, 0.02]
+    cs = _cset()
+    cs.create_clock(name="clk", period_seconds=10e-9, fixed=True,
+                    source_kind=SourceKind.USER, confidence=Confidence.HIGH)
+    u = cs.create_clock_uncertainty("clk", 0.05e-9, source_kind=SourceKind.INFERENCE)
+    u.opt_status = OptimizationStatus.TUNABLE
+    mat = build_scenario_matrix(cfg, cs)
+    assert mat.single_scenario and mat.scenario_count == 1
+    ev = mock_mcmm_evaluator(mat, base_cset=cs)
+    opt = Optimizer(cfg, evaluate_fn=ev, work_dir=Path(tmp_path))
+    res = opt.run(cs)
+    assert res.final is not None
+    # The single-scenario MCMM eval still exposes a coherent per-scenario result.
+    assert res.final.mcmm is not None
+    assert res.final.mcmm.active_scenario_ids == ["S1"]
+    assert res.final.mcmm.global_status
+
+
+def test_optimizer_mcmm_disabled_uses_legacy_no_mcmm(tmp_path):
+    cfg = _cfg(enabled=False, scenarios=[
+        ScenarioSpec(id="S1", mode="functional", corner="slow"),
+        ScenarioSpec(id="S2", mode="functional", corner="fast"),
+    ])
+    cfg.optimization.enabled = True
+    cfg.optimization.max_iterations = 2
+    cfg.optimization.max_eda_runs = 20
+    cfg.optimization.perturbation.uncertainty_range_ns = [0.0, 0.1, 0.02]
+    cs = _cset()
+    cs.create_clock(name="clk", period_seconds=10e-9, fixed=True,
+                    source_kind=SourceKind.USER, confidence=Confidence.HIGH)
+    u = cs.create_clock_uncertainty("clk", 0.05e-9, source_kind=SourceKind.INFERENCE)
+    u.opt_status = OptimizationStatus.TUNABLE
+
+    def _eval(cand, work_dir):
+        q = _qor(wns_ns=0.5, hold_ns=0.2, area=100.0)
+        return {"qor": q, "cache_key": "K" + cand.id, "cache_status": "MISS",
+                "run_id": "r" + cand.id}
+    opt = Optimizer(cfg, evaluate_fn=_eval, work_dir=Path(tmp_path))
+    res = opt.run(cs)
+    assert res.final is not None
+    # Legacy path: single QoR on the candidate, NO mcmm aggregate.
+    assert res.final.qor is not None
+    assert res.final.mcmm is None

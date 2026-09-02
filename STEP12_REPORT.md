@@ -97,6 +97,13 @@ Precedence: invalid ⇒ blocked ⇒ infeasible ⇒ feasible. The status vocabula
 scenario retained on the per-scenario record. `limiting_scenarios` records the
 failing / binding scenario ids.
 
+**Missing results are never silently skipped.** A required/active scenario with
+no recorded `ScenarioQoR` (or which is referenced but has no scenario definition)
+is synthesised as `blocked` with the deterministic reason `missing_scenario_result`
+and retained in `limiting_scenarios`; a candidate is therefore globally infeasible
+whenever any required scenario is missing (or failed/blocked). A healthy scenario
+can never rescue a missing/failing one.
+
 ## 6. Objective aggregation
 
 `aggregate_objectives()` is conservative/binding:
@@ -108,6 +115,11 @@ failing / binding scenario ids.
 - **UNKNOWN stays UNKNOWN**: if any required scenario lacks the metric, the
   aggregate value is `None`/unknown — never averaged, never fabricated.
 - The **limiting scenario(s)** for each objective are retained.
+- **Area:** `real + real` and `proxy + proxy` are comparable (binding per
+  direction); `real + proxy` is INCOMPARABLE; if **any** required scenario has
+  UNKNOWN area the global area is **UNKNOWN** (never aggregated over only the
+  known scenarios, never fabricated to zero/placeholder). The scenario IDs
+  responsible for the unknown are retained.
 
 ## 7. Area semantics
 
@@ -144,6 +156,16 @@ a binding global signal (worst utilisation, worst headroom) with its limiting
 scenario. `margin_utilization` is **diagnostic only**: it is excluded from
 `OBJECTIVE_SPECS` / the Pareto scalar and is a secondary final-selection signal.
 
+**The MCMM baseline is evaluated per scenario.** `MCMMEvaluator` derives a
+per-scenario baseline `(setup_wns, hold_wns)` map (from the baseline candidate's
+own per-scenario QoR when the candidate IS the baseline, otherwise a single
+baseline evaluation is cached) and feeds it to `global_margin()` so the exact
+Step-11 math runs for every candidate against a real per-scenario baseline. The
+baseline map is retained in MCMM provenance. This is wired through the
+**production** `Optimizer` path (not just the helper): the baseline candidate is
+evaluated per scenario first, and every candidate's per-scenario margin is
+populated against that baseline, with a deterministic global limiting scenario.
+
 ## 10. Pareto policy
 
 `mcmm_is_dominating()` / `mcmm_pareto_front()` represent the **complete scenario
@@ -159,10 +181,12 @@ Deterministic ordering by candidate id keeps the front reproducible.
 
 `scenario_cache_key()` / `mcmm_run_cache_key()` compose `stable_hash_cset()` with
 scenario identity (id, mode, corner, libraries, parasitics, environment) and the
-backend / tool identity + version. `scenario_semantic_key()` distinguishes
-mode/corner so `functional/slow` can never reuse a `functional/fast` entry unless
-the scenario semantics are identical. `stable_hash_cset()` is preserved and
-includes sorted `scenario_ids`.
+backend / tool identity + version. A single canonical `CACHE_VERSION = 3`
+constant is used in both functions and in the docs/tests so the versioning policy
+is consistent. `scenario_semantic_key()` distinguishes mode/corner so
+`functional/slow` can never reuse a `functional/fast` entry unless the scenario
+semantics are identical. `stable_hash_cset()` is preserved and includes sorted
+`scenario_ids`.
 
 ## 12. Candidate generation
 
@@ -255,8 +279,8 @@ python -m rca.cli report examples/mcmm_counter/project.yaml
 
 - Step-11 regression gate: `python -m pytest tests/unit/test_pareto.py -q` ⇒
   **125 passed**.
-- New MCMM tests: `python -m pytest tests/unit/test_mcmm.py -q` ⇒ **45 passed**.
-- Full suite: `python -m pytest -q` ⇒ **735 passed** (0 failed), including the
+- New MCMM tests: `python -m pytest tests/unit/test_mcmm.py -q` ⇒ **70 passed**.
+- Full suite: `python -m pytest -q` ⇒ **760 passed** (0 failed), including the
   cross-process determinism tests once `pyslang` is installed. (Without
   `pyslang`, the two `SlangAdapter`-based determinism / parser tests report an
   honest environment limitation.)
@@ -270,9 +294,13 @@ python -m rca.cli report examples/mcmm_counter/project.yaml
 - No real EDA multi-corner signoff is claimed; only mock and orchestration are
   validated in this environment (`pyslang`/Yosys/OpenSTA availability is the
   caller's responsibility).
-- `ScenarioSpec.constraints` (scenario-associated constraint definitions from
-  YAML) is carried but not yet materialised into UCM constraints; scenario
-  specificity is expressed through `Constraint.scenario_ids` instead.
+- `ScenarioSpec.constraints` is **explicitly rejected** when non-empty
+  (deterministic `ValueError` with a clear message). It is a reserved,
+  currently-unsupported configuration block and is never silently ignored.
+  Scenario-specific constraints must be expressed via `Constraint.scenario_ids`.
+- A **pre-existing** `report` command crash (coverage key mismatch in
+  `src/rca/explanation/generator.py`) was fixed so the MCMM-aware `report`
+  path is reachable; this is unrelated to MCMM semantics.
 
 ## 21. Reproducibility
 

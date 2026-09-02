@@ -159,10 +159,21 @@ def global_feasibility(result: MCMMResult,
         result.limiting_scenarios = []
         return result
 
-    # Classify every active scenario.
+    # Every required/active scenario MUST have a result.  A missing result
+    # (or a referenced scenario with no definition) is treated conservatively
+    # as BLOCKED — it can NEVER make the candidate globally feasible.  This is
+    # deliberately the opposite of silently skipping it.
     for sid in active:
         sqor = result.scenario_results.get(sid)
         if sqor is None:
+            # A required scenario with no recorded result at all.
+            sqor = ScenarioQoR(candidate_id=result.candidate_id, scenario_id=sid)
+            sqor.status = BLOCKED
+            sqor.blocked = True
+            sqor.feasible = False
+            sqor.infeasible_reason = "missing_scenario_result"
+            sqor.diagnostics = [f"scenario={sid}: missing_scenario_result"]
+            result.scenario_results[sid] = sqor
             continue
         scenario_feasibility(
             sqor,
@@ -290,20 +301,30 @@ def aggregate_objectives(result: MCMMResult,
         if is_area:
             # Area source semantics (Step 12 §6).
             source_set = set(area_sources.values())
-            if not known:
+            if unknown_sids:
+                # ANY required scenario with UNKNOWN area => global area is
+                # UNKNOWN.  Never aggregate only the known scenarios and never
+                # fabricate zero/another placeholder.  Retain the IDs that are
+                # responsible for the unknown (Step 12 §6).
+                agg.unknown = True
+                agg.incomparable = False
+                agg.value = None
+                agg.area_source = AREA_UNKNOWN
+                agg.limiting = sorted(unknown_sids)
+            elif not known:
+                # Every required scenario is UNKNOWN.
                 agg.unknown = True
                 agg.area_source = AREA_UNKNOWN
                 agg.limiting = sorted(unknown_sids)
-            elif source_set == {AREA_REAL} or source_set == {AREA_PROXY}:
-                agg.area_source = next(iter(source_set))
-                agg.value = _binding_value(known, direction)
-                agg.limiting = _limiting_sids(known, agg.value)
             elif len(source_set) == 1:
+                # All known scenarios share a single source (real or proxy) and
+                # none are unknown -> comparable (binding per direction).
                 agg.area_source = next(iter(source_set))
                 agg.value = _binding_value(known, direction)
                 agg.limiting = _limiting_sids(known, agg.value)
             else:
-                # Mixed real/proxy => INCOMPARABLE.
+                # Mixed real/proxy sources, all known -> INCOMPARABLE
+                # (no numeric conversion ever implied).
                 agg.unknown = True
                 agg.incomparable = True
                 agg.area_source = "mixed"
@@ -690,6 +711,8 @@ def _compare_global_metric(name: str, a, b) -> int | None:
 
 
 def _glob_value_cmp(a_mcmm, b_mcmm, name: str, *, higher: bool) -> int | None:
+    from ..qor.objectives import _cmp_higher_better, _cmp_lower_better
+
     aa = a_mcmm.objectives.get(name)
     bb = b_mcmm.objectives.get(name)
     if aa is None or bb is None or aa.unknown or bb.unknown or aa.incomparable or bb.incomparable:
