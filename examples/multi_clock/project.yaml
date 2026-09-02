@@ -1,0 +1,39 @@
+schema_version: "1.0"
+project:
+  name: two_clocks
+  top: two_clocks
+sources:
+  files:
+    - rtl/two_clocks.sv
+constraints:
+  user:
+    clocks:
+      - name: clk_a
+        period: 10ns
+        fixed: true
+      - name: clk_b
+        period: 15ns
+        fixed: true
+    io:
+      inputs:
+        a_data:
+          delay: 2ns
+          clock: clk_a
+        a_valid:
+          delay: 1ns
+          clock: clk_a
+      outputs:
+        b_data:
+          delay: 2ns
+          clock: clk_b
+        b_valid:
+          delay: 1ns
+          clock: clk_b
+    relationships:
+      - clocks: [clk_a, clk_b]
+        relationship: asynchronous
+        fixed: true
+flow:
+  backend: generic
+optimization:
+  enabled: false

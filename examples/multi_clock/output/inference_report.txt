@@ -1,0 +1,40 @@
+RTL Constraint Assistant
+========================
+
+Design: two_clocks
+Top module: two_clocks
+Files: 1
+
+CLOCKS
+------
+  clk_a        detected / posedge /       10.000 ns / FIXED
+  clk_b        detected / posedge /       15.000 ns / FIXED
+
+RESETS
+------
+  rst_n        asynchronous / active_low
+
+CLOCK RELATIONSHIPS
+-------------------
+  clk_a <-> clk_b : ASYNCHRONOUS (confidence=HIGH)
+
+MISSING INFORMATION
+-------------------
+
+CONSTRAINT QUALITY
+------------------
+  Clock source coverage: 100.0%
+  Input timing coverage:  100.0%
+  Output timing coverage: 100.0%
+  Validation errors: 0
+  Validation warnings: 0
+
+GENERATED CONSTRAINTS (7)
+------------------------------
+  [CLK0001] create_clock                   targets=['two_clocks.clk_a'] values={'name': 'clk_a', 'period': 1e-08}
+  [CLK0002] create_clock                   targets=['two_clocks.clk_b'] values={'name': 'clk_b', 'period': 1.5000000000000002e-08}
+  [INP0003] set_input_delay                targets=['a_data'] values={'clock': 'clk_a', 'delay': 2e-09, 'min_max': 'max'}
+  [INP0004] set_input_delay                targets=['a_valid'] values={'clock': 'clk_a', 'delay': 1e-09, 'min_max': 'max'}
+  [OUT0005] set_output_delay               targets=['b_data'] values={'clock': 'clk_b', 'delay': 2e-09, 'min_max': 'max'}
+  [OUT0006] set_output_delay               targets=['b_valid'] values={'clock': 'clk_b', 'delay': 1e-09, 'min_max': 'max'}
+  [CG0007] set_clock_groups               targets=[] values={'groups': [['clk_a'], ['clk_b']], 'relationship': 'asynchronous'}
