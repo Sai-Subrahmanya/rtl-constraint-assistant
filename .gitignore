@@ -8,15 +8,31 @@ dist/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
 output/
 examples/*/output/
 *.log
 *.sdc.bak
-results/
+# Preserve the empty results/ directory via .gitkeep while ignoring runtime outputs
+results/*
+!results/.gitkeep
+results/runs/
 .venv/
 .env
 .idea/
 .vscode/
 .DS_Store
 node_modules/
+
+# Sandbox / runtime state (kept from working sandbox configuration)
+.arena/
+.cache/
+.next/
+.nox/
+.npm/
+.nuxt/
+.output/
+.parcel-cache/
+.tox/
+.turbo/
