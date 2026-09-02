@@ -166,6 +166,52 @@ def _mcmm_per_scenario_sdc(cset: ConstraintSet, backend, design_name: str,
     return res.text
 
 
+def _print_power_summary(console, q: dict, *, indent: str = "  ") -> None:
+    """Render report-derived power without implying a live/silicon measurement."""
+    status = q.get("power_status", "UNAVAILABLE")
+    total = q.get("power_total", q.get("power"))
+    if status == "AVAILABLE" and total is not None:
+        console.print(f"{indent}Tool-reported power: {total:.6g} W")
+        dynamic = q.get("power_dynamic")
+        leakage = q.get("power_leakage")
+        if dynamic is not None or leakage is not None:
+            pieces = []
+            if dynamic is not None:
+                pieces.append(f"dynamic={dynamic:.6g} W")
+            if leakage is not None:
+                pieces.append(f"leakage={leakage:.6g} W")
+            console.print(f"{indent}  " + "  ".join(pieces))
+    else:
+        console.print(f"{indent}Power: {status}")
+    provenance = q.get("power_provenance") or {}
+    if provenance:
+        report_path = provenance.get("report_path") or "-"
+        digest = provenance.get("sha256") or "-"
+        fmt = provenance.get("format") or "-"
+        console.print(f"{indent}Power provenance: format={fmt} path={report_path} sha256={digest}")
+
+
+def _latest_qor_summary(cfg: ProjectConfig) -> dict | None:
+    """Read the most recently modified completed QoR artifact, if any.
+
+    ``rca report`` remains a reporting command: it never runs a tool or parses
+    a new report on its own.  It only presents report-derived QoR already
+    recorded by ``run-sta``/the flow.
+    """
+    runs_dir = Path(cfg.flow.output_dir) / "runs"
+    if not runs_dir.is_dir():
+        return None
+    paths = sorted(runs_dir.glob("*/qor.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in paths:
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(candidate, dict):
+                return candidate
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
+
 def _print_mcmm_result(console, m: "MCMMResult", matrix) -> None:
     """Print an MCMMResult with full per-scenario auditability (Step 12 §14)."""
     from rich.table import Table
@@ -661,14 +707,21 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
                 sources=sources, include_dirs=include_dirs, defines=defines,
                 output_dir=Path(cfg.flow.output_dir), backend=backend,
                 candidate_id=f"baseline_{scenario.id}",
-                scenario=scenario.id, corner=scenario.corner,
+                scenario=scenario.id, corner=scenario.corner, mode=scenario.mode,
                 allow_partial_sdc=allow_partial_sdc, force=force,
             )
             per_scenario[scenario.id] = res
-        am.write_json("mcmm_report.json", per_scenario)
+        # ``qor_result`` is an internal canonical object used by optimizer
+        # callbacks; persist the established JSON summary, not its repr.
+        am.write_json("mcmm_report.json", {
+            sid: {key: value for key, value in res.items() if key != "qor_result"}
+            for sid, res in per_scenario.items()
+        })
         for sid, res in per_scenario.items():
             console.print(f"[cyan]Scenario {sid}[/cyan]  status={res.get('status')}  "
-                          f"run_id={res.get('run_id')}  qor={res.get('qor')}")
+                          f"run_id={res.get('run_id')}")
+            if isinstance(res.get("qor"), dict):
+                _print_power_summary(console, res["qor"], indent="    ")
         return
 
     # Generate SDC (using balanced safe mode by default; user can switch via --allow-partial)
@@ -685,12 +738,23 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
     include_dirs = resolve_include_dirs(cfg)
     defines = dict(getattr(cfg, "sources", None).defines or {}) if getattr(cfg, "sources", None) else {}
 
+    # Preserve a configured single scenario's identity when present so a
+    # scenario-labelled power report is never silently ignored or rebound.
+    flow_scenario = "default"
+    flow_corner = "default"
+    flow_mode = "default"
+    if matrix.scenario_count == 1 and cfg.scenarios:
+        only_scenario = matrix.active_scenarios()[0]
+        flow_scenario = only_scenario.id
+        flow_corner = only_scenario.corner
+        flow_mode = only_scenario.mode
     result = run_flow(
         cfg=cfg, cset=cset, sdc_text=sdc_text,
         sdc_generation_status=gen.status if isinstance(gen.status, str) else gen.status.value,
         sources=sources, include_dirs=include_dirs, defines=defines,
         output_dir=Path(cfg.flow.output_dir), backend=backend,
-        candidate_id="baseline", allow_partial_sdc=allow_partial_sdc,
+        candidate_id="baseline", scenario=flow_scenario, corner=flow_corner, mode=flow_mode,
+        allow_partial_sdc=allow_partial_sdc,
         force=force,
     )
 
@@ -722,7 +786,7 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
     if result.get("qor"):
         q = result["qor"]
         console.print("\n[bold]TIMING[/bold]")
-        def _ns(x): return f"{x*1e9:.3f} ns" if isinstance(x,(int,float)) else "n/a"
+        def _ns(x): return f"{x:.3f} ns" if isinstance(x, (int, float)) else "n/a"
         console.print(f"  Setup WNS: {_ns(q.get('setup_wns_ns'))}   TNS: {_ns(q.get('setup_tns_ns'))}  violations={q.get('setup_violations')}")
         console.print(f"  Hold  WNS: {_ns(q.get('hold_wns_ns'))}   TNS: {_ns(q.get('hold_tns_ns'))}  violations={q.get('hold_violations')}")
         console.print("\n[bold]QoR[/bold]")
@@ -730,7 +794,7 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
         area_label = "area" if q.get("area") is not None else "area_proxy (cell_count)"
         console.print(f"  Cell count: {q.get('cell_count')}   FF: {q.get('ff_count')}")
         console.print(f"  {area_label}: {area}")
-        console.print(f"  Power: {q.get('power_status','UNAVAILABLE')}")
+        _print_power_summary(console, q)
         if q.get("critical_setup"):
             cs = q["critical_setup"]
             console.print(f"  Worst setup path: {cs.get('startpoint')} -> {cs.get('endpoint')}  "
@@ -777,15 +841,20 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
             cand_cset = cand.constraint_set or cset
             sdc_text = _mcmm_per_scenario_sdc(
                 cand_cset, sdc_backend, cfg.project.name, matrix, scenario.id)
-            sdc_p = work / f"{cand.id}.{scenario.id}.sdc"
-            sdc_p.parent.mkdir(parents=True, exist_ok=True)
-            sdc_p.write_text(sdc_text, encoding="utf-8")
-            yosys = YosysBackend()
-            ndir = work / f"{cand.id}_{scenario.id}"
-            netlist = yosys.synthesize(sources, cfg.top_module(), libs, ndir)
-            sta = OpenSTABackend()
-            return sta.run_sta(netlist, sdc_p, libs, ndir, cfg.top_module(),
-                               corner=scenario.corner)
+            flow_result = run_flow(
+                cfg=cfg, cset=cand_cset, sdc_text=sdc_text,
+                sdc_generation_status="COMPLETE", sources=sources,
+                include_dirs=resolve_include_dirs(cfg),
+                output_dir=Path(cfg.flow.output_dir), backend="yosys_opensta",
+                candidate_id=cand.id, scenario=scenario.id, corner=scenario.corner,
+                mode=scenario.mode,
+            )
+            return {
+                "qor": flow_result.get("qor_result"),
+                "cache_key": flow_result.get("cache_key", ""),
+                "cache_status": flow_result.get("status", ""),
+                "run_id": flow_result.get("run_id", ""),
+            }
 
         if backend == "mock":
             evaluate = mock_mcmm_evaluator(matrix, base_cset=cset)
@@ -797,15 +866,17 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
         def evaluate(cand, work):
             cand_cset = cand.constraint_set or cset
             sdc_text = sdc_backend.render(cand_cset, design_name=cfg.project.name)
-            sdc_p = work / f"{cand.id}.sdc"
-            sdc_p.write_text(sdc_text, encoding="utf-8")
             if backend == "mock":
                 tool = MockEDA()
                 return tool.evaluate_candidate(cand, work)
-            yosys = YosysBackend()
-            netlist = yosys.synthesize(sources, cfg.top_module(), libs, work / cand.id)
-            sta = OpenSTABackend()
-            return sta.run_sta(netlist, sdc_p, libs, work / cand.id, cfg.top_module())
+            flow_result = run_flow(
+                cfg=cfg, cset=cand_cset, sdc_text=sdc_text,
+                sdc_generation_status="COMPLETE", sources=sources,
+                include_dirs=resolve_include_dirs(cfg),
+                output_dir=Path(cfg.flow.output_dir), backend="yosys_opensta",
+                candidate_id=cand.id,
+            )
+            return flow_result.get("qor_result")
 
     opt = Optimizer(cfg, evaluate_fn=evaluate, work_dir=runs_dir)
     result = opt.run(cset)
@@ -838,15 +909,20 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
                 sq = m.scenario_results.get(sid)
                 if sq is None:
                     continue
-                s_wns = sq.qor.setup_wns * 1e9 if sq.qor and sq.qor.setup_wns is not None else None
-                h_wns = sq.qor.hold_wns * 1e9 if sq.qor and sq.qor.hold_wns is not None else None
+                s_wns = (f"{sq.qor.setup_wns * 1e9:.3f}" if sq.qor and sq.qor.setup_wns is not None else "-")
+                h_wns = (f"{sq.qor.hold_wns * 1e9:.3f}" if sq.qor and sq.qor.hold_wns is not None else "-")
                 console.print(f"    [{sid} {sq.mode}/{sq.corner}] {sq.status}  "
-                              f"setup={s_wns:.3f}ns  hold={h_wns:.3f}ns  "
+                              f"setup={s_wns}ns  hold={h_wns}ns  "
                               f"util={('%.2f' % sq.margin_utilization) if sq.margin_utilization is not None else '-'}")
+                if sq.qor:
+                    _print_power_summary(console, sq.qor.summary(), indent="      ")
         elif q:
-            console.print(f"  Setup WNS: {q.setup_wns*1e9 if q.setup_wns is not None else '-':.3f} ns")
-            console.print(f"  Hold WNS:  {q.hold_wns*1e9 if q.hold_wns is not None else '-':.3f} ns")
-            console.print(f"  Area:      {q.area_total}  Power: {q.power_total}")
+            s_wns = f"{q.setup_wns * 1e9:.3f} ns" if q.setup_wns is not None else "-"
+            h_wns = f"{q.hold_wns * 1e9:.3f} ns" if q.hold_wns is not None else "-"
+            console.print(f"  Setup WNS: {s_wns}")
+            console.print(f"  Hold WNS:  {h_wns}")
+            console.print(f"  Area:      {q.area_total}")
+            _print_power_summary(console, q.summary())
     if dashboard:
         _run_dashboard(cfg=cfg)
 
@@ -862,9 +938,10 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
     cset, _ = _do_inference(cfg, design, tg, ledger)
     val_result = run_validation(design, tg, cset, formal_backend=_formal_backend(cfg))
     missing = tg.missing_information()
+    latest_qor = _latest_qor_summary(cfg)
     text = design_report(design.summary(), tg.summary(), val_result.as_dict(),
                          val_result.coverage.as_dict() if val_result.coverage else None,
-                         cset, missing)
+                         cset, missing, latest_qor)
     am = _am(cfg)
     am.write_text("inference_report.txt", text)
     _maybe_print_matrix(cfg, cset, console)
@@ -872,6 +949,7 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
                   {"design": design.summary(), "timing": tg.summary(),
                    "validation": val_result.as_dict(),
                    "coverage": val_result.coverage.as_dict() if val_result.coverage else None,
+                   "qor": latest_qor,
                    "constraints": cset.snapshot()})
     sys.stdout.write(text)
 

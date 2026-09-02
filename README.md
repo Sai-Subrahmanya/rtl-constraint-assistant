@@ -216,6 +216,36 @@ MCMM provenance details.
 
 ---
 
+## Configured OpenROAD/OpenSTA power reports (Step 20)
+
+`rca run-sta` and real `rca optimize` flows can ingest one explicitly
+configured OpenROAD/OpenSTA-style `report_power` group-summary text report per
+scenario. RCA parses the final `Total` row only when the report has its
+Internal, Switching, Leakage, and Total columns and an explicit supported unit;
+it normalizes W, mW, uW/µW, nW, and pW to watts.
+
+```yaml
+flow:
+  power_reports:
+    - format: openroad_report_power
+      path: reports/func_slow.power.rpt
+      scenario_id: FUNC_SLOW    # required for MCMM; optional for one scenario
+```
+
+`Total` becomes the existing QoR `power`/`power_total`; dynamic power is
+`Internal + Switching` only when both cells are reported, and leakage comes
+from the Leakage cell. Missing, ambiguous, malformed, invalid, or unsupported
+reports never become zero. Each accepted report carries its path, SHA-256,
+format, unit, scenario/mode/corner, and parser diagnostics into the existing
+QoR summary and run manifest; its content is cache-relevant.
+
+This feature ingests a **configured tool report**. It does not run a power tool,
+produce activity data, or claim physical/silicon measurement. Mock flow remains
+explicitly mock and power-unavailable. See `STEP20_POWER_REPORT.md` for the
+complete supported grammar, status policy, MCMM behavior, and limitations.
+
+---
+
 ## Enhancements added beyond the manual
 
 With your permission, the following enhancements were incorporated (documented here):
@@ -224,7 +254,7 @@ With your permission, the following enhancements were incorporated (documented h
 2. **Rich CLI** for beautiful, structured console output.
 3. **FastAPI web dashboard** with live constraint/coverage/QoR views (`rca dashboard`).
 4. **JSON Schema** for the project configuration (versioned).
-5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests), Step-12 MCMM coverage (70 tests), Step-13 validation scenarios (40 tests), Step-14 SymbiYosys formal-adapter coverage (11 tests), and Step-15 semantic-comparison audit coverage (67 tests) — full suite **816 collected / 816 passed**. Coverage spans parser, constraints, SDC parsing/generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), formal proof verdicts/provenance, exceptions, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
+5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests), Step-12 MCMM coverage (70 tests), Step-13 validation scenarios (40 tests), Step-14 SymbiYosys formal-adapter coverage (11 tests), Step-15 semantic-comparison audit coverage (67 tests), and Step-20 power-report ingestion coverage (34 tests) — full suite **850 collected / 850 passed**. Coverage spans parser, constraints, SDC parsing/generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), formal proof verdicts/provenance, configured power reports, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
 6. **Deterministic hashing** utilities for reproducibility/caching.
 
 ---

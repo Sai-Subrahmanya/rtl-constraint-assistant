@@ -52,7 +52,8 @@ def explain_candidate(c: Candidate, baseline: Candidate | None = None) -> str:
 
 def design_report(design_summary: dict[str, Any], tg_summary: dict[str, Any],
                   validation: dict[str, Any] | None, coverage: dict[str, Any] | None,
-                  cset: ConstraintSet, missing: list[dict[str, str]]) -> str:
+                  cset: ConstraintSet, missing: list[dict[str, str]],
+                  qor_summary: dict[str, Any] | None = None) -> str:
     """Produce a human-readable report (Manual §101)."""
     lines: list[str] = []
     a = lines.append
@@ -96,6 +97,29 @@ def design_report(design_summary: dict[str, Any], tg_summary: dict[str, Any],
         summary = validation.get("summary", {})
         a(f"  Validation errors: {summary.get('errors', 0)}")
         a(f"  Validation warnings: {summary.get('warnings', 0)}")
+    a("")
+    a("POWER (MOST RECENT RECORDED RUN)")
+    a("---------------------------------")
+    if qor_summary is None:
+        a("  No completed QoR artifact is available. This command did not run a power tool.")
+    else:
+        status = qor_summary.get("power_status", "UNAVAILABLE")
+        total = qor_summary.get("power_total", qor_summary.get("power"))
+        if status == "AVAILABLE" and total is not None:
+            a(f"  Tool-reported power: {total:.6g} W")
+            dynamic = qor_summary.get("power_dynamic")
+            leakage = qor_summary.get("power_leakage")
+            if dynamic is not None:
+                a(f"  Dynamic power: {dynamic:.6g} W")
+            if leakage is not None:
+                a(f"  Leakage power: {leakage:.6g} W")
+        else:
+            a(f"  Power: {status}")
+        provenance = qor_summary.get("power_provenance") or {}
+        if provenance:
+            a(f"  Source: {provenance.get('report_path') or '-'}")
+            a(f"  Format: {provenance.get('format') or '-'}")
+            a(f"  SHA-256: {provenance.get('sha256') or '-'}")
     a("")
     a(f"GENERATED CONSTRAINTS ({len(cset)})")
     a("-" * 30)

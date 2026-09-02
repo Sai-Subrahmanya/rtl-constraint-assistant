@@ -595,9 +595,10 @@ def scalar_score(c, baseline, priorities) -> float:
         s += a * _area_for_score(q, bq)
         # Power contributes only when known on both sides (conservative).
         # UNKNOWN power is not zero and not a free win.
+        usable_power_statuses = {PowerStatus.AVAILABLE.value, PowerStatus.ESTIMATED.value}
         if (q.power is not None and bq.power is not None
-                and getattr(q, "power_status", None) != PowerStatus.UNAVAILABLE.value
-                and getattr(bq, "power_status", None) != PowerStatus.UNAVAILABLE.value
+                and getattr(q, "power_status", None) in usable_power_statuses
+                and getattr(bq, "power_status", None) in usable_power_statuses
                 and bq.power != 0):
             s += pw * (1.0 - q.power / bq.power)
     # NOTE: margin_utilization is deliberately NOT added to scalar_score —

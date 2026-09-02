@@ -33,6 +33,12 @@ from typing import Any
 
 from ..artifacts import ArtifactManager, RunManifest
 from ..constraint_model import ConstraintSet
+from ..qor.model import QoRResult
+from ..reports.power import (
+    POWER_REPORT_PARSER_VERSION,
+    parse_openroad_power_report,
+    unavailable_power_result,
+)
 from ..utils.enums import BackendKind, PowerStatus, RunStatus
 from ..utils.hashing import hash_file, hash_source_set, hash_text, stable_hash
 from ..utils.logging import get_logger
@@ -48,7 +54,7 @@ _PROJECT_LOCAL_TOOL_DIRS = ("tools", ".tools", "eda_tools", "bin")
 # logs can be skipped — policy documented in STEP10_REPORT.
 _HASHED_ARTIFACTS = {"sdc", "netlist", "synth_script", "synth_stats",
                      "sta_tcl", "sta_checks", "sta_setup_rpt", "sta_hold_rpt",
-                     "qor"}
+                     "power_report", "qor"}
 _LOG_ARTIFACTS = {"synth_log", "sta_log"}  # recorded but not integrity-hashed
 
 
@@ -154,6 +160,127 @@ def _resolve_rel(run_dir: Path, rel: str) -> Path:
     return (run_dir / p).resolve()
 
 
+def _power_report_input(cfg: Any, scenario: str) -> dict[str, Any]:
+    """Return canonical identity for the report bound to ``scenario``.
+
+    Configuration validation enforces the MCMM mapping rules for normal
+    ``ProjectConfig`` instances.  This small defensive selector also avoids a
+    global fallback if a config-like test object bypasses Pydantic validation.
+    """
+    flow = getattr(cfg, "flow", None)
+    reports = list(getattr(flow, "power_reports", None) or [])
+    matches = [r for r in reports if getattr(r, "scenario_id", None) == scenario]
+    defaults = [r for r in reports if getattr(r, "scenario_id", None) is None]
+    selected = matches[0] if len(matches) == 1 else None
+    mcmm = getattr(cfg, "mcmm", None)
+    mcmm_enabled = bool(getattr(mcmm, "enabled", False))
+    if selected is None and not matches and not mcmm_enabled and len(defaults) == 1:
+        selected = defaults[0]
+    if selected is None:
+        return {
+            "configured": False,
+            "format": None,
+            "parser_version": POWER_REPORT_PARSER_VERSION,
+            "path": "",
+            "sha256": "",
+            "exists": False,
+            "scenario_id": scenario,
+            "producer": "",
+            "producer_version": None,
+        }
+    path = Path(str(getattr(selected, "path", "")))
+    digest = ""
+    exists = path.is_file()
+    if exists:
+        try:
+            digest = hash_file(path)
+        except OSError:
+            exists = False
+    return {
+        "configured": True,
+        "format": str(getattr(selected, "format", "")),
+        "parser_version": POWER_REPORT_PARSER_VERSION,
+        "path": str(path),
+        "sha256": digest,
+        "exists": exists,
+        # Preserve the configuration association, even when a single-scenario
+        # report omits it and ``scenario`` supplies the effective association.
+        "scenario_id": getattr(selected, "scenario_id", None) or scenario,
+        "producer": str(getattr(selected, "producer", "openroad_opensta")),
+        "producer_version": getattr(selected, "producer_version", None),
+    }
+
+
+def _stage_power_report(power_input: dict[str, Any], run_dir: Path) -> Path | None:
+    """Copy an existing configured report into the run artifact directory.
+
+    The source path and source SHA-256 stay in QoR provenance.  The staged copy
+    lets the existing run-relative manifest and integrity mechanism audit the
+    exact report consumed by this run without adding a second artifact system.
+    """
+    if not power_input.get("configured") or not power_input.get("exists"):
+        return None
+    source = Path(str(power_input["path"]))
+    if not source.is_file():
+        return None
+    target = run_dir / "configured_power_report.rpt"
+    try:
+        if source.resolve() != target.resolve():
+            shutil.copyfile(source, target)
+        return target
+    except OSError:
+        return None
+
+
+def _apply_power_report(qor: Any, power_input: dict[str, Any], *, scenario: str,
+                        mode: str | None = None, corner: str | None = None,
+                        producer_version: str | None = None) -> Any:
+    """Merge one parser-bound result into the existing canonical QoR object."""
+    # A configured producer version describes the report source; otherwise the
+    # discovered OpenSTA/OpenROAD invocation version is the best available
+    # producer evidence. Keep the latter separately in provenance below.
+    reported_version = power_input.get("producer_version") or producer_version
+    if not power_input.get("configured"):
+        parsed = unavailable_power_result(
+            scenario_id=scenario, mode=mode, corner=corner,
+            producer_version=reported_version,
+            diagnostic="No power report is configured for this scenario.",
+        )
+    elif power_input.get("format") != "openroad_report_power":
+        # Normal ProjectConfig validation rejects this before flow execution.
+        # Retain a defensive conservative result for config-like callers.
+        from ..reports.power import PowerReportParseResult
+        parsed = PowerReportParseResult(
+            status=PowerStatus.UNSUPPORTED.value,
+            source_path=str(power_input.get("path", "")),
+            source_sha256=str(power_input.get("sha256", "")),
+            scenario_id=scenario, mode=mode, corner=corner,
+            producer_version=reported_version,
+            diagnostics=[f"Unsupported configured power report format: {power_input.get('format')}"],
+        )
+    else:
+        parsed = parse_openroad_power_report(
+            str(power_input.get("path", "")),
+            scenario_id=scenario,
+            mode=mode,
+            corner=corner,
+            producer_version=reported_version,
+        )
+    qor.power_status = parsed.status
+    qor.power = parsed.total if parsed.available else None
+    qor.power_total = parsed.total if parsed.available else None
+    qor.power_dynamic = parsed.dynamic if parsed.available else None
+    qor.power_leakage = parsed.leakage if parsed.available else None
+    qor.raw_reports = dict(qor.raw_reports or {})
+    power_provenance = parsed.provenance()
+    power_provenance["configured_producer"] = power_input.get("producer", "")
+    power_provenance["configured_scenario_id"] = power_input.get("scenario_id", scenario)
+    power_provenance["tool_version"] = producer_version
+    qor.raw_reports["power"] = power_provenance
+    qor.diagnostics.extend(parsed.diagnostics)
+    return parsed
+
+
 def run_flow(cfg: Any,
              cset: ConstraintSet,
              sdc_text: str,
@@ -168,6 +295,7 @@ def run_flow(cfg: Any,
              candidate_id: str = "baseline",
              scenario: str = "default",
              corner: str = "default",
+             mode: str = "default",
              allow_partial_sdc: bool = False,
              yosys_bin: str | None = None,
              sta_bin: str | None = None,
@@ -182,6 +310,11 @@ def run_flow(cfg: Any,
     diagnostics: list[str] = []
 
     cfg_bits = _extract_cfg(cfg)
+    # Resolve and hash the evidence before cache lookup.  It is an input to
+    # this experiment, not an output-derived metric and never a synthesized
+    # estimate.  Mock flow deliberately does not consume it.
+    power_input = _power_report_input(cfg, scenario)
+    power_artifact: Path | None = None
     # Caller-provided defines/includes/parameters override config defaults
     if defines:
         cfg_bits["defines"] = _coerce_defines(defines)
@@ -226,7 +359,16 @@ def run_flow(cfg: Any,
         qor.backend = "mock"; qor.is_mock = True
         qor.backend_version = "mock"; qor.flow_stage = "synthesis_sta"
         qor.scenario = scenario
+        qor.mode = mode
+        qor.corner = corner
+        qor.power = None
+        qor.power_total = None
+        qor.power_dynamic = None
+        qor.power_leakage = None
+        qor.power_status = PowerStatus.UNAVAILABLE.value
         qor.notes.append("MOCK result — not from real EDA tools.")
+        if power_input.get("configured"):
+            qor.notes.append("Configured power report ignored for mock flow; power remains unavailable.")
         from ..qor.model import Feasibility
         qor.feasibility = Feasibility.from_qor(qor).to_dict()
         # Write mock netlist stub for artifact integrity
@@ -239,17 +381,17 @@ def run_flow(cfg: Any,
         manifest = RunManifest(
             candidate_id=candidate_id, rtl_hash=rtl_hashes, sdc_hash=sdc_hash,
             config_hash="", tool="mock", tool_version="mock",
-            flow_stage="synthesis_sta", corner=scenario,
+            flow_stage="synthesis_sta", mode=mode, corner=corner,
             library=",".join(str(p) for p in libs),
             artifacts=rel_artifacts, artifact_hashes=artifact_hashes,
             tool_identity={"backend": "mock"},
             input_hashes={"rtl": rtl_hashes, "includes": inc_hashes},
-            extra={"cache_key": "mock", "diagnostics": diagnostics},
+            extra={"cache_key": "mock", "scenario": scenario, "diagnostics": diagnostics},
         )
         am.write_manifest_to(run_id, manifest)
         return {"status": RunStatus.MOCK.value, "run_id": run_id,
                 "run_dir": str(run_dir), "manifest": manifest.to_dict(),
-                "qor": qor.summary(), "diagnostics": diagnostics,
+                "qor": qor.summary(), "qor_result": qor, "diagnostics": diagnostics,
                 "synth": None, "sta": None}
 
     # ---------- REAL backends ----------
@@ -304,19 +446,21 @@ def run_flow(cfg: Any,
         "parameters": dict(sorted(params_map.items())),
         "backend": backend, "stage": cfg_bits["stage"],
         "safe_mode": cfg_bits["safe_mode"],
-        "corner": corner, "scenario": scenario,
+        "corner": corner, "mode": mode, "scenario": scenario,
+        "power_report": power_input,
         "allow_partial_sdc": allow_partial_sdc,
         "sdc_generation_status": sdc_generation_status,
     }
     cfg_hash = stable_hash(cfg_for_hash)
 
     cache_key_data = {
-        "version": 2,
+        "version": 3,
         "rtl": rtl_hashes,
         "includes": inc_hashes,
         "sdc": sdc_hash,
         "libs": lib_hashes,
         "cfg": cfg_for_hash,
+        "power_report": power_input,
         "tool": {
             "yosys_bin": yosys.executable, "yosys_ver": yinfo.version,
             "sta_bin": opensta.executable, "sta_ver": oinfo.version,
@@ -404,6 +548,8 @@ def run_flow(cfg: Any,
         qor.backend_version = f"yosys:{yinfo.version}|opensta:{oinfo.version}"
         qor.flow_stage = "synthesis_sta"
         qor.scenario = scenario
+        qor.mode = mode
+        qor.corner = corner
         qor.is_mock = False
         if synth_res.stats.get("cell_count") is not None:
             qor.cell_count = synth_res.stats["cell_count"]
@@ -416,9 +562,13 @@ def run_flow(cfg: Any,
         qor.runtime_seconds = (
             (synth_res.command.duration_seconds if synth_res.command else 0)
             + (sta_res.command.duration_seconds if sta_res.command else 0))
-        qor.power_status = PowerStatus.UNAVAILABLE.value
-        qor.power = None
         qor.diagnostics = list(diagnostics)
+        # Report ingestion is deliberately post-STA: it consumes only the
+        # configured evidence for this real scenario and leaves synthesis/STA
+        # commands unchanged.  A staged copy is tracked by the normal manifest.
+        power_artifact = _stage_power_report(power_input, run_dir)
+        _apply_power_report(qor, power_input, scenario=scenario, mode=mode, corner=corner,
+                            producer_version=oinfo.version)
 
     # ---------- write artifacts / manifest ----------
     synth_stats_path = run_dir / "synthesis_stats.json"
@@ -441,6 +591,8 @@ def run_flow(cfg: Any,
         artifacts["sta_log"] = sta_result.get("log")
     for name, p in (sta_result.get("reports") or {}).items():
         artifacts[f"sta_{name}"] = p
+    if power_artifact is not None:
+        artifacts["power_report"] = power_artifact
     if qor_path:
         artifacts["qor"] = qor_path
     artifacts = {k: v for k, v in artifacts.items() if v}
@@ -454,16 +606,18 @@ def run_flow(cfg: Any,
     # artifact_hashes on lookup.
     input_hashes = {"rtl": rtl_hashes, "includes": inc_hashes,
                     "libs": lib_hashes, "sdc": sdc_hash,
-                    "synth_script": synth_script_hash}
+                    "synth_script": synth_script_hash,
+                    "power_report": power_input}
     manifest = RunManifest(
         candidate_id=candidate_id, rtl_hash=rtl_hashes, sdc_hash=sdc_hash,
         config_hash=cfg_hash, tool="yosys_opensta",
         tool_version=f"yosys:{yinfo.version}|opensta:{oinfo.version}",
-        flow_stage="synthesis_sta", corner=scenario,
+        flow_stage="synthesis_sta", mode=mode, corner=corner,
         library=",".join(str(p) for p in libs),
         artifacts=rel_artifacts, artifact_hashes=artifact_hashes,
         tool_identity=tool_identity, input_hashes=input_hashes,
         extra={"cache_key": cache_key,
+               "scenario": scenario,
                "cache_key_data": cache_key_data,
                "netlist_hash": netlist_hash,
                "commands": {
@@ -477,6 +631,7 @@ def run_flow(cfg: Any,
         "status": status, "run_id": run_id, "run_dir": str(run_dir),
         "manifest": manifest.to_dict(),
         "qor": qor.summary() if qor is not None else None,
+        "qor_result": qor,
         "diagnostics": diagnostics + sta_diag,
         "synth": synth_res.to_dict(), "sta": sta_result,
         "cache_key": cache_key,
@@ -584,8 +739,9 @@ def _find_cached_run(am: ArtifactManager, cache_key: str,
                 continue
         diag = list((extra.get("diagnostics") or []))
         diag.append(f"CACHE_HIT from {d.name}")
+        qor_result = QoRResult.from_summary(qor) if isinstance(qor, dict) else None
         return {"run_id": d.name, "run_dir": str(d), "manifest": m, "qor": qor,
-                "diagnostics": diag, "cache_key": cache_key,
+                "qor_result": qor_result, "diagnostics": diag, "cache_key": cache_key,
                 "status": RunStatus.CACHE_HIT.value}
     return None
 

@@ -1,11 +1,12 @@
-# Test Plan — RCA Validation, Formal Exception Verification, and Semantic Comparison (Steps 13–15)
+# Test Plan — RCA Validation, Formal Exception Verification, Semantic Comparison, and Power Reports (Steps 13–15, 20)
 
-This test plan describes validation-engine, concrete formal-adapter, and
-semantic-comparison coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
+This test plan describes validation-engine, concrete formal-adapter,
+semantic-comparison, and conservative power-report-ingestion coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
 `tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios),
 `tests/unit/test_symbiyosys.py` (Step 14, 11 named scenarios), and
 `tests/unit/test_equivalence.py` (Step 9 capability, Step-15 audit-hardened;
-67 named semantic-comparison scenarios).
+67 named semantic-comparison scenarios), and `tests/unit/test_power_reports.py`
+(Step 20; one representative fixture plus temporary variants).
 
 ## Suites
 
@@ -17,6 +18,7 @@ semantic-comparison coverage. Tests are kept in `tests/unit/test_validation.py` 
 | Step-15 semantic-comparison audit | `tests/unit/test_equivalence.py` | 67 | Existing UCM/SDC normalization and deterministic semantic-diff coverage, plus hardened CLI UNKNOWN handling and active-MCMM scope/context comparisons. |
 | Step-12 MCMM | `tests/unit/test_mcmm.py` | 70 | MCMM aggregation, per-scenario identity, cache, evaluator. |
 | Step-11 Pareto | `tests/unit/test_pareto.py` | 125 | Multi-objective Pareto/scalar/final selection. |
+| Step-20 power-report ingestion | `tests/unit/test_power_reports.py` | 34 | One representative OpenROAD/OpenSTA `report_power` fixture; parsing, units, statuses, provenance, artifact/cache, MCMM, Pareto, mock, and CLI/report regressions. |
 
 ## Step-13 named scenarios
 
@@ -79,6 +81,47 @@ The test fixture is a local fake `sby` executable. It exercises the adapter's
 actual argument-list subprocess, status-marker, timeout, artifact, and
 provenance handling without substituting a fake result for a real formal proof.
 
+## Step-20 power-report scenarios
+
+The one tracked fixture is `tests/golden/reports/openroad_report_power_representative.rpt`.
+It is labelled representative test data, not a live power-tool result. All bad
+variants are generated in test text or pytest temporary directories.
+
+1. Recognized `Total`, Internal + Switching dynamic, and Leakage map to the existing QoR fields.
+2. Explicit `W` normalization.
+3. Explicit `Watts` normalization.
+4. Explicit `mW` normalization.
+5. Explicit `uW` normalization.
+6. Explicit `µW` normalization.
+7. Explicit `nW` normalization.
+8. Explicit `pW` normalization.
+9. Valid literal zero remains `AVAILABLE`.
+10. Missing report is `UNAVAILABLE`, never zero.
+11. Missing Total is `UNKNOWN`.
+12. Missing Internal/Switching component leaves dynamic unknown but keeps total.
+13. Missing Leakage leaves leakage unknown but keeps total.
+14. Malformed numeric cell is `MALFORMED`.
+15. Multiple candidate report tables are `UNKNOWN`.
+16. Unrelated text is `UNSUPPORTED`.
+17. Unsupported explicit unit is `UNSUPPORTED`.
+18. Absent unit is `UNKNOWN`; no implicit watts default exists.
+19. Negative values are `INVALID`.
+20. Inconsistent complete component sum is `INVALID`.
+21. Repeated parse is deterministic.
+22. Summary/rehydration retain power components and provenance.
+23. Single-scenario YAML allows omitted scenario ID and resolves its path.
+24. MCMM rejects global, unknown, inactive, and duplicate report mappings.
+25. Real-flow plumbing accepts valid report-derived evidence.
+26. Existing run manifest records a run-relative report artifact and SHA-256.
+27. Report mutation changes the existing cache key and prevents a cache hit.
+28. A missing configured report remains unavailable in a real flow.
+29. Mock flow ignores a configured report and stays mock/unavailable.
+30. MCMM selects only each scenario's own report and retains per-scenario provenance.
+31. Missing required active-scenario power leaves global MCMM power unknown; no average is made.
+32. Available report-derived lower power participates in existing Pareto comparison.
+33. Effective scenario association changes the existing cache identity.
+34. Existing CLI and human report present tool-reported wording and report provenance.
+
 ## Gate criteria
 
 - `tests/unit/test_validation.py` : **74 passed** (no weakened assertions).
@@ -87,7 +130,8 @@ provenance handling without substituting a fake result for a real formal proof.
 - `tests/unit/test_pareto.py` : **125 passed** (Step-11 regression).
 - `tests/unit/test_mcmm.py` : **70 passed** (Step-12 regression).
 - `tests/unit/test_equivalence.py` : **67 passed** (Step-15 audit/hardening gate).
-- Full `python -m pytest -q` : **816 collected, 816 passed, 0 failed, 0 skipped, 0 errors**.
+- `tests/unit/test_power_reports.py` : **34 passed** (Step-20 parser/flow/cache/MCMM/CLI gate; no live power tool).
+- Full `python -m pytest -q` : **850 collected, 850 passed, 0 failed, 0 skipped, 0 errors** (in the project virtual environment).
 
 ## Environment notes
 

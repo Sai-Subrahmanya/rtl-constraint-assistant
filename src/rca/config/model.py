@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..utils.enums import (
     FlowStage,
@@ -130,11 +130,46 @@ class OptimizationConfig(BaseModel):
     thresholds: OptimizationThresholds = Field(default_factory=OptimizationThresholds)
 
 
+class PowerReportConfig(BaseModel):
+    """One explicitly configured OpenROAD/OpenSTA power-report input.
+
+    The report is an external, tool-produced input.  RCA parses it only after
+    a real flow completes; configuration never asks RCA to estimate power.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["openroad_report_power"]
+    path: str = Field(min_length=1)
+    scenario_id: str | None = None
+    producer: Literal["openroad_opensta"] = "openroad_opensta"
+    producer_version: str | None = None
+
+    @field_validator("path", "producer")
+    @classmethod
+    def _nonblank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("power report path and producer must not be blank")
+        return value
+
+    @field_validator("scenario_id")
+    @classmethod
+    def _scenario_id_nonblank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("flow.power_reports[].scenario_id must not be blank")
+        return value
+
+
 class FlowConfig(BaseModel):
     backend: str = "generic"
     stage: str = "synthesis_sta"
     liberty: str | list[str] | None = None
     output_dir: str = "output"
+    power_reports: list[PowerReportConfig] = Field(default_factory=list)
 
     def flow_stage(self) -> FlowStage:
         mapping = {
@@ -277,6 +312,60 @@ class ProjectConfig(BaseModel):
             self.project.top = self.analysis.top
         return self
 
+    @model_validator(mode="after")
+    def _validate_power_report_mappings(self) -> ProjectConfig:
+        """Reject ambiguous or unsafe scenario-to-report associations.
+
+        A report's scenario binding is configuration provenance.  In MCMM,
+        allowing an unlabeled/global report would risk reusing one scenario's
+        evidence for another, so it is intentionally forbidden.
+        """
+        reports = list(self.flow.power_reports)
+        scenario_specs = {spec.id: spec for spec in self.scenarios if spec.id}
+        all_ids = set(scenario_specs)
+        active_ids = set(self.mcmm.active_scenario_ids) if self.mcmm.active_scenario_ids else {
+            sid for sid, spec in scenario_specs.items() if spec.active
+        }
+        unknown_active = active_ids - all_ids
+        if self.mcmm.enabled and unknown_active:
+            raise ValueError(
+                "mcmm.active_scenario_ids contains unknown scenario(s): "
+                + ", ".join(sorted(unknown_active))
+            )
+        if (not self.mcmm.enabled and any(r.scenario_id is None for r in reports)
+                and any(r.scenario_id is not None for r in reports)):
+            raise ValueError(
+                "A single-scenario default power report cannot coexist with a "
+                "scenario-labelled power report; the association would be ambiguous."
+            )
+        seen: set[str] = set()
+        for report in reports:
+            sid = report.scenario_id
+            if self.mcmm.enabled and sid is None:
+                raise ValueError(
+                    "flow.power_reports[].scenario_id is required when mcmm.enabled=true; "
+                    "global power-report fallback is not allowed."
+                )
+            if sid is None:
+                key = "__single_scenario_default__"
+            else:
+                if sid not in all_ids:
+                    raise ValueError(
+                        f"flow.power_reports scenario_id '{sid}' is not a configured scenario"
+                    )
+                if sid not in active_ids:
+                    raise ValueError(
+                        f"flow.power_reports scenario_id '{sid}' is inactive for this run"
+                    )
+                key = sid
+            if key in seen:
+                raise ValueError(
+                    f"Duplicate flow.power_reports mapping for scenario "
+                    f"'{sid if sid is not None else 'single-scenario default'}'"
+                )
+            seen.add(key)
+        return self
+
     @field_validator("schema_version")
     @classmethod
     def _check_version(cls, v: str) -> str:
@@ -307,6 +396,10 @@ class ProjectConfig(BaseModel):
         self.flow.liberty = resolved_libs
         out = self.flow.output_dir
         self.flow.output_dir = str((root / out).resolve()) if not Path(out).is_absolute() else out
+        for report in self.flow.power_reports:
+            report_path = Path(report.path)
+            if not report_path.is_absolute():
+                report.path = str((root / report_path).resolve())
         formal_work_dir = self.formal.work_dir
         self.formal.work_dir = (
             str((root / formal_work_dir).resolve())

@@ -209,6 +209,29 @@ PROJECT_SCHEMA: dict = {
                     ],
                 },
                 "output_dir": {"type": "string", "default": "output"},
+                "power_reports": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["format", "path"],
+                        "properties": {
+                            "format": {
+                                "type": "string",
+                                "enum": ["openroad_report_power"],
+                            },
+                            "path": {"type": "string", "minLength": 1},
+                            "scenario_id": {"type": "string", "minLength": 1},
+                            "producer": {
+                                "type": "string",
+                                "enum": ["openroad_opensta"],
+                                "default": "openroad_opensta",
+                            },
+                            "producer_version": {"type": "string"},
+                        },
+                    },
+                    "default": [],
+                },
             },
             "default": {},
         },

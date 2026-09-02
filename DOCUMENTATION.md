@@ -467,12 +467,13 @@ A timing exception selector is not itself a formal property. RCA therefore never
 | `__init__.py` | — | Re-exports. |
 | `manager.py` | ~140 | `ArtifactManager`: writes runs into `<results_dir>/runs/<timestamp>-<slug>/`, writes SDC files, QoR JSONL, manifests, optimization history, and UCM snapshots. Uses the deterministic hashes from `utils.hashing` to skip redundant EDA runs when inputs are identical (Manual §66, §153). |
 
-### 5.22 `src/rca/reports/` — human-readable reports
+### 5.22 `src/rca/reports/` — timing and power report parsing
 
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | — | Re-exports. |
-| `timing.py` | ~120 | `TimingReport`: builds structured timing summary (WNS, TNS, WHS, critical path, endpoints, per-domain breakdown). Also `design_report(design_summary, tg_summary, validation, coverage, constraints) → str` which is the Rich table shown by `rca report`. |
+| `timing.py` | ~120 | Parses OpenSTA-style timing summaries and Yosys area/cell statistics conservatively. |
+| `power.py` | ~300 | Parses only OpenROAD/OpenSTA `report_power` group summaries with explicit units and one total row; returns report provenance/status for the existing QoR model and never estimates power. |
 
 ### 5.23 `src/rca/explanation/` — natural-language explainability (Manual §151)
 
@@ -861,6 +862,47 @@ errors. Relative proof and work paths are resolved from the project YAML.
 the existing validation engine. By default (`formal.backend: conservative`),
 no external proof process runs and the established `EXCEPTION_UNVERIFIED`
 behavior remains unchanged.
+
+### Configured power report ingestion (Step 20)
+
+The only supported power input is an explicitly configured
+OpenROAD/OpenSTA-style `report_power` group-summary text file. It is consumed
+by a completed real `yosys_opensta` flow; RCA does not add `report_power` to a
+Tcl script, estimate activity, or claim to run a power engine.
+
+```yaml
+flow:
+  power_reports:
+    - format: openroad_report_power
+      path: reports/func_slow.power.rpt
+      scenario_id: FUNC_SLOW
+      # producer defaults to openroad_opensta; producer_version is optional
+```
+
+The report must identify the group table with Internal, Switching, Leakage,
+and Total columns, use one unambiguous final `Total` row, and declare its unit
+explicitly as W/Watts, mW, uW/µW, nW, or pW. Values are normalized to watts.
+Total maps to `QoRResult.power` and `power_total`; dynamic maps to
+Internal + Switching only when both cells are present; leakage maps directly.
+A literal zero is valid available evidence. Missing/ambiguous reports are
+`UNKNOWN`, absent files are `UNAVAILABLE`, structural/numeric parse failures
+are `MALFORMED`, semantic failures are `INVALID`, and other formats/units are
+`UNSUPPORTED`; none receives a fabricated numeric total.
+
+For MCMM, every mapping requires an active `scenario_id`; global fallback and
+duplicate mappings are rejected. A scenario with no usable power report leaves
+the global power objective unknown rather than averaging other scenarios. The
+configured source path, SHA-256, format/parser version, unit, producer,
+scenario/mode/corner, and diagnostics appear under the existing
+`QoRResult.raw_reports["power"]`, summary output, and existing run manifest.
+Report content and identity are part of the existing flow cache key. Mock flow
+always remains explicitly mock and power-unavailable. `rca run-sta`,
+`rca optimize`, and `rca report` display report-derived power and provenance;
+`rca report` only shows already-recorded QoR and does not run a tool.
+
+The checked-in fixture is representative syntax for tests, not a tool run in
+this repository. See `STEP20_POWER_REPORT.md` for detailed status and
+validation policy.
 
 ---
 
