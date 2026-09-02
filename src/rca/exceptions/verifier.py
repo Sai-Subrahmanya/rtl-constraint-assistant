@@ -13,8 +13,6 @@ never returned without a real proof result.
 
 from __future__ import annotations
 
-from typing import Any
-
 from ..constraint_model import ConstraintSet
 from ..design_model import Design
 from ..timing_model import TimingGraph
@@ -79,6 +77,10 @@ def verify_exceptions(cset: ConstraintSet,
             continue
         ps = c.path_selector
         spec = ps.summary() if ps else {}
+        # Scenario applicability is UCM-owned and must survive into formal
+        # provenance.  The backend does not invent scenario assumptions; a
+        # user-authored .sby job/task is responsible for proving them.
+        spec["scenario_ids"] = sorted(c.scenario_ids or [])
         try:
             if c.type == ConstraintType.SET_FALSE_PATH:
                 vr = backend.prove_false_path(c.id, spec)
@@ -92,7 +94,7 @@ def verify_exceptions(cset: ConstraintSet,
                     tool=backend.name,
                     message="Verification not implemented for this exception type.",
                 )
-        except Exception as exc:  # backend error -> ERROR, not silently UNRESOLVED
+        except Exception as exc:  # noqa: BLE001 - isolate external formal backend failures
             vr = VerificationResult(
                 constraint_id=c.id,
                 status=VerificationStatus.ERROR,

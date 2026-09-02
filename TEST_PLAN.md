@@ -1,8 +1,12 @@
-# Test Plan — RCA Constraint Validation Engine (Step 13)
+# Test Plan — RCA Validation, Formal, Semantic Comparison, Power, and QoR History (Steps 11–15, 20–21)
 
-This test plan describes the validation-engine test coverage. Tests are
-kept in `tests/unit/test_validation.py` (Step 7) and
-`tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios).
+This test plan describes validation-engine, concrete formal-adapter,
+semantic-comparison, and conservative power-report-ingestion coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
+`tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios),
+`tests/unit/test_symbiyosys.py` (Step 14, 11 named scenarios), and
+`tests/unit/test_equivalence.py` (Step 9 capability, Step-15 audit-hardened;
+67 named semantic-comparison scenarios), and `tests/unit/test_power_reports.py`
+(Step 20; one representative fixture plus temporary variants).
 
 ## Suites
 
@@ -10,8 +14,12 @@ kept in `tests/unit/test_validation.py` (Step 7) and
 |---|---|---|---|
 | Step-7 validation | `tests/unit/test_validation.py` | 74 | Deterministic IDs, clocks, gclks, IO, groups, conflicts, coverage, exceptions, scenarios, backend, immutability. |
 | Step-13 validation | `tests/unit/test_validation_step13.py` | 40 | Strengthened reference/semantic/conflict/completeness/exception-safety/scenario/SDC-import/backend/provenance/determinism. |
+| Step-14 SymbiYosys formal adapter | `tests/unit/test_symbiyosys.py` | 11 | PASS/FAIL/UNKNOWN/error/timeout verdicts, counterexamples, configuration, scenario provenance, validation integration, and immutability. |
+| Step-15 semantic-comparison audit | `tests/unit/test_equivalence.py` | 67 | Existing UCM/SDC normalization and deterministic semantic-diff coverage, plus hardened CLI UNKNOWN handling and active-MCMM scope/context comparisons. |
 | Step-12 MCMM | `tests/unit/test_mcmm.py` | 70 | MCMM aggregation, per-scenario identity, cache, evaluator. |
 | Step-11 Pareto | `tests/unit/test_pareto.py` | 125 | Multi-objective Pareto/scalar/final selection. |
+| Step-20 power-report ingestion | `tests/unit/test_power_reports.py` | 38 | One representative OpenROAD/OpenSTA `report_power` fixture; parsing, units, parser classification/canonical QoR compatibility, provenance, artifact/cache, MCMM, Pareto, mock, and CLI/report regressions. |
+| Step-21 QoR history repository | `tests/unit/test_qor_repository.py` | 37 | SQLite initialization/versioning, transactional historical graph persistence, canonical QoR/power/provenance/artifact/MCMM indexing, deterministic parameterized queries, explicit legacy import, flow failure safety, cache separation, CLI history, and WAL reader behavior. |
 
 ## Step-13 named scenarios
 
@@ -56,13 +64,113 @@ kept in `tests/unit/test_validation.py` (Step 7) and
 39. `test_13_39` — UNKNOWN/UNRESOLVED in `to_dict`.
 40. `test_13_40` — issue_id stable with provenance fields.
 
+## Step-14 named scenarios
+
+1. `test_14_01` — only SBY PASS plus zero exit is formally VERIFIED.
+2. `test_14_02` — SBY FAIL is INVALID and preserves counterexample artifacts.
+3. `test_14_03` — SBY UNKNOWN or missing marker stays UNRESOLVED.
+4. `test_14_04` — missing mapping, proof file, or executable stays UNRESOLVED.
+5. `test_14_05` — timeout and PASS/non-zero discrepancy are never VERIFIED.
+6. `test_14_06` — false-path/multicycle proof-kind mismatch is explicit ERROR.
+7. `test_14_07` — multicycle proof provenance preserves the cycle count.
+8. `test_14_08` — stable run ID, scenario provenance, and no UCM mutation.
+9. `test_14_09` — formal counterexample becomes a blocking existing-validation finding.
+10. `test_14_10` — YAML formal config resolves proof paths and constructs the adapter.
+11. `test_14_11` — duplicate UCM proof mappings are deterministically rejected.
+
+The test fixture is a local fake `sby` executable. It exercises the adapter's
+actual argument-list subprocess, status-marker, timeout, artifact, and
+provenance handling without substituting a fake result for a real formal proof.
+
+## Step-20 power-report scenarios
+
+The one tracked fixture is `tests/golden/reports/openroad_report_power_representative.rpt`.
+It is labelled representative test data, not a live power-tool result. All bad
+variants are generated in test text or pytest temporary directories. Detailed
+outcomes are parser `PowerParseStatus` classifications; canonical QoR keeps
+only backward-compatible `PowerStatus` availability (`AVAILABLE`,
+`UNAVAILABLE`, `ESTIMATED`) and maps all parser failures to `UNAVAILABLE`.
+
+1. Recognized `Total`, Internal + Switching dynamic, and Leakage map to the existing QoR fields.
+2. Explicit `W` normalization.
+3. Explicit `Watts` normalization.
+4. Explicit `mW` normalization.
+5. Explicit `uW` normalization.
+6. Explicit `µW` normalization.
+7. Explicit `nW` normalization.
+8. Explicit `pW` normalization.
+9. Valid literal zero is parser `AVAILABLE`.
+10. Missing report is parser `UNAVAILABLE`, never zero.
+11. `PowerParseStatus` is separate from the unchanged three-value canonical `PowerStatus`.
+12. Missing Total is parser `UNKNOWN`.
+13. Missing Internal/Switching component leaves dynamic unknown but keeps total.
+14. Missing Leakage leaves leakage unknown but keeps total.
+15. Malformed numeric cell is parser `MALFORMED`.
+16. A `38.6%` Internal cell cannot be parsed as power.
+17. A `100.0%` Total cell cannot be parsed as power.
+18. Multiple candidate report tables are parser `UNKNOWN`.
+19. Unrelated text is parser `UNSUPPORTED`.
+20. Unsupported explicit unit is parser `UNSUPPORTED`.
+21. Absent unit is parser `UNKNOWN`; no implicit watts default exists.
+22. Negative values are parser `INVALID`.
+23. Inconsistent complete component sum is parser `INVALID`.
+24. Repeated parse is deterministic.
+25. Summary/rehydration retain power components and provenance.
+26. Single-scenario YAML allows omitted scenario ID and resolves its path.
+27. MCMM rejects a global report mapping.
+28. MCMM rejects an unknown report scenario ID.
+29. MCMM rejects an inactive report scenario ID.
+30. MCMM rejects duplicate scenario report mappings.
+31. Real-flow plumbing accepts valid report-derived evidence, tracks the manifest artifact/hash, and preserves a same-input cache hit while report mutation rekeys it.
+32. A missing configured report remains canonical unavailable in a real flow.
+33. A malformed report preserves parser `MALFORMED` provenance while canonical QoR remains unavailable with no numeric components.
+34. Mock flow ignores a configured report and stays mock/unavailable.
+35. MCMM selects only each scenario's own report, retains per-scenario provenance, and keeps global power unknown when an active scenario is missing power.
+36. Available report-derived lower power participates in existing Pareto comparison.
+37. Rebinding a report to another MCMM scenario, and missing-versus-present evidence, change the existing cache identity.
+38. CLI and human report present tool-reported wording/provenance and show a detailed parser classification beside canonical unavailable power.
+
+## Step-21 QoR history repository scenarios
+
+`tests/unit/test_qor_repository.py` uses temporary SQLite sidecars and no live
+EDA tool. Its 37 named cases cover:
+
+1. database creation, current schema version, and application identifier;
+2. transactional schema initialization/migration and migration rollback;
+3. unsupported-newer and ledger/user-version mismatch rejection;
+4. flow-record insertion, idempotency, and same-run changed-evidence conflict;
+5. full canonical QoR column projection, including detailed area/cell/timing data;
+6. nullable unknown metric storage and valid numeric zero;
+7. canonical `PowerStatus`, separate `PowerParseStatus`, provenance, report SHA-256, and components;
+8. artifact references/hashes and replay-time integrity validation;
+9. replay identity inputs, commands, and explicit non-executable replay limitation;
+10. session-scoped candidate identity, mutations, constraint-set identity, and lineage;
+11. physical evaluation linkage to a later optimizer candidate;
+12. distinct MCMM scenario evidence and derived aggregate/objective persistence;
+13. conservative MCMM unknown/incomparable aggregate fields;
+14. candidate/scenario/status/constraint-set query filtering;
+15. real/proxy area separation and power availability rules in best-QoR queries;
+16. deterministic list, artifact, best, candidate, MCMM, and CLI JSON ordering;
+17. transaction rollback for evaluation and MCMM graphs;
+18. explicit legacy import, missing-field NULL handling, idempotency, current-record recognition, and conflicts;
+19. legacy power parser provenance retention;
+20. WAL two-connection reader behavior;
+21. real-flow blocked-manifest indexing after existing artifact output;
+22. explicit database-failure warning while QoR/artifacts stay intact;
+23. no sidecar for ordinary mock flow unless a repository is explicitly supplied;
+24. passive cache-key indexing and proof that repository queries do not invoke filesystem cache lookup;
+25. CLI `history` query, JSON, candidate/session, selector validation, and explicit legacy-import behavior.
+
 ## Gate criteria
 
 - `tests/unit/test_validation.py` : **74 passed** (no weakened assertions).
 - `tests/unit/test_validation_step13.py` : **40 passed**.
+- `tests/unit/test_symbiyosys.py` : **11 passed** (Step-14 gate; no real formal tool required).
 - `tests/unit/test_pareto.py` : **125 passed** (Step-11 regression).
 - `tests/unit/test_mcmm.py` : **70 passed** (Step-12 regression).
-- Full `python -m pytest -q` : **800 collected, 800 passed**.
+- `tests/unit/test_equivalence.py` : **67 passed** (Step-15 audit/hardening gate).
+- `tests/unit/test_power_reports.py` : **38 passed** (Step-20 parser/flow/cache/MCMM/CLI gate; no live power tool).
+- Full `python -m pytest -q` : **854 collected, 854 passed, 0 failed, 0 skipped, 0 errors** (in the project virtual environment).
 
 ## Environment notes
 

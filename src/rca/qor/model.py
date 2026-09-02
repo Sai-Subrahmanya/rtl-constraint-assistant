@@ -182,8 +182,10 @@ class QoRResult:
     def summary(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id, "candidate_id": self.candidate_id,
-            "backend": self.backend or self.tool, "is_mock": self.is_mock,
+            "backend": self.backend or self.tool, "backend_version": self.backend_version,
+            "is_mock": self.is_mock,
             "flow_stage": self.flow_stage, "scenario": self.scenario,
+            "mode": self.mode, "corner": self.corner,
             "setup_wns_ns": (self.setup_wns * 1e9) if self.setup_wns is not None else None,
             "setup_tns_ns": (self.setup_tns * 1e9) if self.setup_tns is not None else None,
             "setup_violations": self.setup_violations,
@@ -192,14 +194,78 @@ class QoRResult:
             "hold_violations": self.hold_violations,
             "near_critical_count": self.near_critical_count,
             "path_count": self.path_count,
-            "area": self.area, "area_proxy": self.area_proxy,
+            "area": self.area, "area_total": self.area_total,
+            "area_proxy": self.area_proxy,
             "cell_count": self.cell_count, "ff_count": self.ff_count,
-            "power": self.power, "power_status": self.power_status,
+            "power": self.power, "power_total": self.power_total,
+            "power_dynamic": self.power_dynamic,
+            "power_leakage": self.power_leakage,
+            "power_status": self.power_status,
+            "power_provenance": self.raw_reports.get("power"),
             "runtime_s": self.runtime_seconds, "tool": self.tool,
+            "tool_version": self.tool_version,
             "critical_setup": self.critical_setup.to_dict() if self.critical_setup else None,
             "critical_hold": self.critical_hold.to_dict() if self.critical_hold else None,
             "feasibility": self.feasibility,
+            "diagnostics": list(self.diagnostics),
+            "notes": list(self.notes),
         }
 
     def to_dict(self) -> dict[str, Any]:
         return self.summary()
+
+    @classmethod
+    def from_summary(cls, data: dict[str, Any]) -> QoRResult:
+        """Rehydrate the existing QoR model from its JSON summary.
+
+        Run-flow uses this only when returning a verified cache hit to internal
+        callers such as the optimizer.  It is deliberately a reconstruction of
+        this canonical model, not a parallel QoR representation.
+        """
+        def _seconds(key: str) -> float | None:
+            value = data.get(key)
+            return float(value) * 1e-9 if value is not None else None
+
+        raw_reports: dict[str, Any] = {}
+        if data.get("power_provenance") is not None:
+            raw_reports["power"] = data["power_provenance"]
+        critical_setup = data.get("critical_setup")
+        critical_hold = data.get("critical_hold")
+        return cls(
+            run_id=str(data.get("run_id", "")),
+            candidate_id=str(data.get("candidate_id", "")),
+            backend=str(data.get("backend", "")),
+            backend_version=str(data.get("backend_version", "")),
+            flow_stage=str(data.get("flow_stage", "")),
+            scenario=str(data.get("scenario", "default")),
+            mode=str(data.get("mode", "default")),
+            corner=str(data.get("corner", "default")),
+            is_mock=bool(data.get("is_mock", False)),
+            setup_wns=_seconds("setup_wns_ns"),
+            setup_tns=_seconds("setup_tns_ns"),
+            setup_violations=int(data.get("setup_violations", 0) or 0),
+            hold_wns=_seconds("hold_wns_ns"),
+            hold_tns=_seconds("hold_tns_ns"),
+            hold_violations=int(data.get("hold_violations", 0) or 0),
+            near_critical_count=int(data.get("near_critical_count", 0) or 0),
+            path_count=data.get("path_count"),
+            area=data.get("area"),
+            area_total=data.get("area_total"),
+            area_proxy=data.get("area_proxy"),
+            cell_count=data.get("cell_count"),
+            ff_count=data.get("ff_count"),
+            power=data.get("power"),
+            power_total=data.get("power_total"),
+            power_dynamic=data.get("power_dynamic"),
+            power_leakage=data.get("power_leakage"),
+            power_status=str(data.get("power_status", PowerStatus.UNAVAILABLE.value)),
+            runtime_seconds=data.get("runtime_s"),
+            raw_reports=raw_reports,
+            tool=str(data.get("tool", "")),
+            tool_version=str(data.get("tool_version", "")),
+            notes=list(data.get("notes") or []),
+            diagnostics=list(data.get("diagnostics") or []),
+            feasibility=dict(data.get("feasibility") or {}),
+            critical_setup=CriticalPath(**critical_setup) if critical_setup else None,
+            critical_hold=CriticalPath(**critical_hold) if critical_hold else None,
+        )

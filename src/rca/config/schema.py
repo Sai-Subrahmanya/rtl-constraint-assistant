@@ -209,6 +209,29 @@ PROJECT_SCHEMA: dict = {
                     ],
                 },
                 "output_dir": {"type": "string", "default": "output"},
+                "power_reports": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["format", "path"],
+                        "properties": {
+                            "format": {
+                                "type": "string",
+                                "enum": ["openroad_report_power"],
+                            },
+                            "path": {"type": "string", "minLength": 1},
+                            "scenario_id": {"type": "string", "minLength": 1},
+                            "producer": {
+                                "type": "string",
+                                "enum": ["openroad_opensta"],
+                                "default": "openroad_opensta",
+                            },
+                            "producer_version": {"type": "string"},
+                        },
+                    },
+                    "default": [],
+                },
             },
             "default": {},
         },
@@ -299,6 +322,39 @@ PROJECT_SCHEMA: dict = {
                 "active_scenario_ids": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "default": [],
+                },
+            },
+            "default": {},
+        },
+        "formal": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "backend": {
+                    "type": "string",
+                    "enum": ["conservative", "symbiyosys"],
+                    "default": "conservative",
+                },
+                "symbiyosys_executable": {"type": "string"},
+                "work_dir": {"type": "string", "default": "output/formal"},
+                "timeout_seconds": {"type": "integer", "minimum": 1, "default": 300},
+                "proofs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["constraint_id", "exception_kind", "sby_file"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "constraint_id": {"type": "string", "minLength": 1},
+                            "exception_kind": {
+                                "type": "string",
+                                "enum": ["false_path", "multicycle"],
+                            },
+                            "sby_file": {"type": "string", "minLength": 1},
+                            "task": {"type": "string", "minLength": 1},
+                        },
+                    },
                     "default": [],
                 },
             },

@@ -8,15 +8,18 @@ scenario scoping, UNKNOWN policy, adversarial cases, and determinism.
 from __future__ import annotations
 
 import copy
+import json
 import os
 import sys
 import tempfile
 
 import pytest
+from typer.testing import CliRunner
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
-from rca.constraint_model import Constraint, ConstraintSet, PathSelector
+from rca.cli.main import app
+from rca.constraint_model import Constraint, ConstraintSet, PathSelector, Scenario
 from rca.equivalence import (
     ComparisonLevel,
     ComparisonResult,
@@ -449,6 +452,8 @@ def test_23_provenance_difference_semantic_equal():
     assert r.overall_status == EquivalenceResult.EQUIVALENT_AFTER_NORMALIZATION
     pr = r.equivalent_constraints[0]
     assert pr.a_source_kind != pr.b_source_kind
+    assert pr.provenance_equal is False
+    assert pr.a_provenance == {"source_kind": SourceKind.USER.value, "created_by": "rca"}
     assert any("provenance differs" in n for n in pr.notes)
 
 
@@ -470,6 +475,74 @@ def test_25_scenario_mismatch_different():
     # Functional and scan constraints live in separate scenario
     # namespaces — do not pair them as equivalent.
     assert r.overall_status == EquivalenceResult.DIFFERENT
+
+
+def _mcmm_cset(scenarios: list[str], scope: list[str]) -> tuple[ConstraintSet, Constraint]:
+    """Build a UCM with an explicit active MCMM matrix for scope testing."""
+    cset = _cset()
+    for scenario_id in scenarios:
+        cset.scenarios[scenario_id] = Scenario(
+            id=scenario_id, mode=scenario_id.lower(), corner="typical"
+        )
+    constraint = cset.create_clock(
+        name="clk", period_seconds=10e-9, source="clk", scenario_ids=scope, fixed=True
+    )
+    return cset, constraint
+
+
+def test_15_mcmm_empty_scope_equals_explicit_complete_active_scope_read_only():
+    """[] means every active scenario, not a literal empty scenario set."""
+    a, global_clock = _mcmm_cset(["FUNC", "SCAN"], [])
+    b, explicit_clock = _mcmm_cset(["FUNC", "SCAN"], ["SCAN", "FUNC"])
+
+    result = compare(a, b)
+
+    assert result.overall_status == EquivalenceResult.EQUIVALENT
+    assert result.equivalent_constraints[0].scenarios == ["FUNC", "SCAN"]
+    # The projection used to compare active scopes must not change UCM intent.
+    assert global_clock.is_fixed() and explicit_clock.is_fixed()
+    assert global_clock.scenario_ids == []
+    assert explicit_clock.scenario_ids == ["SCAN", "FUNC"]
+
+
+def test_15_mcmm_different_active_context_is_not_falsely_equivalent():
+    """Global constraints differ when their complete active matrices differ."""
+    a, _ = _mcmm_cset(["FUNC"], [])
+    b, _ = _mcmm_cset(["SCAN"], [])
+
+    result = compare(a, b)
+
+    assert result.overall_status == EquivalenceResult.DIFFERENT
+    assert [finding.status for finding in result.scenario_differences] == [
+        "ONLY_IN_LEFT", "ONLY_IN_RIGHT"
+    ]
+    assert result.to_dict()["scenario_differences"][0]["scenario_id"] == "FUNC"
+
+
+def test_15_mcmm_same_id_different_definition_is_not_equivalent():
+    """Scenario identity includes mode/corner/environment semantics, not only its ID."""
+    a, _ = _mcmm_cset(["FUNC"], [])
+    b, _ = _mcmm_cset(["FUNC"], [])
+    b.scenarios["FUNC"].corner = "slow"
+
+    result = compare(a, b)
+
+    assert result.overall_status == EquivalenceResult.DIFFERENT
+    assert result.scenario_differences[0].status == "DIFFERENT"
+    assert result.scenario_differences[0].field == "active_scenario_definition"
+
+
+def test_15_mcmm_unknown_constraint_scenario_remains_unknown():
+    """A declared matrix cannot hide an invalid constraint scope as equal."""
+    a, _ = _mcmm_cset(["FUNC"], ["MISSING"])
+    b, _ = _mcmm_cset(["FUNC"], ["MISSING"])
+
+    result = compare(a, b)
+
+    assert result.overall_status == EquivalenceResult.UNKNOWN
+    assert result.counts()["unknown"] == 2
+    assert all("absent from its declared MCMM context" in pair.notes[0]
+               for pair in result.unknown_constraints)
 
 
 # 26. deterministic comparison (same input → same output)
@@ -735,7 +808,10 @@ def test_sdc_A_identical_strings_equivalent():
     from rca.equivalence import compare_sdc_text
     sdc = "create_clock -name clk -period 10 [get_ports clk]\n"
     r = compare_sdc_text(sdc, sdc)
-    assert r.overall_status == EquivalenceResult.EQUIVALENT
+    # Default synthetic source names differ, so provenance may make the
+    # semantic match EQUIVALENT_AFTER_NORMALIZATION rather than byte-identical.
+    assert r.overall_status in (EquivalenceResult.EQUIVALENT,
+                                EquivalenceResult.EQUIVALENT_AFTER_NORMALIZATION)
     assert r.counts()["equivalent"] == 1
 
 
@@ -780,11 +856,52 @@ def test_sdc_E_unsupported_causes_unknown():
     b = ("create_clock -name clk -period 10 [get_ports clk]\n"
          "set_load 0.5 [get_ports out]\n")
     r = compare_sdc_text(a, b)
-    # Either UNKNOWN (because of the unsupported set_load pair) or
-    # EQUIVALENT_AFTER_NORMALIZATION if the importer drops it. Either
-    # case must NOT incorrectly flag DIFFERENT.
-    assert r.overall_status != EquivalenceResult.ERROR
-    assert r.counts()["different"] == 0
+    # Both sides contain timing intent that the importer cannot model.
+    # Similar text is not evidence of semantic equivalence.
+    assert r.overall_status == EquivalenceResult.UNKNOWN
+    assert r.counts()["unknown"] == 1
+    assert r.unknown_constraints[0].constraint_type == ConstraintType.SET_LOAD.value
+    assert "set_load" in r.unknown_constraints[0].notes[0]
+
+
+def test_15_cli_unsupported_sdc_is_unknown_not_equivalent(tmp_path):
+    """The user-facing command must use the hardened importer path too."""
+    project = tmp_path / "project.yaml"
+    project.write_text(
+        "schema_version: '1.0'\nproject:\n  name: audit\n  top: audit\nsources:\n  files: []\n",
+        encoding="utf-8",
+    )
+    sdc = tmp_path / "unsupported.sdc"
+    sdc.write_text("set_load 0.5 [get_ports out]\n", encoding="utf-8")
+
+    invocation = CliRunner().invoke(
+        app, ["compare", str(project), "--a", str(sdc), "--b", str(sdc), "--json"]
+    )
+
+    assert invocation.exit_code == 0, invocation.output
+    report = json.loads(invocation.output)
+    assert report["overall_status"] == EquivalenceResult.UNKNOWN.value
+    assert report["counts"]["unknown"] == 1
+    assert report["unknown_constraints"][0]["constraint_type"] == ConstraintType.SET_LOAD.value
+    assert "set_load" in report["unknown_constraints"][0]["notes"][0]
+    diagnostics = report["diagnostics"]
+    assert any(
+        diagnostic.startswith("A: [WARNING] UNSUPPORTED_COMMAND") and "set_load" in diagnostic
+        for diagnostic in diagnostics
+    )
+    assert any(
+        diagnostic.startswith("B: [WARNING] UNSUPPORTED_COMMAND") and "set_load" in diagnostic
+        for diagnostic in diagnostics
+    )
+
+    human = CliRunner().invoke(
+        app, ["compare", str(project), "--a", str(sdc), "--b", str(sdc)]
+    )
+    assert human.exit_code == 0, human.output
+    assert "[set_load]" in human.output
+    assert "[set_case_analysis]" not in human.output
+    assert "UNKNOWN (cannot prove equivalence)" in human.output
+    assert "Provenance:" in human.output
 
 
 def test_sdc_F_malformed_sdc_causes_error():
@@ -805,8 +922,12 @@ def test_sdc_G_provenance_does_not_affect_equality():
     from rca.equivalence import compare_sdc_text
     sdc = "create_clock -name clk -period 10 [get_ports clk]\n"
     r = compare_sdc_text(sdc, sdc, source_a="a.sdc", source_b="b.sdc")
-    assert r.overall_status in (EquivalenceResult.EQUIVALENT,
-                                EquivalenceResult.EQUIVALENT_AFTER_NORMALIZATION)
+    assert r.overall_status == EquivalenceResult.EQUIVALENT_AFTER_NORMALIZATION
+    pair = r.equivalent_constraints[0]
+    assert pair.provenance_equal is False
+    assert pair.a_provenance is not None and pair.b_provenance is not None
+    assert pair.a_provenance["import"]["source_file"] == "a.sdc"
+    assert pair.b_provenance["import"]["source_file"] == "b.sdc"
 
 
 def test_sdc_H_design_context_not_required_for_basic():

@@ -372,26 +372,29 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | `conflicts.py` | ~420 | Conflict and overlap/shadow detection (§42): duplicate/conflicting clocks, IO delays, latency/uncertainty, min/max delay, plus Step-13 precedence-aware user-vs-inference conflicts and contradictory exceptions. |
 | `coverage.py` | ~661 | Coverage analyzer (§43): clock-source, input/output timing path, reg-to-reg, CDC path, and clock-relationship coverage. `UNKNOWN` when graph unavailable; `NOT_APPLICABLE` when zero applicable; retains numerator/denominator evidence. |
 | `completeness.py` | ~150 | Step-13 completeness / missing-info: unresolved clock relationships, generated-clock transforms, missing IO timing, unresolved timing environment. Never invents a value. |
-| `exceptions.py` | ~260 | Exception sanity (§14) + scenario coherence (§15). Step-13: records formal-verification state via `verify_exceptions`; unverified ⇒ `EXCEPTION_UNVERIFIED`, never concluded safe. |
+| `exceptions.py` | ~300 | Exception sanity (§14) + scenario coherence (§15). Step-13 records formal-verification state via `verify_exceptions`; Step-14 accepts an optional `FormalBackend`, exposes counterexamples as blocking `EXCEPTION_FORMAL_INVALID`, backend errors as blocking `EXCEPTION_VERIFICATION_ERROR`, and retains unproven evidence as `EXCEPTION_UNVERIFIED`. |
 | `sdc_import.py` | ~120 | Step-13 SDC import/parse classification (§16/Req 10): consumes importer diagnostics and classifies `SYNTAX_INVALID / SEMANTIC_INVALID / INCOMPLETE / COMPLETE / UNRESOLVED` without re-parsing. |
 | `backend.py` | ~50 | Backend capability (§16): preflight via the chosen `SDCBackend`; vendor syntax checks stay behind the backend abstraction. |
 
-### 5.11 `src/rca/exceptions/` — exception effectiveness & formal (WP-K)
+### 5.11 `src/rca/exceptions/` — exception effectiveness & formal (WP-K, Step 14 adapter)
 
-| File | Lines | Purpose |
-|---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `analyzer.py` | ~70 | Classifies false paths and multicycle paths by effectiveness: *necessary* (blocks a real failing path), *useless* (does not intersect any failing path — shadowed or redundant), *harmful* (hides a real timing problem that would otherwise be caught). Hooks into the QoR loop. |
-| `verifier.py` | ~60 | Orchestrates formal verification of exceptions via `FormalBackend`; defaults to "unverified" with a CONFIDENCE.LOW marker if no formal backend is connected. |
-| `formal_backend.py` | ~50 | Abstract formal backend (interface reserved for SymbiYosys/VC Formal/Conformal LEC plug-in). The default implementation returns `UNVERIFIED`. |
+| File | Purpose |
+|---|---|
+| `__init__.py` | Re-exports the structural, verification, and concrete adapter APIs. |
+| `analyzer.py` | Classifies false paths and multicycle paths by effectiveness: *necessary* (blocks a real failing path), *useless* (does not intersect any failing path — shadowed or redundant), *harmful* (hides a real timing problem that would otherwise be caught). Hooks into the QoR loop. |
+| `verifier.py` | Sole formal orchestration path. Retains UCM `scenario_ids` in the proof input, dispatches false-path/multicycle proofs through `FormalBackend`, and defaults to the conservative UNRESOLVED backend. |
+| `formal_backend.py` | Vendor-neutral `FormalBackend` / `VerificationResult` contract plus conservative and deterministic mock implementations. |
+| `symbiyosys.py` | **Step 14.** Concrete `SymbiYosysFormalBackend`: safely invokes explicit user-authored `.sby` jobs, requires an unambiguous SBY `PASS` plus exit code 0 for `VERIFIED`, retains job/tool/run/counterexample provenance, and otherwise stays UNRESOLVED or reports an error. |
+
+A timing exception selector is not itself a formal property. RCA therefore never synthesizes an assertion from an SDC selector: the user-owned `.sby` collateral supplies design-specific temporal assumptions and assertions, and `formal.proofs` maps that job to the exact UCM exception ID. This keeps UCM/SDC vendor-neutral and preserves the no-fabrication invariant.
 
 ### 5.12 `src/rca/equivalence/` — semantic constraint comparison (WP-L)
 
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | — | Re-exports. |
-| `normalize.py` | ~70 | Constraint normalization (§50): before comparing two constraints, canonicalize their target lists, clock references, waveform representation, and unit formatting so semantically identical constraints compare equal even when textually different (e.g., `10000ps` vs `10ns`, `-name clk` vs positional). |
-| `semantic_compare.py` | ~100 | `compare(a: ConstraintSet, b: ConstraintSet) → ComparisonResult`: returns equivalence (EQUIVALENT / DIFFERENT / OVERLAPPING / CONFLICTING), plus added/removed/modified constraint lists. Used by `rca compare` and by the optimizer to detect regressions. |
+| `normalize.py` | ~70 | Constraint normalization (§50): before comparing two constraints, canonicalize their target lists, clock references, waveform representation, and unit formatting. This makes semantically identical constraints compare equal even when textually different (e.g., `10000ps` vs `10ns`, `-name clk` vs positional). |
+| `semantic_compare.py` | ~100 | `compare(a: ConstraintSet, b: ConstraintSet) → ComparisonResult`: returns semantic equivalence/differences plus added/removed/modified constraint lists, deterministic `scenario_differences`, and source provenance summaries separate from semantic identity. It projects `scenario_ids=[]` to all active scenarios only when both UCMs provide comparable active matrices; one-sided matrices remain UNKNOWN. Used by `rca compare` and by the optimizer to detect regressions. |
 
 ### 5.13 `src/rca/source/` — source manifest and resolution (WP-A)
 
@@ -405,7 +408,7 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | 3 | Re-exports `ProjectConfig`, `load_config`, `default_config`, `write_config`, `PROJECT_SCHEMA`, `SCHEMA_VERSION`, `write_schema`. |
-| `model.py` | 286 | Pydantic v2 models: `ProjectConfig` (project, rtl, clocks, constraints, io, scenarios, optimization, eda, output, validation, dashboard sections with nested models `ProjectMeta`, `RTLConfig`, `ClockSpec`, `IOSpec`, `ConstraintDefaults`, `ScenarioSpec`, `OptimizationConfig`, `EDAConfig`, `OutputConfig`, `ValidationConfig`, `DashboardConfig`). `load_config(path) → ProjectConfig` reads YAML and validates; `default_config(top)` returns a starter config (used by `rca init`); `write_config(cfg, path)` writes YAML. |
+| `model.py` | ~340 | Pydantic v2 models: `ProjectConfig` (project, sources, constraints, analysis, flow, optimization, scenarios, MCMM, and optional `formal` sections). Step 14 adds `FormalConfig` and `FormalProofSpec` for explicit SymbiYosys job mappings; paths resolve from the project YAML. `load_config(path) → ProjectConfig` reads YAML and validates; `default_config(top)` returns a starter config (used by `rca init`); `write_config(cfg, path)` writes YAML. |
 | `schema.py` | 282 | Derives a **JSON Schema** (draft 2020-12) from the Pydantic model for editor support / external validation. `PROJECT_SCHEMA` is the schema dict; `SCHEMA_VERSION` is a monotonic integer; `write_schema(path)` serializes it to disk (already written to `configs/schemas/project.schema.json`). |
 
 ### 5.15 `src/rca/eda/` — EDA backends: synthesis / STA / PPA (WP-M)
@@ -420,14 +423,15 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | `common/__init__.py` | — | Re-exports shared EDA helpers. |
 | `common/mock.py` | ~120 | **Mock EDA backend** — a fast, deterministic surrogate used for CI, unit tests, and optimization smoke runs. It returns plausible timing results derived from clock period, register count, and SDC budgets (setup/hold slacks are modeled as `period - delay_estimate - budget`), and deterministically produces area/power numbers for Pareto smoke tests. It deliberately never crashes, so closed-loop tests always run. Imports guarded by `TYPE_CHECKING` to avoid a circular import with `qor.model`. |
 
-### 5.16 `src/rca/qor/` — QoR database + Pareto (WP-N, WP-O)
+### 5.16 `src/rca/qor/` — canonical QoR, Pareto, and history repository (WP-N, WP-O)
 
-| File | Lines | Purpose |
-|---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `model.py` | ~100 | `QoRResult`: per-candidate metrics (`constraint_set_id`, `wns_setup`, `tns_setup`, `wns_hold`, `tns_hold`, `area`, `dynamic_power`, `leakage_power`, `fmax`, `runtime_seconds`, `feasible`, `fail_reason`, `raw_report_path`, `scenario`). Knows how to serialize to JSON lines and deserialize. |
-| `metrics.py` | ~60 | Metric aggregation helpers: `combine_scenario_results(...)`, `score(cset, qor)` scalarization for ranking. |
-| `pareto.py` | ~170 | `ParetoFront`: non-dominated-sort over (setup-slack, hold-slack, -area, -power). `dominates(a,b)` returns true if a is no worse in all objectives and strictly better in at least one (using epsilon tolerance). `feasible(qr)` rejects candidates with negative WNS (setup or hold) or with constraint violations. Used by the optimizer to select the Pareto set (WP-O). Unit tested. |
+| File | Purpose |
+|---|---|
+| `model.py` | Canonical `QoRResult`, `CriticalPath`, and `Feasibility` model. Internal timing values are seconds and absent metrics remain `None`; persisted summaries are compatibility artifacts, not a second QoR model. |
+| `metrics.py`, `objectives.py`, `pareto.py` | Existing QoR comparison, objective, feasibility, and Pareto utilities. |
+| `repository.py` | **Step 21.** Local `sqlite3` historical-query sidecar at `<flow.output_dir>/qor.sqlite3`. It indexes existing QoR/manifests/candidates/MCMM evidence with schema migrations (`PRAGMA user_version` plus `schema_migrations`), WAL, foreign keys, FULL synchronous writes, and parameterized deterministic queries. It is not an EDA cache or artifact store. |
+
+The repository preserves run/candidate/session/scenario/cache/tool/constraint identity, artifacts/hashes, real-vs-proxy area distinction, nullable metrics, and report-derived power provenance. Existing `qor.json`, manifests, candidate JSONL, and optimizer JSON remain supported file artifacts. Its `rca history --import-legacy` path is explicit, deterministic, idempotent, and never rewrites those inputs; it prefers a retained `candidates.jsonl` snapshot and uses `optimizer_state.json` only when JSONL is absent.
 
 ### 5.17 `src/rca/optimizer/` — closed-loop multi-objective optimizer (WP-O)
 
@@ -457,19 +461,21 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 |---|---|---|
 | `__init__.py` | — | Reserved package for future "search for existing constraints" / knowledge-base lookup (Manual §146-149). |
 
-### 5.21 `src/rca/artifacts/` — artifact & cache manager (WP-A, WP-N)
+### 5.21 `src/rca/artifacts/` — artifact/provenance and cache authority (WP-A, WP-N)
+
+| File | Lines | Purpose |
+|---|---|---|
+| `manager.py` | `ArtifactManager` writes run directories and JSON/text artifacts; `RunManifest` records hashes, tool identity, artifact locators, and cache-relevant input evidence. Filesystem manifest/hash validation remains the experiment-reuse/cache authority. |
+
+The Step-21 SQLite sidecar indexes these existing artifacts only after they are written. It neither stores artifact contents nor changes cache lookup. A SQLite write failure leaves the physical artifact set, QoR, run status, and cache identity unchanged and is surfaced as a persistence warning for later explicit import/reconciliation.
+
+### 5.22 `src/rca/reports/` — timing and power report parsing
 
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | — | Re-exports. |
-| `manager.py` | ~140 | `ArtifactManager`: writes runs into `<results_dir>/runs/<timestamp>-<slug>/`, writes SDC files, QoR JSONL, manifests, optimization history, and UCM snapshots. Uses the deterministic hashes from `utils.hashing` to skip redundant EDA runs when inputs are identical (Manual §66, §153). |
-
-### 5.22 `src/rca/reports/` — human-readable reports
-
-| File | Lines | Purpose |
-|---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `timing.py` | ~120 | `TimingReport`: builds structured timing summary (WNS, TNS, WHS, critical path, endpoints, per-domain breakdown). Also `design_report(design_summary, tg_summary, validation, coverage, constraints) → str` which is the Rich table shown by `rca report`. |
+| `timing.py` | ~120 | Parses OpenSTA-style timing summaries and Yosys area/cell statistics conservatively. |
+| `power.py` | ~300 | Parses only OpenROAD/OpenSTA `report_power` group summaries with explicit units and one total row; returns report provenance/status for the existing QoR model and never estimates power. |
 
 ### 5.23 `src/rca/explanation/` — natural-language explainability (Manual §151)
 
@@ -615,6 +621,8 @@ packages (empty `__init__.py`) to be populated with:
 |---|---|
 | `docs/references.md` | Reference URLs per Manual §152: Synopsys TCM and white paper, Cadence Conformal CCD, OpenSTA, OpenROAD, Surelog/UHDM, slang, Yosys, and the UCSD timing-exceptions paper. |
 | `docs/decisions/ADR-001-universal-constraint-model.md` | Architecture Decision Record: why the UCM exists (vendor-neutral source of truth; SDC as derived rendering; strong typing with provenance), alternatives rejected (direct SDC strings, vendor-specific models with translators), consequences. |
+| `docs/decisions/ADR-002-validation-engine.md` | Architecture Decision Record: strengthen the one existing validation model rather than adding a competing Step-13 model. |
+| `docs/decisions/ADR-003-symbiyosys-formal-adapter.md` | Architecture Decision Record: use explicit user-authored SymbiYosys jobs through existing formal/validation abstractions; never generate a proof property from an SDC selector. |
 
 Placeholders for future docs:
 
@@ -748,11 +756,12 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca infer [CONFIG]` | Run inference only; prints the proposed ConstraintSet without generating SDC. | `--show-assumptions` |
 | `rca generate [CONFIG]` | Emit SDC from the current UCM (skip inference if a snapshot is present). | `--backend`, `--scenario NAME` |
 | `rca validate [CONFIG]` | Run the validator against the current UCM/design and print issues. | `--strict` |
-| `rca compare [CONFIG] --a FILE.sdc --b FILE.sdc` | Semantically compare two SDC files via normalization + `semantic_compare`. Prints equivalence verdict and added/removed/modified sets. |  |
+| `rca compare [CONFIG] --a FILE.sdc --b FILE.sdc` | Semantically compare two SDC files through the hardened SDC importer, normalization + `semantic_compare`. Prints equivalence/UNKNOWN verdict, field- and scenario-context differences, and added/removed/modified sets; `--json` emits deterministic machine output. | `--json` |
 | `rca coverage [CONFIG]` | Print only the coverage metrics (clock/in/out %). |  |
 | `rca explain [CONFIG] [CONSTRAINT_ID]` | Print natural-language explanation(s) of one or all constraints (evidence, assumptions, source). |  |
 | `rca run-sta [CONFIG]` | Synthesize with Yosys and/or run OpenSTA with current SDC; print timing report. | `--eda {yosys,opensta,mock}`, `--sdc FILE` |
-| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization. | `--backend`, `--iterations N`, `--eda-runs-per-iter N`, `--timeout SECS`, `--eda {mock,yosys,opensta}` |
+| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization; after its established files are written, records a session-scoped local historical index. | `--backend`, `--iterations N`, `--eda-runs-per-iter N`, `--timeout SECS`, `--eda {mock,yosys,opensta}` |
+| `rca history` | Query the local `<flow.output_dir>/qor.sqlite3` sidecar or explicitly import existing run artifacts. Never executes EDA, optimization, or cache reuse. | `--config`, `--output-dir`, `--run-id`, `--candidate --session`, `--scenario`, `--constraint-set`, `--best {setup_wns,area,power}`, `--area-source {real,proxy}`, `--import-legacy`, `--json` |
 | `rca inspect [CONFIG] {module,port,net,register,clock,path}` | Structured inspection sub-tables of the design model (e.g. `rca inspect project.yaml port` prints all ports). |  |
 | `rca report [CONFIG]` | Human-readable design report (clocks, resets, domains, missing info, validation, constraint list) — Rich formatted. |  |
 | `rca dashboard [CONFIG]` | Start the FastAPI web dashboard (uvicorn). | `--port 8765`, `--open-browser/--no-open-browser`, `--host 0.0.0.0` |
@@ -824,6 +833,87 @@ output:
 
 All values are validated by Pydantic; unknown keys raise an error.
 
+### Optional SymbiYosys exception verification (Step 14)
+
+Formal verification is opt-in and preserves the conservative default. To run a
+reviewed, user-authored SymbiYosys proof job when validating a particular UCM
+exception, add a top-level `formal:` block:
+
+```yaml
+formal:
+  backend: symbiyosys                 # default: conservative
+  symbiyosys_executable: sby          # optional; RCA_SYMBIYOSYS/PATH otherwise
+  work_dir: output/formal
+  timeout_seconds: 300
+  proofs:
+    - constraint_id: FP0001           # exact UCM false-path constraint ID
+      exception_kind: false_path      # false_path | multicycle
+      sby_file: formal/async_fifo.sby # user-authored proof collateral
+      task: async_fifo_fp             # optional SBY task
+```
+
+The `.sby` file owns the RTL/formal source list, top module, assumptions,
+assertions, engines, and any mode/corner setup. RCA does **not** infer a
+property from an SDC path selector. It invokes `sby -f -d <derived-run-dir>
+<file> [task]` without a shell; only a `PASS` marker and exit status zero
+returns `VERIFIED`. `FAIL` returns `INVALID` with preserved counterexample
+artifact paths. Missing mapping/tool/file, timeout, `UNKNOWN`, or no status
+marker stay `UNRESOLVED`; ambiguous/error outcomes are blocking verification
+errors. Relative proof and work paths are resolved from the project YAML.
+
+`rca validate`, `rca report`, and `rca coverage` use this configuration through
+the existing validation engine. By default (`formal.backend: conservative`),
+no external proof process runs and the established `EXCEPTION_UNVERIFIED`
+behavior remains unchanged.
+
+### Configured power report ingestion (Step 20)
+
+The only supported power input is an explicitly configured
+OpenROAD/OpenSTA-style `report_power` group-summary text file. It is consumed
+by a completed real `yosys_opensta` flow; RCA does not add `report_power` to a
+Tcl script, estimate activity, or claim to run a power engine.
+
+```yaml
+flow:
+  power_reports:
+    - format: openroad_report_power
+      path: reports/func_slow.power.rpt
+      scenario_id: FUNC_SLOW
+      # producer defaults to openroad_opensta; producer_version is optional
+```
+
+The report must identify the group table with Internal, Switching, Leakage,
+and Total columns, use one unambiguous final `Total` row, and declare its unit
+explicitly as W/Watts, mW, uW/µW, nW, or pW. Values are normalized to watts.
+Total maps to `QoRResult.power` and `power_total`; dynamic maps to
+Internal + Switching only when both cells are present; leakage maps directly.
+A literal zero is valid available evidence. Detailed parser classifications are
+`UNKNOWN` for missing/ambiguous report content, `UNAVAILABLE` for absent files,
+`MALFORMED` for structural/numeric parse failures, `INVALID` for semantic
+failures, and `UNSUPPORTED` for other formats/units; none receives a fabricated
+numeric total. These are `PowerParseStatus` values stored in
+`raw_reports["power"]["parsing_status"]`. Canonical `QoRResult.power_status`
+remains the historical `PowerStatus` vocabulary only: `AVAILABLE`,
+`UNAVAILABLE`, and compatibility-only `ESTIMATED`; every non-available parser
+classification is canonical `UNAVAILABLE` with all canonical power fields
+`None`.
+
+For MCMM, every mapping requires an active `scenario_id`; global fallback and
+duplicate mappings are rejected. A scenario with no usable power report leaves
+the global power objective unknown rather than averaging other scenarios. The
+configured source path, SHA-256, format/parser version, original/normalized
+unit, producer/producer version, discovered tool version, scenario/mode/corner,
+and diagnostics appear under the existing
+`QoRResult.raw_reports["power"]`, summary output, and existing run manifest.
+Report content and identity are part of the existing flow cache key. Mock flow
+always remains explicitly mock and power-unavailable. `rca run-sta`,
+`rca optimize`, and `rca report` display report-derived power and provenance;
+`rca report` only shows already-recorded QoR and does not run a tool.
+
+The checked-in fixture is representative syntax for tests, not a tool run in
+this repository. See `STEP20_POWER_REPORT.md` for detailed status and
+validation policy.
+
 ---
 
 ## 14. Safety, Confidence, Provenance, and Invariants
@@ -894,6 +984,11 @@ Each `Scenario` is stored on the `ConstraintSet.scenarios` dict. The SDC
 generator can render per-scenario SDC with the appropriate `set_operating_conditions`
 / derate commands (backend-dependent). The optimizer loops over active
 scenarios when evaluating a candidate, combining QoR with worst-case WNS.
+
+When Step-14 SymbiYosys verification is configured, an exception's UCM
+`scenario_ids` are retained in proof provenance. RCA does not infer a
+per-corner property from that membership: the user-authored `.sby` job/task
+must explicitly establish the intended mode/corner assumptions.
 
 ---
 
@@ -969,6 +1064,25 @@ docker run --rm -v $PWD:/work -p 8765:8765 rca dashboard project.yaml --host 0.0
 
 ---
 
+## 18.1 Local QoR history repository (Step 21)
+
+SQLite is selected as a portable, dependency-free local sidecar; it does not
+provide distributed/cross-machine database semantics. The schema normalizes
+optimization sessions, session-scoped candidates and mutations, constraint-set
+identities, evaluations, canonical QoR measurements, power evidence, artifact
+references, MCMM aggregates/objectives/members, and an append-only migration
+ledger. Sparse diagnostics, report metadata, timing distributions, and manifest
+extra fields retain structured JSON where relational filtering is not useful.
+
+`record_flow_evaluation`, `record_optimizer_session`, and
+`record_mcmm_aggregate` use `BEGIN IMMEDIATE` transactions. Matching evidence
+fingerprints are no-ops; changed evidence for an existing stable ID is a clear
+conflict. `list_runs`, `best_qor`, candidate-lineage, MCMM, artifact,
+provenance, and replay-identity queries have fixed ordering and whitelisted
+fields. `get_replay_identity` validates retained artifact paths/hashes and
+reports absent evidence, but does not execute or promise a reproducible EDA
+rerun. See `STEP21_QOR_DATABASE.md` for the complete contract.
+
 ## 19. Known Gaps and Roadmap
 
 Implemented as alpha-grade:
@@ -979,9 +1093,11 @@ Implemented as alpha-grade:
 - Commercial backends (Synopsys PrimeTime/DC, Cadence Tempus/Genus) emit
   correct SDC headers and dialect notes but do not yet produce all the
   tool-specific Tcl prologue/epilogue.
-- Formal verification of false paths / multicycle paths is an interface
-  (`FormalBackend`) with a conservative UNVERIFIED default; a SymbiYosys
-  adapter is planned.
+- Formal verification of false paths / multicycle paths has an optional
+  Step-14 `SymbiYosysFormalBackend` for explicit user-authored `.sby` jobs;
+  the default remains conservative UNRESOLVED. RCA intentionally does not
+  generate formal properties or bundle SymbiYosys/SMT tools. Additional
+  commercial formal adapters remain future work.
 - Hierarchy elaboration (parameter binding, generate-block unrolling) is
   handled by pyslang already; parser-independent elaboration passes in
   `rca.elaboration` are reserved.

@@ -156,7 +156,12 @@ def _raw_metric(qor, name: str) -> tuple[float | None, str | None]:
         av = _area_value(qor)
         return av.value, av.source
     if name == "power":
-        if qor.power_status != PowerStatus.UNAVAILABLE.value and qor.power is not None:
+        # Only canonical usable power evidence participates.  Detailed parser
+        # failures are mapped to canonical UNAVAILABLE and retained solely in
+        # report provenance; never let an arbitrary status plus a value become
+        # a fabricated objective.
+        usable_power_statuses = {PowerStatus.AVAILABLE.value, PowerStatus.ESTIMATED.value}
+        if qor.power_status in usable_power_statuses and qor.power is not None:
             return float(qor.power), None
         return None, None
     if name == "constraint_quality":
@@ -465,13 +470,12 @@ def _cmp_area(qa, qb) -> int | None:
 
 
 def _cmp_power(qa, qb) -> int | None:
-    """Compare power (MIN) only when known on both sides."""
+    """Compare power (MIN) only when both canonical values are usable."""
     if qa.power is None or qb.power is None:
         return None
-    # Respect UNAVAILABLE status: if either side reports unavailable, treat as unknown.
-    from ..utils.enums import PowerStatus
-    if (getattr(qa, "power_status", None) == PowerStatus.UNAVAILABLE.value or
-        getattr(qb, "power_status", None) == PowerStatus.UNAVAILABLE.value):
+    usable_power_statuses = {PowerStatus.AVAILABLE.value, PowerStatus.ESTIMATED.value}
+    if (getattr(qa, "power_status", None) not in usable_power_statuses or
+            getattr(qb, "power_status", None) not in usable_power_statuses):
         return None
     return _cmp_lower_better(qa.power, qb.power)
 
@@ -595,9 +599,10 @@ def scalar_score(c, baseline, priorities) -> float:
         s += a * _area_for_score(q, bq)
         # Power contributes only when known on both sides (conservative).
         # UNKNOWN power is not zero and not a free win.
+        usable_power_statuses = {PowerStatus.AVAILABLE.value, PowerStatus.ESTIMATED.value}
         if (q.power is not None and bq.power is not None
-                and getattr(q, "power_status", None) != PowerStatus.UNAVAILABLE.value
-                and getattr(bq, "power_status", None) != PowerStatus.UNAVAILABLE.value
+                and getattr(q, "power_status", None) in usable_power_statuses
+                and getattr(bq, "power_status", None) in usable_power_statuses
                 and bq.power != 0):
             s += pw * (1.0 - q.power / bq.power)
     # NOTE: margin_utilization is deliberately NOT added to scalar_score —

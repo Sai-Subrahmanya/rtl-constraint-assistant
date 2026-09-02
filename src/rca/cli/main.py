@@ -16,6 +16,7 @@ from typing import Optional
 import typer
 import uvicorn
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -25,8 +26,8 @@ from ..config.model import ProjectConfig, default_config, load_config, write_con
 from ..constraint_model import ConstraintSet
 from ..design_model import Design
 from ..eda import MockEDA, OpenSTABackend, YosysBackend, get_tool, run_flow
-from ..equivalence import compare as compare_sets
-from ..exceptions import analyze_exceptions, verify_exceptions
+from ..equivalence import compare_sdc_text
+from ..exceptions import analyze_exceptions, formal_backend_from_config, verify_exceptions
 from ..explanation import design_report, explain_candidate, explain_constraint
 from ..inference import InferenceEngine
 from ..mcmm import (
@@ -40,6 +41,7 @@ from ..optimizer import Optimizer
 from ..parser import SlangAdapter
 from ..provenance import AssumptionLedger
 from ..qor.model import QoRResult
+from ..qor.repository import QoRRepositoryError, SQLiteQoRRepository
 from ..sdc import SDCParser, get_backend
 from ..sdc_importer import SdcImporter
 from ..scenarios import build_scenarios
@@ -117,6 +119,11 @@ def _am(cfg: ProjectConfig) -> ArtifactManager:
     return ArtifactManager(out)
 
 
+def _formal_backend(cfg: ProjectConfig):
+    """Construct the opt-in formal backend from config without changing UCM state."""
+    return formal_backend_from_config(cfg.formal)
+
+
 # ---- MCMM helpers (Step 12 §13, §14) --------------------------------
 
 def _mcmm_matrix(cfg: ProjectConfig, cset: ConstraintSet):
@@ -160,6 +167,59 @@ def _mcmm_per_scenario_sdc(cset: ConstraintSet, backend, design_name: str,
     return res.text
 
 
+def _print_power_summary(console, q: dict, *, indent: str = "  ") -> None:
+    """Render report-derived power without implying a live/silicon measurement."""
+    status = q.get("power_status", "UNAVAILABLE")
+    total = q.get("power_total", q.get("power"))
+    if status == "AVAILABLE" and total is not None:
+        console.print(f"{indent}Tool-reported power: {total:.6g} W")
+        dynamic = q.get("power_dynamic")
+        leakage = q.get("power_leakage")
+        if dynamic is not None or leakage is not None:
+            pieces = []
+            if dynamic is not None:
+                pieces.append(f"dynamic={dynamic:.6g} W")
+            if leakage is not None:
+                pieces.append(f"leakage={leakage:.6g} W")
+            console.print(f"{indent}  " + "  ".join(pieces))
+    else:
+        # Canonical QoR remains UNAVAILABLE for every unusable report. Retain
+        # the parser-bound detail so users can distinguish absent evidence from
+        # unknown, malformed, invalid, or unsupported configured evidence.
+        provenance = q.get("power_provenance") or {}
+        parse_status = provenance.get("parsing_status")
+        suffix = (f" (report parser: {parse_status})"
+                  if parse_status and parse_status != status else "")
+        console.print(f"{indent}Power: {status}{suffix}")
+    provenance = q.get("power_provenance") or {}
+    if provenance:
+        report_path = provenance.get("report_path") or "-"
+        digest = provenance.get("sha256") or "-"
+        fmt = provenance.get("format") or "-"
+        console.print(f"{indent}Power provenance: format={fmt} path={report_path} sha256={digest}")
+
+
+def _latest_qor_summary(cfg: ProjectConfig) -> dict | None:
+    """Read the most recently modified completed QoR artifact, if any.
+
+    ``rca report`` remains a reporting command: it never runs a tool or parses
+    a new report on its own.  It only presents report-derived QoR already
+    recorded by ``run-sta``/the flow.
+    """
+    runs_dir = Path(cfg.flow.output_dir) / "runs"
+    if not runs_dir.is_dir():
+        return None
+    paths = sorted(runs_dir.glob("*/qor.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in paths:
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(candidate, dict):
+                return candidate
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
+
 def _print_mcmm_result(console, m: "MCMMResult", matrix) -> None:
     """Print an MCMMResult with full per-scenario auditability (Step 12 §14)."""
     from rich.table import Table
@@ -197,6 +257,38 @@ def _print_mcmm_result(console, m: "MCMMResult", matrix) -> None:
         console.print("  Diagnostics:")
         for d in m.diagnostics:
             console.print(f"    - {d}")
+
+
+def _record_standalone_mcmm_history(cfg: ProjectConfig, cset: ConstraintSet,
+                                    mcmm_result: MCMMResult, candidate_id: str = "baseline") -> tuple[str | None, str | None]:
+    """Index a completed ``run-sta`` MCMM aggregate without changing its artifacts.
+
+    The repository needs a session-scoped candidate key even for a baseline
+    MCMM command.  This creates a one-candidate historical session after the
+    established MCMM artifact is written; it does not run an optimizer or
+    modify the MCMM/flow/cache models.
+    """
+    try:
+        from ..optimizer import Candidate, OptimizationResult
+
+        candidate = Candidate(id=candidate_id, constraint_set=cset, mcmm=mcmm_result)
+        candidate.hard_feasible = bool(mcmm_result.feasible)
+        candidate.blocked = bool(mcmm_result.blocked)
+        candidate.global_status = mcmm_result.global_status
+        candidate.infeasible_reason = mcmm_result.global_reason
+        candidate.cache_key = mcmm_result.cache_key
+        candidate.cache_status = mcmm_result.cache_status
+        candidate.run_id = ";".join(mcmm_result.run_ids)
+        candidate.margin_headroom_ns = mcmm_result.margin_headroom_ns
+        candidate.margin_utilization = mcmm_result.margin_utilization
+        session = OptimizationResult(baseline=candidate, final=candidate, all_candidates=[candidate])
+        repo = SQLiteQoRRepository.for_output_dir(cfg.flow.output_dir)
+        session_id = repo.record_optimizer_session(
+            session, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
+        )
+        return session_id, None
+    except Exception as exc:
+        return None, f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
 
 
 # ---- Commands ---------------------------------------------------------------
@@ -398,7 +490,7 @@ def validate(config: str = typer.Argument(..., help="Path to project YAML"),
     active = matrix.active_ids if matrix.is_enabled else None
     result = run_validation(design, tg, cset, backend=backend,
                             active_scenarios=set(active) if active else None,
-                            parser=parser_obj)
+                            parser=parser_obj, formal_backend=_formal_backend(cfg))
     am = _am(cfg)
     am.write_json("validation_report.json", result.as_dict())
     if result.coverage:
@@ -453,7 +545,7 @@ def coverage(config: str = typer.Argument(..., help="Path to project YAML")):
     tg = _do_timing(cfg, design)
     ledger = AssumptionLedger()
     cset, _ = _do_inference(cfg, design, tg, ledger)
-    result = run_validation(design, tg, cset)
+    result = run_validation(design, tg, cset, formal_backend=_formal_backend(cfg))
     cov = result.coverage
     am = _am(cfg)
     am.write_json("coverage_report.json", cov.as_dict() if cov else {})
@@ -480,16 +572,18 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
     separated from semantic identity; unsupported or unresolved options
     surface as UNKNOWN rather than false equivalence.
     """
-    cfg = _load(config)
-    am = _am(cfg)
+    # Retain the project-config argument as part of the established CLI
+    # contract, but compare the supplied SDC inputs through the hardened
+    # importer.  The legacy SDCParser silently drops unsupported commands,
+    # which could otherwise turn materially unknown intent into EQUIVALENT.
+    _load(config)
     try:
-        parser = SDCParser()
-        cset_a = parser.parse_file(a)
-        cset_b = parser.parse_file(b)
-    except Exception as exc:
-        console.print(f"[red]Failed to parse SDC: {exc}[/red]")
-        raise typer.Exit(code=2)
-    result = compare_sets(cset_a, cset_b)
+        text_a = Path(a).read_text(encoding="utf-8", errors="replace")
+        text_b = Path(b).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        console.print(f"[red]Failed to read SDC: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    result = compare_sdc_text(text_a, text_b, source_a=a, source_b=b)
     if json_out:
         import json as _json
         console.print_json(data=result.to_dict())
@@ -513,7 +607,15 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
                   f"   Only in B: {c['only_in_right']}"
                   f"   Unknown: [magenta]{c['unknown']}[/]")
     console.print(f"  Duplicates in A: {c['duplicates_left']}   "
-                  f"Duplicates in B: {c['duplicates_right']}")
+                  f"Duplicates in B: {c['duplicates_right']}"
+                  f"   Scenario context findings: {c['scenario_differences']}")
+    if result.scenario_differences:
+        console.print("\n[bold]Scenario context findings:[/bold]")
+        for finding in result.scenario_differences[:10]:
+            where = finding.scenario_id or "active scenario matrix"
+            category = escape(f"[{finding.status}]")
+            console.print(f"  - {category} {escape(where)}: {escape(finding.field)}")
+            console.print(f"      {escape(finding.explanation)}")
     if result.different_constraints:
         console.print("\n[bold]Top semantic differences:[/bold]")
         shown = 0
@@ -522,25 +624,47 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
                 console.print(f"  … and {len(result.different_constraints)-shown} more")
                 break
             ids = f"{p.a_id} → {p.b_id}" if p.a_id and p.b_id else (p.a_id or p.b_id or "")
-            console.print(f"  - [{p.constraint_type}] {ids}")
+            category = escape(f"[{p.constraint_type}]")
+            console.print(f"  - {category} {escape(ids)}")
             for fld in p.fields[:3]:
-                console.print(f"      {fld.field}: A={fld.value_a!r}  B={fld.value_b!r}")
-                console.print(f"        {fld.explanation}")
+                console.print(
+                    f"      {escape(fld.field)}: A={escape(repr(fld.value_a))}  "
+                    f"B={escape(repr(fld.value_b))}"
+                )
+                console.print(f"        {escape(fld.explanation)}")
+            provenance = []
+            if p.a_provenance is not None:
+                provenance.append(f"A={p.a_provenance!r}")
+            if p.b_provenance is not None:
+                provenance.append(f"B={p.b_provenance!r}")
+            if provenance:
+                console.print(f"      Provenance: {escape('; '.join(provenance))}")
             shown += 1
     if result.only_in_left:
         console.print("\n[bold]Only in A:[/bold]")
         for p in result.only_in_left[:10]:
-            console.print(f"  - [{p.constraint_type}] {p.a_id}")
+            category = escape(f"[{p.constraint_type}]")
+            console.print(f"  - {category} {escape(p.a_id or '')}")
     if result.only_in_right:
         console.print("\n[bold]Only in B:[/bold]")
         for p in result.only_in_right[:10]:
-            console.print(f"  - [{p.constraint_type}] {p.b_id}")
+            category = escape(f"[{p.constraint_type}]")
+            console.print(f"  - {category} {escape(p.b_id or '')}")
     if result.unknown_constraints:
         console.print("\n[magenta][bold]UNKNOWN (cannot prove equivalence):[/bold][/magenta]")
         for p in result.unknown_constraints[:10]:
-            console.print(f"  - [{p.constraint_type}] {p.a_id or '?'} vs {p.b_id or '?'}")
+            ids = f"{p.a_id or '?'} vs {p.b_id or '?'}"
+            category = escape(f"[{p.constraint_type}]")
+            console.print(f"  - {category} {escape(ids)}")
             for n in p.notes[:3]:
-                console.print(f"      {n}")
+                console.print(f"      {escape(n)}")
+            provenance = []
+            if p.a_provenance is not None:
+                provenance.append(f"A={p.a_provenance!r}")
+            if p.b_provenance is not None:
+                provenance.append(f"B={p.b_provenance!r}")
+            if provenance:
+                console.print(f"      Provenance: {escape('; '.join(provenance))}")
     if result.normalization_notes:
         console.print("\n[dim]Normalization notes:[/dim]")
         for n in result.normalization_notes:
@@ -604,6 +728,11 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
             ev = mock_mcmm_evaluator(matrix, base_cset=cset)
             m = ev(base_cand, Path(cfg.flow.output_dir))
             am.write_json("mcmm_report.json", m.to_dict())
+            session_id, persistence_warning = _record_standalone_mcmm_history(cfg, cset, m)
+            if session_id:
+                console.print(f"[dim]Historical QoR session: {session_id}[/dim]")
+            if persistence_warning:
+                console.print(f"[yellow]{persistence_warning}[/yellow]")
             _print_mcmm_result(console, m, matrix)
             return
         # Real backend: run the flow once per active scenario, then aggregate.
@@ -623,14 +752,59 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
                 sources=sources, include_dirs=include_dirs, defines=defines,
                 output_dir=Path(cfg.flow.output_dir), backend=backend,
                 candidate_id=f"baseline_{scenario.id}",
-                scenario=scenario.id, corner=scenario.corner,
+                scenario=scenario.id, corner=scenario.corner, mode=scenario.mode,
                 allow_partial_sdc=allow_partial_sdc, force=force,
             )
             per_scenario[scenario.id] = res
-        am.write_json("mcmm_report.json", per_scenario)
+        # ``qor_result`` is an internal canonical object used by optimizer
+        # callbacks; persist the established JSON summary, not its repr.
+        am.write_json("mcmm_report.json", {
+            sid: {key: value for key, value in res.items() if key != "qor_result"}
+            for sid, res in per_scenario.items()
+        })
+        # Keep the established mcmm_report.json layout untouched, then build
+        # the existing MCMM model solely for relational aggregate indexing.
+        from ..mcmm import BLOCKED, ScenarioQoR, aggregate_objectives, finalize_limiting, global_feasibility, global_margin
+        aggregate = MCMMResult(candidate_id="baseline", active_scenario_ids=list(matrix.active_ids))
+        for sid in matrix.active_ids:
+            scenario = matrix.scenario(sid)
+            res = per_scenario[sid]
+            sqor = ScenarioQoR(
+                candidate_id="baseline", scenario_id=sid, mode=scenario.mode, corner=scenario.corner,
+                name=scenario.name, qor=res.get("qor_result"), cache_key=res.get("cache_key", ""),
+                cache_status=("HIT" if res.get("status") == "CACHE_HIT" else
+                              "MISS" if res.get("cache_key") else res.get("status", "")),
+                run_id=res.get("run_id", ""), backend=backend, tool=backend,
+            )
+            # A failed/blocked scenario has no canonical QoR for the shared
+            # MCMM helper to classify. Preserve that observed flow status
+            # explicitly rather than allowing ScenarioQoR's historical default
+            # of ``infeasible`` to recast it as a timing verdict.
+            if sqor.qor is None:
+                sqor.status = BLOCKED
+                sqor.blocked = True
+                sqor.infeasible_reason = str(
+                    res.get("blocked_reason") or "; ".join(res.get("diagnostics") or []) or
+                    res.get("status") or "no QoR result"
+                )
+            aggregate.scenario_results[sid] = sqor
+            if sqor.run_id:
+                aggregate.run_ids.append(sqor.run_id)
+        aggregate.eda_runs = len(aggregate.scenario_results)
+        global_feasibility(aggregate)
+        aggregate_objectives(aggregate)
+        global_margin(aggregate)
+        finalize_limiting(aggregate)
+        session_id, persistence_warning = _record_standalone_mcmm_history(cfg, cset, aggregate)
+        if session_id:
+            console.print(f"[dim]Historical QoR session: {session_id}[/dim]")
+        if persistence_warning:
+            console.print(f"[yellow]{persistence_warning}[/yellow]")
         for sid, res in per_scenario.items():
             console.print(f"[cyan]Scenario {sid}[/cyan]  status={res.get('status')}  "
-                          f"run_id={res.get('run_id')}  qor={res.get('qor')}")
+                          f"run_id={res.get('run_id')}")
+            if isinstance(res.get("qor"), dict):
+                _print_power_summary(console, res["qor"], indent="    ")
         return
 
     # Generate SDC (using balanced safe mode by default; user can switch via --allow-partial)
@@ -647,12 +821,23 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
     include_dirs = resolve_include_dirs(cfg)
     defines = dict(getattr(cfg, "sources", None).defines or {}) if getattr(cfg, "sources", None) else {}
 
+    # Preserve a configured single scenario's identity when present so a
+    # scenario-labelled power report is never silently ignored or rebound.
+    flow_scenario = "default"
+    flow_corner = "default"
+    flow_mode = "default"
+    if matrix.scenario_count == 1 and cfg.scenarios:
+        only_scenario = matrix.active_scenarios()[0]
+        flow_scenario = only_scenario.id
+        flow_corner = only_scenario.corner
+        flow_mode = only_scenario.mode
     result = run_flow(
         cfg=cfg, cset=cset, sdc_text=sdc_text,
         sdc_generation_status=gen.status if isinstance(gen.status, str) else gen.status.value,
         sources=sources, include_dirs=include_dirs, defines=defines,
         output_dir=Path(cfg.flow.output_dir), backend=backend,
-        candidate_id="baseline", allow_partial_sdc=allow_partial_sdc,
+        candidate_id="baseline", scenario=flow_scenario, corner=flow_corner, mode=flow_mode,
+        allow_partial_sdc=allow_partial_sdc,
         force=force,
     )
 
@@ -684,7 +869,7 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
     if result.get("qor"):
         q = result["qor"]
         console.print("\n[bold]TIMING[/bold]")
-        def _ns(x): return f"{x*1e9:.3f} ns" if isinstance(x,(int,float)) else "n/a"
+        def _ns(x): return f"{x:.3f} ns" if isinstance(x, (int, float)) else "n/a"
         console.print(f"  Setup WNS: {_ns(q.get('setup_wns_ns'))}   TNS: {_ns(q.get('setup_tns_ns'))}  violations={q.get('setup_violations')}")
         console.print(f"  Hold  WNS: {_ns(q.get('hold_wns_ns'))}   TNS: {_ns(q.get('hold_tns_ns'))}  violations={q.get('hold_violations')}")
         console.print("\n[bold]QoR[/bold]")
@@ -692,7 +877,7 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
         area_label = "area" if q.get("area") is not None else "area_proxy (cell_count)"
         console.print(f"  Cell count: {q.get('cell_count')}   FF: {q.get('ff_count')}")
         console.print(f"  {area_label}: {area}")
-        console.print(f"  Power: {q.get('power_status','UNAVAILABLE')}")
+        _print_power_summary(console, q)
         if q.get("critical_setup"):
             cs = q["critical_setup"]
             console.print(f"  Worst setup path: {cs.get('startpoint')} -> {cs.get('endpoint')}  "
@@ -739,15 +924,20 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
             cand_cset = cand.constraint_set or cset
             sdc_text = _mcmm_per_scenario_sdc(
                 cand_cset, sdc_backend, cfg.project.name, matrix, scenario.id)
-            sdc_p = work / f"{cand.id}.{scenario.id}.sdc"
-            sdc_p.parent.mkdir(parents=True, exist_ok=True)
-            sdc_p.write_text(sdc_text, encoding="utf-8")
-            yosys = YosysBackend()
-            ndir = work / f"{cand.id}_{scenario.id}"
-            netlist = yosys.synthesize(sources, cfg.top_module(), libs, ndir)
-            sta = OpenSTABackend()
-            return sta.run_sta(netlist, sdc_p, libs, ndir, cfg.top_module(),
-                               corner=scenario.corner)
+            flow_result = run_flow(
+                cfg=cfg, cset=cand_cset, sdc_text=sdc_text,
+                sdc_generation_status="COMPLETE", sources=sources,
+                include_dirs=resolve_include_dirs(cfg),
+                output_dir=Path(cfg.flow.output_dir), backend="yosys_opensta",
+                candidate_id=cand.id, scenario=scenario.id, corner=scenario.corner,
+                mode=scenario.mode,
+            )
+            return {
+                "qor": flow_result.get("qor_result"),
+                "cache_key": flow_result.get("cache_key", ""),
+                "cache_status": flow_result.get("status", ""),
+                "run_id": flow_result.get("run_id", ""),
+            }
 
         if backend == "mock":
             evaluate = mock_mcmm_evaluator(matrix, base_cset=cset)
@@ -759,15 +949,17 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
         def evaluate(cand, work):
             cand_cset = cand.constraint_set or cset
             sdc_text = sdc_backend.render(cand_cset, design_name=cfg.project.name)
-            sdc_p = work / f"{cand.id}.sdc"
-            sdc_p.write_text(sdc_text, encoding="utf-8")
             if backend == "mock":
                 tool = MockEDA()
                 return tool.evaluate_candidate(cand, work)
-            yosys = YosysBackend()
-            netlist = yosys.synthesize(sources, cfg.top_module(), libs, work / cand.id)
-            sta = OpenSTABackend()
-            return sta.run_sta(netlist, sdc_p, libs, work / cand.id, cfg.top_module())
+            flow_result = run_flow(
+                cfg=cfg, cset=cand_cset, sdc_text=sdc_text,
+                sdc_generation_status="COMPLETE", sources=sources,
+                include_dirs=resolve_include_dirs(cfg),
+                output_dir=Path(cfg.flow.output_dir), backend="yosys_opensta",
+                candidate_id=cand.id,
+            )
+            return flow_result.get("qor_result")
 
     opt = Optimizer(cfg, evaluate_fn=evaluate, work_dir=runs_dir)
     result = opt.run(cset)
@@ -783,7 +975,19 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
     if result.final and result.final.constraint_set:
         final_sdc = sdc_backend.render(result.final.constraint_set, design_name=cfg.project.name)
         am.write_text("design.final.sdc", final_sdc)
+    # The existing optimizer JSON/JSONL artifacts remain canonical.  Index
+    # after they are complete; a database issue only emits a warning and never
+    # changes candidate, optimizer, EDA, or cache semantics.
+    history_session_id = None
+    try:
+        history_session_id = SQLiteQoRRepository.for_output_dir(cfg.flow.output_dir).record_optimizer_session(
+            result, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
+        )
+    except Exception as exc:
+        console.print(f"[yellow]QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}[/yellow]")
     console.print(Panel("[cyan bold]Optimization complete[/cyan bold]"))
+    if history_session_id:
+        console.print(f"  Historical QoR session: {history_session_id}")
     console.print(f"  Stop reason: {result.stop_reason.value if result.stop_reason else 'n/a'}")
     console.print(f"  Iterations:  {result.iterations}  EDA runs: {result.eda_runs}  Elapsed: {result.elapsed_seconds:.1f}s")
     console.print(f"  Pareto size: {len(result.pareto)}")
@@ -800,15 +1004,20 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
                 sq = m.scenario_results.get(sid)
                 if sq is None:
                     continue
-                s_wns = sq.qor.setup_wns * 1e9 if sq.qor and sq.qor.setup_wns is not None else None
-                h_wns = sq.qor.hold_wns * 1e9 if sq.qor and sq.qor.hold_wns is not None else None
+                s_wns = (f"{sq.qor.setup_wns * 1e9:.3f}" if sq.qor and sq.qor.setup_wns is not None else "-")
+                h_wns = (f"{sq.qor.hold_wns * 1e9:.3f}" if sq.qor and sq.qor.hold_wns is not None else "-")
                 console.print(f"    [{sid} {sq.mode}/{sq.corner}] {sq.status}  "
-                              f"setup={s_wns:.3f}ns  hold={h_wns:.3f}ns  "
+                              f"setup={s_wns}ns  hold={h_wns}ns  "
                               f"util={('%.2f' % sq.margin_utilization) if sq.margin_utilization is not None else '-'}")
+                if sq.qor:
+                    _print_power_summary(console, sq.qor.summary(), indent="      ")
         elif q:
-            console.print(f"  Setup WNS: {q.setup_wns*1e9 if q.setup_wns is not None else '-':.3f} ns")
-            console.print(f"  Hold WNS:  {q.hold_wns*1e9 if q.hold_wns is not None else '-':.3f} ns")
-            console.print(f"  Area:      {q.area_total}  Power: {q.power_total}")
+            s_wns = f"{q.setup_wns * 1e9:.3f} ns" if q.setup_wns is not None else "-"
+            h_wns = f"{q.hold_wns * 1e9:.3f} ns" if q.hold_wns is not None else "-"
+            console.print(f"  Setup WNS: {s_wns}")
+            console.print(f"  Hold WNS:  {h_wns}")
+            console.print(f"  Area:      {q.area_total}")
+            _print_power_summary(console, q.summary())
     if dashboard:
         _run_dashboard(cfg=cfg)
 
@@ -822,11 +1031,12 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
     tg = _do_timing(cfg, design)
     ledger = AssumptionLedger()
     cset, _ = _do_inference(cfg, design, tg, ledger)
-    val_result = run_validation(design, tg, cset)
+    val_result = run_validation(design, tg, cset, formal_backend=_formal_backend(cfg))
     missing = tg.missing_information()
+    latest_qor = _latest_qor_summary(cfg)
     text = design_report(design.summary(), tg.summary(), val_result.as_dict(),
                          val_result.coverage.as_dict() if val_result.coverage else None,
-                         cset, missing)
+                         cset, missing, latest_qor)
     am = _am(cfg)
     am.write_text("inference_report.txt", text)
     _maybe_print_matrix(cfg, cset, console)
@@ -834,8 +1044,74 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
                   {"design": design.summary(), "timing": tg.summary(),
                    "validation": val_result.as_dict(),
                    "coverage": val_result.coverage.as_dict() if val_result.coverage else None,
+                   "qor": latest_qor,
                    "constraints": cset.snapshot()})
     sys.stdout.write(text)
+
+
+@app.command()
+def history(
+    run_id: str | None = typer.Option(None, "--run-id", help="Physical run/evaluation id"),
+    candidate_id: str | None = typer.Option(None, "--candidate", help="Candidate id"),
+    session_id: str | None = typer.Option(None, "--session", help="Optimization session id"),
+    scenario_id: str | None = typer.Option(None, "--scenario", help="Scenario id"),
+    constraint_set_hash: str | None = typer.Option(None, "--constraint-set", help="Constraint-set hash"),
+    best: str | None = typer.Option(None, "--best", help="setup_wns|area|power"),
+    import_legacy: bool = typer.Option(False, "--import-legacy", help="Explicitly index existing run artifacts"),
+    include_mock: bool = typer.Option(False, "--include-mock", help="Include mock evidence in best queries"),
+    area_source: str | None = typer.Option(None, "--area-source", help="real|proxy for --best area"),
+    output_dir: str = typer.Option("output", "--output-dir", help="Flow output directory containing qor.sqlite3"),
+    config: str | None = typer.Option(None, "--config", help="Project YAML; supplies flow.output_dir"),
+    json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
+):
+    """Query local historical QoR evidence; never executes EDA or cache reuse."""
+    if config:
+        output_dir = str(_load(config).flow.output_dir)
+    selectors = sum(value is not None for value in (
+        run_id, candidate_id, scenario_id, constraint_set_hash, best,
+    ))
+    if import_legacy and selectors:
+        console.print("[red]--import-legacy cannot be combined with a query selector.[/red]")
+        raise typer.Exit(code=2)
+    if selectors > 1:
+        console.print("[red]Choose one of --run-id, --candidate, --scenario, --constraint-set, or --best.[/red]")
+        raise typer.Exit(code=2)
+    if session_id and not candidate_id:
+        console.print("[red]--session requires --candidate.[/red]")
+        raise typer.Exit(code=2)
+    repo = SQLiteQoRRepository.for_output_dir(output_dir)
+    try:
+        if import_legacy:
+            data: Any = repo.import_legacy_artifacts(output_dir)
+        elif run_id:
+            data = repo.get_replay_identity(run_id)
+        elif candidate_id and session_id:
+            candidate = repo.get_candidate(session_id, candidate_id)
+            data = ({"candidate": candidate,
+                     "lineage": repo.candidate_lineage(session_id, candidate_id),
+                     "mcmm": repo.get_mcmm(session_id=session_id, candidate_id=candidate_id)}
+                    if candidate else None)
+        elif candidate_id:
+            data = repo.list_runs(candidate_id=candidate_id)
+        elif scenario_id:
+            data = repo.list_runs(scenario_id=scenario_id)
+        elif constraint_set_hash:
+            data = repo.find_by_constraint_set(constraint_set_hash)
+        elif best:
+            data = repo.best_qor(best, include_mock=include_mock, area_source=area_source)
+        else:
+            data = repo.list_runs()
+    except QoRRepositoryError as exc:
+        console.print(f"[red]QoR history error: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    if json_out:
+        sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+        return
+    if data is None:
+        console.print("[yellow]No matching QoR history record.[/yellow]")
+        return
+    console.print(Panel("[cyan]QoR historical repository[/cyan] — artifacts/cache remain authoritative"))
+    console.print_json(json.dumps(data, indent=2, sort_keys=True, default=str))
 
 
 @app.command()

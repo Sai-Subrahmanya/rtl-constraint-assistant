@@ -8,17 +8,15 @@ Validates and normalises project YAML files into a strongly-typed
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..utils.enums import (
     FlowStage,
-    OperationMode,
     Priority,
     SafeMode,
-    TimeUnit,
 )
 from ..utils.logging import get_logger
 from ..utils.units import parse_frequency_string, parse_time_string
@@ -132,11 +130,46 @@ class OptimizationConfig(BaseModel):
     thresholds: OptimizationThresholds = Field(default_factory=OptimizationThresholds)
 
 
+class PowerReportConfig(BaseModel):
+    """One explicitly configured OpenROAD/OpenSTA power-report input.
+
+    The report is an external, tool-produced input.  RCA parses it only after
+    a real flow completes; configuration never asks RCA to estimate power.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["openroad_report_power"]
+    path: str = Field(min_length=1)
+    scenario_id: str | None = None
+    producer: Literal["openroad_opensta"] = "openroad_opensta"
+    producer_version: str | None = None
+
+    @field_validator("path", "producer")
+    @classmethod
+    def _nonblank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("power report path and producer must not be blank")
+        return value
+
+    @field_validator("scenario_id")
+    @classmethod
+    def _scenario_id_nonblank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("flow.power_reports[].scenario_id must not be blank")
+        return value
+
+
 class FlowConfig(BaseModel):
     backend: str = "generic"
     stage: str = "synthesis_sta"
     liberty: str | list[str] | None = None
     output_dir: str = "output"
+    power_reports: list[PowerReportConfig] = Field(default_factory=list)
 
     def flow_stage(self) -> FlowStage:
         mapping = {
@@ -169,7 +202,7 @@ class ScenarioSpec(BaseModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _reject_nonempty_constraints(self) -> "ScenarioSpec":
+    def _reject_nonempty_constraints(self) -> ScenarioSpec:
         """Do not silently accept scenario-specific constraint definitions.
 
         ``scenarios[].constraints`` is a reserved, currently-unsupported
@@ -202,6 +235,55 @@ class MCMMConfig(BaseModel):
     active_scenario_ids: list[str] = Field(default_factory=list)
 
 
+class FormalProofSpec(BaseModel):
+    """Explicit, user-authored SymbiYosys proof mapped to one UCM exception.
+
+    RCA deliberately requires the constraint ID and exception kind rather than
+    guessing which generated property could establish timing intent.  The SBY
+    file contains the design-specific assumptions and assertion(s).
+    """
+
+    constraint_id: str = Field(min_length=1)
+    exception_kind: Literal["false_path", "multicycle"]
+    sby_file: str = Field(min_length=1)
+    task: str | None = None
+
+    @field_validator("task")
+    @classmethod
+    def _validate_task(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized or normalized.startswith("-"):
+            raise ValueError("formal.proofs[].task must be a non-option task name")
+        return normalized
+
+
+class FormalConfig(BaseModel):
+    """Optional formal-exception verification configuration (Step 14).
+
+    The default remains the conservative backend, preserving the historical
+    behavior where no real proof is available and exceptions stay UNRESOLVED.
+    """
+
+    backend: Literal["conservative", "symbiyosys"] = "conservative"
+    symbiyosys_executable: str | None = None
+    work_dir: str = "output/formal"
+    timeout_seconds: int = Field(default=300, ge=1)
+    proofs: list[FormalProofSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_constraint_ids(self) -> FormalConfig:
+        ids = [proof.constraint_id for proof in self.proofs]
+        duplicates = sorted({cid for cid in ids if ids.count(cid) > 1})
+        if duplicates:
+            raise ValueError(
+                "formal.proofs must contain at most one mapping per constraint_id: "
+                + ", ".join(duplicates)
+            )
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -217,16 +299,71 @@ class ProjectConfig(BaseModel):
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     scenarios: list[ScenarioSpec] = Field(default_factory=list)
     mcmm: MCMMConfig = Field(default_factory=MCMMConfig)
+    formal: FormalConfig = Field(default_factory=FormalConfig)
 
     # Resolved (not from YAML directly)
     config_path: Path | None = Field(default=None, exclude=True)
     project_root: Path | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
-    def _resolve_top(self) -> "ProjectConfig":
+    def _resolve_top(self) -> ProjectConfig:
         # Allow top to come from either project.top or analysis.top
         if self.project.top is None and self.analysis.top is not None:
             self.project.top = self.analysis.top
+        return self
+
+    @model_validator(mode="after")
+    def _validate_power_report_mappings(self) -> ProjectConfig:
+        """Reject ambiguous or unsafe scenario-to-report associations.
+
+        A report's scenario binding is configuration provenance.  In MCMM,
+        allowing an unlabeled/global report would risk reusing one scenario's
+        evidence for another, so it is intentionally forbidden.
+        """
+        reports = list(self.flow.power_reports)
+        scenario_specs = {spec.id: spec for spec in self.scenarios if spec.id}
+        all_ids = set(scenario_specs)
+        active_ids = set(self.mcmm.active_scenario_ids) if self.mcmm.active_scenario_ids else {
+            sid for sid, spec in scenario_specs.items() if spec.active
+        }
+        unknown_active = active_ids - all_ids
+        if self.mcmm.enabled and unknown_active:
+            raise ValueError(
+                "mcmm.active_scenario_ids contains unknown scenario(s): "
+                + ", ".join(sorted(unknown_active))
+            )
+        if (not self.mcmm.enabled and any(r.scenario_id is None for r in reports)
+                and any(r.scenario_id is not None for r in reports)):
+            raise ValueError(
+                "A single-scenario default power report cannot coexist with a "
+                "scenario-labelled power report; the association would be ambiguous."
+            )
+        seen: set[str] = set()
+        for report in reports:
+            sid = report.scenario_id
+            if self.mcmm.enabled and sid is None:
+                raise ValueError(
+                    "flow.power_reports[].scenario_id is required when mcmm.enabled=true; "
+                    "global power-report fallback is not allowed."
+                )
+            if sid is None:
+                key = "__single_scenario_default__"
+            else:
+                if sid not in all_ids:
+                    raise ValueError(
+                        f"flow.power_reports scenario_id '{sid}' is not a configured scenario"
+                    )
+                if sid not in active_ids:
+                    raise ValueError(
+                        f"flow.power_reports scenario_id '{sid}' is inactive for this run"
+                    )
+                key = sid
+            if key in seen:
+                raise ValueError(
+                    f"Duplicate flow.power_reports mapping for scenario "
+                    f"'{sid if sid is not None else 'single-scenario default'}'"
+                )
+            seen.add(key)
         return self
 
     @field_validator("schema_version")
@@ -259,6 +396,20 @@ class ProjectConfig(BaseModel):
         self.flow.liberty = resolved_libs
         out = self.flow.output_dir
         self.flow.output_dir = str((root / out).resolve()) if not Path(out).is_absolute() else out
+        for report in self.flow.power_reports:
+            report_path = Path(report.path)
+            if not report_path.is_absolute():
+                report.path = str((root / report_path).resolve())
+        formal_work_dir = self.formal.work_dir
+        self.formal.work_dir = (
+            str((root / formal_work_dir).resolve())
+            if not Path(formal_work_dir).is_absolute()
+            else formal_work_dir
+        )
+        for proof in self.formal.proofs:
+            proof_path = Path(proof.sby_file)
+            if not proof_path.is_absolute():
+                proof.sby_file = str((root / proof_path).resolve())
 
     def output_dir(self) -> Path:
         p = Path(self.flow.output_dir)
