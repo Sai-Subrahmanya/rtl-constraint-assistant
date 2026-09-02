@@ -382,15 +382,23 @@ def validate(config: str = typer.Argument(..., help="Path to project YAML"),
     design, _ = _do_parse(cfg)
     tg = _do_timing(cfg, design)
     ledger = AssumptionLedger()
+    parser_obj = None
     if sdc:
         parser = SDCParser()
         cset = parser.parse_file(sdc)
         if parser.warnings:
             for w in parser.warnings:
                 console.print(f"[yellow]SDC parser: {w}[/yellow]")
+        parser_obj = parser
     else:
         cset, _ = _do_inference(cfg, design, tg, ledger)
-    result = run_validation(design, tg, cset, backend=backend)
+    # When MCMM is enabled, restrict scenario validation to the active
+    # scenario set so scenario-specific findings keep their identity.
+    matrix = _mcmm_matrix(cfg, cset)
+    active = matrix.active_ids if matrix.is_enabled else None
+    result = run_validation(design, tg, cset, backend=backend,
+                            active_scenarios=set(active) if active else None,
+                            parser=parser_obj)
     am = _am(cfg)
     am.write_json("validation_report.json", result.as_dict())
     if result.coverage:

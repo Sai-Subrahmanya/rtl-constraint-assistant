@@ -41,6 +41,7 @@ def validate_semantic(design: Design | None, tg: TimingGraph | None,
     _validate_io_timing(cset, all_clock_names, design, report)
     _validate_clock_groups(cset, all_clock_names, report)
     _validate_path_selectors(cset, report)
+    _validate_value_semantics(cset, all_clock_names, report)
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +428,158 @@ def _validate_path_selectors(cset: ConstraintSet, report: ValidationReport) -> N
                        ErrorCode.EXCEPTION_SETUP_HOLD_INCOHERENT,
                        f"set_multicycle_path {c.id} specifies both -start and -end.",
                        constraint_id=c.id)
+
+
+# ---------------------------------------------------------------------------
+# Value/unit/range semantics for the remaining constraint types (Step 13 §3)
+# ---------------------------------------------------------------------------
+
+def _validate_value_semantics(cset: ConstraintSet, all_clock_names: set[str],
+                              report: ValidationReport) -> None:
+    """Validate required values / units / ranges for clock uncertainty,
+    clock latency, clock transition, input transition, load, driving cell,
+    design rules, and min/max delay constraints.
+
+    This is strictly observational: it never rewrites a value. If a value
+    is merely absent but the constraint may still be meaningful (e.g. a
+    set_driving_cell without an explicit -max/-min), we only flag genuine
+    contradictions and out-of-range / non-numeric values.
+    """
+    for c in cset:
+        t = c.type
+        if t == ConstraintType.SET_CLOCK_UNCERTAINTY:
+            _check_positive_value(c, "uncertainty", report, allow_zero=True)
+            # uncertainty without a target clock is meaningless
+            if not (c.clock_refs or c.target_objects):
+                _issue(report, Severity.WARNING, ValidationCategory.CLOCK,
+                       ErrorCode.CLOCK_UNCERTAINTY_INVALID,
+                       f"set_clock_uncertainty {c.id} has no target clock.",
+                       constraint_id=c.id,
+                       suggestion="Specify the clock(s) the uncertainty applies to.")
+        elif t == ConstraintType.SET_CLOCK_LATENCY:
+            # latency may legitimately be negative (early/late); only check
+            # that a value is present and finite.
+            _check_finite_value(c, "latency", report)
+            if not (c.clock_refs or c.target_objects):
+                _issue(report, Severity.WARNING, ValidationCategory.CLOCK,
+                       ErrorCode.CLOCK_LATENCY_INVALID,
+                       f"set_clock_latency {c.id} has no target clock.",
+                       constraint_id=c.id,
+                       suggestion="Specify the clock(s) the latency applies to.")
+        elif t == ConstraintType.SET_CLOCK_TRANSITION:
+            _check_positive_value(c, "transition", report)
+        elif t == ConstraintType.SET_INPUT_TRANSITION:
+            _check_positive_value(c, "transition", report)
+            # input transition requires a target port
+            if not c.target_objects:
+                _issue(report, Severity.ERROR, ValidationCategory.TIMING,
+                       ErrorCode.IO_TRANSITION_INVALID,
+                       f"set_input_transition {c.id} has no target port.",
+                       constraint_id=c.id,
+                       suggestion="Specify the input port(s).")
+        elif t == ConstraintType.SET_LOAD:
+            _check_positive_value(c, "load", report, allow_zero=True)
+            if not c.target_objects:
+                _issue(report, Severity.ERROR, ValidationCategory.TIMING,
+                       ErrorCode.LOAD_INVALID,
+                       f"set_load {c.id} has no target port/net.",
+                       constraint_id=c.id,
+                       suggestion="Specify the port or net to load.")
+        elif t == ConstraintType.SET_DRIVING_CELL:
+            if not c.target_objects:
+                _issue(report, Severity.ERROR, ValidationCategory.TIMING,
+                       ErrorCode.DRIVING_CELL_INVALID,
+                       f"set_driving_cell {c.id} has no target port.",
+                       constraint_id=c.id,
+                       suggestion="Specify the input port(s).")
+            cell = c.values.get("cell") or c.values.get("lib_cell") or c.values.get("cell_name")
+            if cell is None:
+                _issue(report, Severity.WARNING, ValidationCategory.TIMING,
+                       ErrorCode.DRIVING_CELL_INVALID,
+                       f"set_driving_cell {c.id} does not name a library cell.",
+                       constraint_id=c.id,
+                       suggestion="Provide -lib_cell or -cell to name the driving cell.")
+        elif t == ConstraintType.SET_MAX_TRANSITION:
+            _check_positive_value(c, "max_transition", report)
+        elif t == ConstraintType.SET_MAX_CAPACITANCE:
+            _check_positive_value(c, "max_capacitance", report)
+        elif t == ConstraintType.SET_MAX_FANOUT:
+            _check_positive_value(c, "max_fanout", report, integer=True)
+        elif t in (ConstraintType.SET_MIN_DELAY, ConstraintType.SET_MAX_DELAY):
+            _check_positive_value(c, "delay", report, allow_zero=True)
+            if c.path_selector is not None:
+                ps = c.path_selector
+                if not ps.from_set and not ps.to_set and not ps.through_set:
+                    _issue(report, Severity.WARNING, ValidationCategory.EXCEPTION,
+                           ErrorCode.MINMAX_DELAY_INVALID,
+                           f"{t.value} {c.id} has no path selector (-from/-to/-through); it applies to all paths.",
+                           constraint_id=c.id,
+                           suggestion="Restrict the delay constraint with -from/-through/-to.")
+
+
+def _check_positive_value(c: Constraint, field: str, report: ValidationReport,
+                          allow_zero: bool = False, integer: bool = False) -> None:
+    v = c.values.get(field)
+    code = _value_code_for(c.type)
+    if v is None:
+        _issue(report, Severity.ERROR, ValidationCategory.TIMING,
+               code,
+               f"{c.type.value} {c.id} is missing its {field} value.",
+               constraint_id=c.id,
+               suggestion="Provide a non-negative numeric value.")
+        return
+    try:
+        if integer:
+            f = float(v)
+            if not math.isfinite(f) or f != int(f):
+                raise ValueError
+        n = float(v)
+    except Exception:
+        _issue(report, Severity.ERROR, ValidationCategory.TIMING,
+               code,
+               f"{c.type.value} {c.id} has non-numeric {field} value {v!r}.",
+               constraint_id=c.id, evidence={field: v})
+        return
+    if not math.isfinite(n) or n < 0 or (n == 0 and not allow_zero):
+        _issue(report, Severity.ERROR, ValidationCategory.TIMING,
+               code,
+               f"{c.type.value} {c.id} has invalid {field} value {n} "
+               f"(must be {'>= 0' if allow_zero else '> 0'}).",
+               constraint_id=c.id, evidence={field: n})
+
+
+def _check_finite_value(c: Constraint, field: str, report: ValidationReport) -> None:
+    v = c.values.get(field)
+    code = _value_code_for(c.type)
+    if v is None:
+        return  # latency may default; not a hard missing-value error
+    try:
+        n = float(v)
+    except Exception:
+        _issue(report, Severity.ERROR, ValidationCategory.CLOCK, code,
+               f"{c.type.value} {c.id} has non-numeric {field} value {v!r}.",
+               constraint_id=c.id, evidence={field: v})
+        return
+    if not math.isfinite(n):
+        _issue(report, Severity.ERROR, ValidationCategory.CLOCK, code,
+               f"{c.type.value} {c.id} has non-finite {field} value {n!r}.",
+               constraint_id=c.id, evidence={field: n})
+
+
+def _value_code_for(t: ConstraintType) -> ErrorCode:
+    return {
+        ConstraintType.SET_CLOCK_UNCERTAINTY: ErrorCode.CLOCK_UNCERTAINTY_INVALID,
+        ConstraintType.SET_CLOCK_LATENCY: ErrorCode.CLOCK_LATENCY_INVALID,
+        ConstraintType.SET_CLOCK_TRANSITION: ErrorCode.CLOCK_TRANSITION_INVALID,
+        ConstraintType.SET_INPUT_TRANSITION: ErrorCode.IO_TRANSITION_INVALID,
+        ConstraintType.SET_LOAD: ErrorCode.LOAD_INVALID,
+        ConstraintType.SET_DRIVING_CELL: ErrorCode.DRIVING_CELL_INVALID,
+        ConstraintType.SET_MAX_TRANSITION: ErrorCode.DESIGN_RULE_INVALID,
+        ConstraintType.SET_MAX_CAPACITANCE: ErrorCode.DESIGN_RULE_INVALID,
+        ConstraintType.SET_MAX_FANOUT: ErrorCode.DESIGN_RULE_INVALID,
+        ConstraintType.SET_MIN_DELAY: ErrorCode.MINMAX_DELAY_INVALID,
+        ConstraintType.SET_MAX_DELAY: ErrorCode.MINMAX_DELAY_INVALID,
+    }.get(t, ErrorCode.VALIDATION_ERROR)
 
 
 def _is_wildcard(name: str) -> bool:

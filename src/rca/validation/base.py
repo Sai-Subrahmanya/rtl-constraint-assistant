@@ -47,6 +47,16 @@ class ValidationIssue:
     suggestion: str | None = None
     blocking: bool = False
     source_location: dict[str, Any] | None = None  # {file, line} if available
+    # Step 13: provenance & explanation (Req 12). Answer "why was this
+    # marked invalid/risky?".
+    source_kind: str | None = None       # RTL / USER / INFERENCE / ...
+    origin: str | None = None            # rule/inference origin (e.g. CLK-001)
+    assumption_ids: list[str] = field(default_factory=list)
+    # Resolution state — distinguishes known-valid / known-invalid /
+    # requires-user-input / unknown / unresolved without inventing validity.
+    # Default RESOLVED for compatibility; UNKNOWN/UNRESOLVED used whenever
+    # the validator cannot prove the finding either way.
+    resolution_status: str = "RESOLVED"  # RESOLVED | UNKNOWN | UNRESOLVED | REQUIRES_USER_INPUT
 
     # -- construction helpers ------------------------------------------------
     def __post_init__(self) -> None:
@@ -64,6 +74,9 @@ class ValidationIssue:
             objs,
             self.scenario_id or "",
             (self.message or "")[:160],
+            self.source_kind or "",
+            self.origin or "",
+            self.resolution_status,
         )
         return "V" + stable_hash(key)[:8].upper()
 
@@ -87,6 +100,10 @@ class ValidationIssue:
             "suggestion": self.suggestion,
             "blocking": self.blocking,
             "source_location": dict(self.source_location) if self.source_location else None,
+            "source_kind": self.source_kind,
+            "origin": self.origin,
+            "assumption_ids": list(self.assumption_ids),
+            "resolution_status": self.resolution_status,
         }
 
 
@@ -102,6 +119,7 @@ class ValidationReport:
     reference_summary: dict[str, Any] = field(default_factory=dict)
     exception_summary: dict[str, Any] = field(default_factory=dict)
     scenario_summary: dict[str, Any] = field(default_factory=dict)
+    completeness_summary: dict[str, Any] = field(default_factory=dict)
 
     # -- mutation ------------------------------------------------------------
     def add(self, issue: ValidationIssue) -> None:
@@ -171,6 +189,7 @@ class ValidationReport:
             "reference_summary": dict(self.reference_summary),
             "exception_summary": dict(self.exception_summary),
             "scenario_summary": dict(self.scenario_summary),
+            "completeness_summary": dict(self.completeness_summary),
             "issues": [i.to_dict() for i in self.issues],
         }
 
@@ -193,7 +212,11 @@ def _issue(report: ValidationReport,
            evidence: dict[str, Any] | None = None,
            suggestion: str | None = None,
            blocking: bool | None = None,
-           source_location: dict[str, Any] | None = None) -> ValidationIssue:
+           source_location: dict[str, Any] | None = None,
+           source_kind: str | None = None,
+           origin: str | None = None,
+           assumption_ids: list[str] | None = None,
+           resolution_status: str | None = None) -> ValidationIssue:
     """Build a :class:`ValidationIssue` and add it to the report.
 
     Default blocking policy: CRITICAL/HIGH/ERROR severity blocks by
@@ -211,6 +234,10 @@ def _issue(report: ValidationReport,
         suggestion=suggestion,
         blocking=blocking,
         source_location=dict(source_location) if source_location else None,
+        source_kind=source_kind,
+        origin=origin,
+        assumption_ids=list(assumption_ids or []),
+        resolution_status=resolution_status or "RESOLVED",
     )
     report.add(issue)
     return issue

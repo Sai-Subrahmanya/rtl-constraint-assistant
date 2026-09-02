@@ -13,7 +13,8 @@ from typing import Any
 from ..constraint_model import Constraint, ConstraintSet
 from ..constraint_model.targets import CollectionKind
 from ..utils.enums import (
-    ConstraintType, ErrorCode, Severity, ValidationCategory,
+    ConstraintStatus, ConstraintType, ErrorCode, Severity, SourceKind,
+    ValidationCategory,
 )
 from .base import ValidationIssue, ValidationReport
 
@@ -140,6 +141,9 @@ def validate_conflicts(cset: ConstraintSet, report: ValidationReport) -> None:
                 suggestion="Reconcile the delay override values.",
                 blocking=False))
 
+    # --- Precedence-aware user-vs-inference conflicts (Step 13 §4) ---
+    _precedence_conflicts(cset, conflicts)
+
     # --- Path-exception overlap/shadow classification ---
     _classify_exception_overlaps(cset, overlaps)
 
@@ -154,6 +158,182 @@ def validate_conflicts(cset: ConstraintSet, report: ValidationReport) -> None:
         "conflict_codes": sorted({i.code.value for i in conflicts}),
         "overlap_codes": sorted({i.code.value for i in overlaps}),
     }
+
+
+# ---------------------------------------------------------------------------
+# Precedence-aware conflict reporting (Step 13 §4)
+# ---------------------------------------------------------------------------
+
+# Precedence order: higher rank wins.  Explicit fixed user intent is the
+# strongest, weak heuristic the weakest.
+_SOURCE_RANK: dict[SourceKind, int] = {
+    SourceKind.USER: 6,
+    SourceKind.EXISTING_SDC: 5,
+    SourceKind.LIBRARY: 4,
+    SourceKind.TOOL: 4,
+    SourceKind.PHYSICAL_DATA: 4,
+    SourceKind.RTL: 3,
+    SourceKind.INFERENCE: 2,
+    SourceKind.DERIVED: 1,
+}
+
+
+def _precedence_rank(c: Constraint) -> int:
+    """Rank a constraint's authority for conflict resolution.
+
+    Fixed/confirmed user intent outranks everything.  Otherwise fall
+    back to source-kind precedence; unknown sources rank as weak
+    heuristic (rank 1).
+    """
+    if c.status in (ConstraintStatus.FIXED,):
+        return 100
+    if c.status == ConstraintStatus.CONFIRMED and c.source_kind == SourceKind.USER:
+        return 90
+    return _SOURCE_RANK.get(c.source_kind, 1)
+
+
+def _precedence_conflicts(cset: ConstraintSet,
+                          conflicts: list[ValidationIssue]) -> None:
+    """Report a CONFLICT_USER_VS_INFERENCE when a low-authority
+    (inferred/derived) constraint conflicts with a fixed user constraint
+    on the same clock/object.  We never silently drop the weaker one —
+    we report it so a human can decide, and we record which wins."""
+    # Group create_clock by name for precedence conflicts.
+    by_name: dict[str, list[Constraint]] = defaultdict(list)
+    for c in cset.clocks():
+        nm = c.values.get("name") or (c.target_objects[0] if c.target_objects else c.id)
+        by_name[nm].append(c)
+    for nm, group in by_name.items():
+        if len({c.id for c in group}) < 2:
+            continue
+        periods = {float(c.values["period"]) for c in group
+                   if c.values.get("period") is not None}
+        if len(periods) <= 1:
+            continue
+        ranked = sorted(group, key=_precedence_rank)
+        winner, loser = ranked[-1], ranked[0]
+        if _precedence_rank(winner) != _precedence_rank(loser):
+            conflicts.append(ValidationIssue(
+                severity=Severity.WARNING, category=ValidationCategory.CONFLICT,
+                code=ErrorCode.CONFLICT_USER_VS_INFERENCE,
+                message=(f"Clock '{nm}' has conflicting periods: fixed/user "
+                         f"constraint {winner.id} ({winner.values.get('period')}) "
+                         f"vs {loser.id} ({loser.values.get('period')}). "
+                         f"Precedence favors {winner.id} "
+                         f"({winner.source_kind.value})."),
+                constraint_id=loser.id, related_constraint_ids=[winner.id],
+                object_names=[nm],
+                suggestion=("Reconcile the conflicting clock definitions; "
+                            "the fixed/user constraint takes precedence and "
+                            "the inferred value should be removed or aligned."),
+                blocking=False,
+                evidence={"winner": winner.id, "loser": loser.id,
+                          "winner_rank": _precedence_rank(winner),
+                          "loser_rank": _precedence_rank(loser),
+                          "winner_source_kind": winner.source_kind.value,
+                          "loser_source_kind": loser.source_kind.value}))
+            continue
+
+    # Conflicting IO delays across different source kinds.
+    io_by_key: dict[tuple, list[Constraint]] = defaultdict(list)
+    for c in cset.io_constraints():
+        clk = c.values.get("clock") or (c.clock_refs[0] if c.clock_refs else None)
+        mm = c.values.get("min_max", "max")
+        edge = c.values.get("edge")
+        add = bool(c.values.get("add_delay"))
+        for tgt in c.target_objects or [None]:
+            io_by_key[(c.type, tgt, clk, mm, edge, add)].append(c)
+    for key, group in io_by_key.items():
+        if len(group) < 2:
+            continue
+        delays = {float(c.values.get("delay")) for c in group
+                  if c.values.get("delay") is not None}
+        if len(delays) <= 1:
+            continue
+        ranked = sorted(group, key=_precedence_rank)
+        winner, loser = ranked[-1], ranked[0]
+        if _precedence_rank(winner) != _precedence_rank(loser):
+            conflicts.append(ValidationIssue(
+                severity=Severity.WARNING, category=ValidationCategory.CONFLICT,
+                code=ErrorCode.CONFLICT_USER_VS_INFERENCE,
+                message=(f"Conflicting {key[0].value} on '{key[1]}' "
+                         f"(clock={key[2]}): user/fixed {winner.id} "
+                         f"({winner.values.get('delay')}) vs "
+                         f"{loser.id} ({loser.values.get('delay')}). "
+                         f"Precedence favors {winner.id}."),
+                constraint_id=loser.id, related_constraint_ids=[winner.id],
+                object_names=[key[1]] if key[1] else [],
+                suggestion="Reconcile the conflicting delays; the fixed/user "
+                           "value has precedence.",
+                blocking=False,
+                evidence={"winner": winner.id, "loser": loser.id,
+                          "winner_source_kind": winner.source_kind.value,
+                          "loser_source_kind": loser.source_kind.value}))
+
+    # Contradictory timing exceptions on the same endpoints.
+    _contradictory_exceptions(cset, conflicts)
+
+
+def _contradictory_exceptions(cset: ConstraintSet,
+                              conflicts: list[ValidationIssue]) -> None:
+    """Report CONFLICT_EXCEPTION when the same path is both covered by a
+    false_path and a multicycle_path (or by min/max delay with an
+    incompatible intent across the same selector), because the two can
+    contradict one another."""
+    exc_types = (ConstraintType.SET_FALSE_PATH, ConstraintType.SET_MULTICYCLE_PATH,
+                 ConstraintType.SET_MIN_DELAY, ConstraintType.SET_MAX_DELAY)
+    by_selector: dict[tuple, list[Constraint]] = defaultdict(list)
+    for c in cset:
+        if c.type not in exc_types:
+            continue
+        ps = c.path_selector
+        if ps is None:
+            continue
+        key = (tuple(sorted(ps.from_set)), tuple(sorted(ps.to_set)),
+               tuple(tuple(sorted(s)) for s in ps.through_set))
+        by_selector[key].append(c)
+    for key, group in by_selector.items():
+        types = {c.type for c in group}
+        # false_path + multicycle (or false_path + max_delay) on the same
+        # selector is inherently contradictory.
+        if ConstraintType.SET_FALSE_PATH in types and (
+                ConstraintType.SET_MULTICYCLE_PATH in types
+                or ConstraintType.SET_MAX_DELAY in types):
+            ids = sorted(c.id for c in group)
+            conflicts.append(ValidationIssue(
+                severity=Severity.HIGH, category=ValidationCategory.CONFLICT,
+                code=ErrorCode.CONFLICT_EXCEPTION,
+                message=(f"Contradictory exceptions share the same path "
+                         f"selector (from={list(key[0])}, to={list(key[1])}): "
+                         f"{[c.type.value for c in group]} on constraints "
+                         f"{ids}. A false_path disables the path while a "
+                         f"multicycle/max_delay applies a timing budget."),
+                constraint_id=ids[0], related_constraint_ids=ids[1:],
+                suggestion="Remove or reconcile the contradictory exceptions.",
+                blocking=True,
+                evidence={"from": list(key[0]), "to": list(key[1]),
+                          "types": sorted({c.type.value for c in group})}))
+            continue
+        # min_delay + max_delay with max < min is nonsensical (mutually
+        # inconsistent values).
+        if ConstraintType.SET_MIN_DELAY in types and ConstraintType.SET_MAX_DELAY in types:
+            mins = [float(c.values.get("delay")) for c in group
+                    if c.type == ConstraintType.SET_MIN_DELAY
+                    and c.values.get("delay") is not None]
+            maxs = [float(c.values.get("delay")) for c in group
+                    if c.type == ConstraintType.SET_MAX_DELAY
+                    and c.values.get("delay") is not None]
+            if mins and maxs and min(mins) > min(maxs):
+                conflicts.append(ValidationIssue(
+                    severity=Severity.WARNING, category=ValidationCategory.CONFLICT,
+                    code=ErrorCode.CONFLICT_MINMAX_DELAY,
+                    message=(f"min_delay {min(mins)} exceeds max_delay "
+                             f"{min(maxs)} on the same path selector; the "
+                             f"constraints are mutually inconsistent."),
+                    constraint_id=group[0].id,
+                    related_constraint_ids=[c.id for c in group[1:]],
+                    suggestion="Ensure min_delay <= max_delay for the same path.",
+                    blocking=False))
 
 
 def _classify_exception_overlaps(cset: ConstraintSet,

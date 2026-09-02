@@ -16,8 +16,17 @@ from ..utils.enums import (
     ErrorCode,
     Severity,
     ValidationCategory,
+    VerificationStatus,
 )
 from .base import ValidationIssue, ValidationReport, _issue
+
+# Used to determine whether a timing exception has been formally verified.
+# When no formal backend is attached, verify_exceptions uses the
+# ConservativeFormalBackend, which returns UNRESOLVED for every query.
+from ..exceptions.verifier import verify_exceptions
+from ..utils.logging import get_logger
+
+log = get_logger("validation.exceptions")
 
 
 def validate_exceptions(design: Design | None, tg: TimingGraph | None,
@@ -92,37 +101,133 @@ def validate_exceptions(design: Design | None, tg: TimingGraph | None,
                                object_names=[a, b],
                                suggestion="Declare the clock relationship (set_clock_groups) before relying on this exception.")
 
+    # --- Step 13 §8: exception safety / formal verification state ---
+    # Never conclude an exception is safe merely because it may improve
+    # timing.  If formal verification is unavailable (the default
+    # ConservativeFormalBackend), mark it UNRESOLVED / UNVERIFIED.
+    _record_verification_state(design, tg, cset, report)
+
     report.exception_summary = {
         "exception_count": sum(1 for c in cset if c.type in exc_types and not c.disabled),
     }
 
 
-def validate_scenarios(cset: ConstraintSet, report: ValidationReport) -> None:
-    """Step 7 §15: scenario coherence. This implementation is conservative:
-    if any constraint lists scenario_ids that no other constraint or
-    project info references, flag for review."""
+def _record_verification_state(design: Design | None, tg: TimingGraph | None,
+                               cset: ConstraintSet,
+                               report: ValidationReport) -> None:
+    """Surface the formal-verification state of timing exceptions.
+
+    Uses the existing ``verify_exceptions`` harness (Step 8) which feeds a
+    ``FormalBackend``.  With no formal backend attached it returns
+    UNRESOLVED for every query, so we record that the exception is
+    *unverified* — never that it is safe.  We do not block on unverified
+    exceptions (that is a policy decision left to emission), but every
+    non-verified exception is surfaced and labeled UNRESOLVED.
+    """
+    exc_ids = {c.id for c in cset if c.type in (
+        ConstraintType.SET_FALSE_PATH, ConstraintType.SET_MULTICYCLE_PATH,
+        ConstraintType.SET_MIN_DELAY, ConstraintType.SET_MAX_DELAY)}
+    if not exc_ids:
+        return
+    try:
+        vrep = verify_exceptions(cset, design=design, tg=tg)
+    except Exception as exc:
+        log.warning("exception verification skipped: %s", exc)
+        return
+    for r in vrep:
+        if r.constraint_id not in exc_ids:
+            continue
+        vs = r.verification_status
+        if vs == VerificationStatus.UNRESOLVED:
+            _issue(report, Severity.INFO, ValidationCategory.EXCEPTION,
+                   ErrorCode.EXCEPTION_UNVERIFIED,
+                   f"Timing exception {r.constraint_id} "
+                   f"({r.constraint_type}) is UNRESOLVED: no formal "
+                   f"verification backend produced a proof.",
+                   constraint_id=r.constraint_id,
+                   suggestion=("Mark the exception safe only after formal "
+                               "verification or explicit user confirmation."),
+                   blocking=False, resolution_status="UNRESOLVED",
+                   evidence=dict(r.evidence or {}),
+                   origin="exceptions.verifier")
+
+
+def validate_scenarios(cset: ConstraintSet, report: ValidationReport,
+                       active_scenarios: set[str] | None = None) -> None:
+    """Scenario coherence (Step 7 §15, strengthened for Step 13 §9).
+
+    * Empty ``Constraint.scenario_ids`` means the constraint applies to all
+      active scenarios.
+    * Non-empty ``scenario_ids`` applies only to the listed scenarios that
+      are active.
+    * A scenario id that is not registered/active in ``cset.scenarios`` is
+      reported as ``SCENARIO_UNKNOWN_ID``.
+    * Scenario-specific issues are emitted with ``scenario_id`` set so the
+      scenario identity is never collapsed.
+
+    ``active_scenarios`` optionally supplies the known-active scenario ids
+    from the project config (used when MCMM is enabled and the constraint
+    set itself does not carry a scenario registry).  Ids in this set are
+    treated as known/active so they are not falsely flagged as unknown.
+    """
     report.checks_run.append("scenarios")
-    all_scenarios: set[str] = set()
+
+    # Registry of known scenarios and active-snapshot.
+    known_scenarios: dict[str, bool] = {}
+    for sid, sc in cset.scenarios.items():
+        active = getattr(sc, "active", True)
+        known_scenarios[sid] = bool(active)
+    active_ids = {sid for sid, act in known_scenarios.items() if act}
+    if active_scenarios:
+        for sid in active_scenarios:
+            known_scenarios.setdefault(sid, True)
+            active_ids.add(sid)
+
+    all_referenced: set[str] = set()
     ref_counts: dict[str, int] = {}
+    unknown_ids: dict[str, int] = {}
     for c in cset:
-        for sid in c.scenario_ids or []:
-            all_scenarios.add(sid)
+        sids = c.scenario_ids or []
+        if not sids:
+            all_referenced.update(active_ids)
+            continue
+        for sid in sids:
+            all_referenced.add(sid)
             ref_counts[sid] = ref_counts.get(sid, 0) + 1
-    # With no project scenario registry available at this layer, we only
-    # flag the special case where a constraint has scenario_ids but the
-    # same constraint is ALSO in the global set (i.e., no scenario-only
-    # constraints are present and scenario_ids may be stale). We do NOT
-    # invent a registry here.
-    if all_scenarios and all(v <= 1 for v in ref_counts.values()):
+            if sid not in known_scenarios:
+                unknown_ids[sid] = unknown_ids.get(sid, 0) + 1
+            elif not known_scenarios[sid]:
+                # Referenced but that scenario is inactive — flag gently.
+                unknown_ids[sid] = unknown_ids.get(sid, 0) + 1
+
+    # Nonexistent / inactive scenario ids.
+    for sid in sorted(unknown_ids):
+        _issue(report, Severity.WARNING, ValidationCategory.SCENARIO,
+               ErrorCode.SCENARIO_UNKNOWN_ID,
+               f"Scenario '{sid}' is referenced by {unknown_ids[sid]} "
+               f"constraint(s) but is not an active/known scenario in the "
+               f"set.",
+               scenario_id=sid, blocking=False,
+               evidence={"referenced": unknown_ids[sid],
+                         "known": sid in known_scenarios,
+                         "active": known_scenarios.get(sid, False)},
+               suggestion="Register the scenario or remove the stale id.")
+
+    # Scenario-only constraints referenced by few constraints (conservative).
+    if all_referenced and all(v <= 1 for v in ref_counts.values()):
         for sid, cnt in ref_counts.items():
             if cnt <= 1:
                 _issue(report, Severity.LOW, ValidationCategory.SCENARIO,
                        ErrorCode.SCENARIO_MISMATCH,
-                       f"Scenario '{sid}' is referenced by only {cnt} constraint(s); ensure it is registered.",
+                       f"Scenario '{sid}' is referenced by only {cnt} "
+                       f"constraint(s); ensure it is registered.",
                        scenario_id=sid, blocking=False)
+
     report.scenario_summary = {
-        "scenarios": sorted(all_scenarios),
-        "scenario_count": len(all_scenarios),
+        "scenarios": sorted(all_referenced),
+        "scenario_count": len(all_referenced),
+        "active_scenarios": sorted(active_ids),
+        "unknown_scenario_count": len(unknown_ids),
     }
 
 
