@@ -98,6 +98,23 @@ summaries for difference/UNKNOWN findings.
 status and import locations. The CLI regression also verifies its provenance
 section.
 
+### 3.5 Opaque `set_load` was displayed as `set_case_analysis`
+
+**Defect.** The opaque-import fallback constructed every unsupported command
+as `ConstraintType.SET_CASE_ANALYSIS`. Consequently, identical unsupported
+`set_load` commands conservatively produced `UNKNOWN`, but both CLI formats
+misidentified their category as `set_case_analysis`.
+
+**Fix.** The importer retains `ConstraintType.SET_LOAD` for the recognized
+`set_load` command while preserving its opaque metadata and unsupported-import
+status. It remains outside the published semantic comparison rules, so the
+result remains `UNKNOWN`; no timing equivalence rule was added.
+
+**Regression evidence.** `test_sdc_E_unsupported_causes_unknown` asserts the
+API reports `set_load` and an unmodeled-category note. The CLI regression
+asserts `[set_load]` in human output, `constraint_type: "set_load"` in JSON,
+the `UNKNOWN` status/count, and retained `UNSUPPORTED_COMMAND` diagnostics.
+
 ## 4. API and architecture impact
 
 No existing comparison, UCM, SDC, MCMM, validation, or formal API was removed
@@ -133,10 +150,12 @@ Top semantic differences:
         numeric timing value 'period' differs after unit normalization.
 ```
 
-`rca compare ... --json` was also exercised with identical files containing
-unsupported `set_load` intent. It emitted `overall_status: "UNKNOWN"`, one
-unknown constraint, and the importer `UNSUPPORTED_COMMAND` diagnostics; it
-did not claim equivalence.
+Both human and `--json` modes were also exercised with identical files
+containing unsupported `set_load 0.5 [get_ports out]` intent. Human output
+reported `Status: UNKNOWN`, `Unknown: 1`, and `[set_load]`. JSON emitted
+`overall_status: "UNKNOWN"`, one unknown constraint with
+`constraint_type: "set_load"`, and the importer `UNSUPPORTED_COMMAND`
+diagnostics for both inputs. Neither mode claimed equivalence.
 
 ## 6. Deliberate limitations retained
 

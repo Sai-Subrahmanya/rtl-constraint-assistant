@@ -860,6 +860,8 @@ def test_sdc_E_unsupported_causes_unknown():
     # Similar text is not evidence of semantic equivalence.
     assert r.overall_status == EquivalenceResult.UNKNOWN
     assert r.counts()["unknown"] == 1
+    assert r.unknown_constraints[0].constraint_type == ConstraintType.SET_LOAD.value
+    assert "set_load" in r.unknown_constraints[0].notes[0]
 
 
 def test_15_cli_unsupported_sdc_is_unknown_not_equivalent(tmp_path):
@@ -880,13 +882,24 @@ def test_15_cli_unsupported_sdc_is_unknown_not_equivalent(tmp_path):
     report = json.loads(invocation.output)
     assert report["overall_status"] == EquivalenceResult.UNKNOWN.value
     assert report["counts"]["unknown"] == 1
-    assert any("UNSUPPORTED_COMMAND" in diagnostic for diagnostic in report["diagnostics"])
+    assert report["unknown_constraints"][0]["constraint_type"] == ConstraintType.SET_LOAD.value
+    assert "set_load" in report["unknown_constraints"][0]["notes"][0]
+    diagnostics = report["diagnostics"]
+    assert any(
+        diagnostic.startswith("A: [WARNING] UNSUPPORTED_COMMAND") and "set_load" in diagnostic
+        for diagnostic in diagnostics
+    )
+    assert any(
+        diagnostic.startswith("B: [WARNING] UNSUPPORTED_COMMAND") and "set_load" in diagnostic
+        for diagnostic in diagnostics
+    )
 
     human = CliRunner().invoke(
         app, ["compare", str(project), "--a", str(sdc), "--b", str(sdc)]
     )
     assert human.exit_code == 0, human.output
-    assert "[set_case_analysis]" in human.output
+    assert "[set_load]" in human.output
+    assert "[set_case_analysis]" not in human.output
     assert "UNKNOWN (cannot prove equivalence)" in human.output
     assert "Provenance:" in human.output
 
