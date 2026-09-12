@@ -567,52 +567,73 @@ Pareto history. These are **not** versioned.
 
 ```
 tests/
-├── __init__.py
-├── conftest.py                 ← adds src/ to sys.path
-├── unit/
-│   ├── __init__.py
-│   ├── test_units.py           (7 tests)
-│   ├── test_parser.py          (7 tests)
-│   ├── test_constraints.py     (5 tests)
-│   ├── test_sdc_parser.py      (4 tests)
-│   └── test_pareto.py          (6 tests)
-├── golden/__init__.py          (empty, reserved)
-├── integration/__init__.py     (empty, reserved)
-├── regression/__init__.py      (empty, reserved)
-└── stress/__init__.py          (empty, reserved)
+├── unit/          ← isolated subsystem contracts
+├── golden/        ← semantic/reference fixtures and assertions
+├── integration/   ← complete deterministic workflows and CLI boundaries
+├── stress/        ← bounded-concurrency and repeatability workloads
+└── support/       ← shared deterministic test-only evaluators
 ```
 
-### 8.2 What is covered (28 tests total, all passing)
+The regression gate is intentionally a thin runner rather than a duplicate test
+tree: `scripts/regression/run_regression.py` composes the appropriate unit,
+golden, integration, and stress tests and preserves their pytest results.
 
-| Test file | Tests | Covers |
-|---|---|---|
-| `test_units.py` | 7 | `to_ns/ps/fs`, `parse_time` (ns/ps/fs/sec), `parse_freq` (MHz/GHz/kHz/Hz → period), period↔freq inversion, `stable_hash` determinism and collision-avoidance on small inputs, `hash_file`. |
-| `test_parser.py` | 7 | Parsing `examples/simple_counter/rtl/counter.sv` with pyslang: module/port/net/register counts, clock candidate detection (`clk`), reset detection (`rst_n`), register attributes (8-bit width, async active-low), port directions, zero diagnostics on a clean design, diagnostic emission for missing files. |
-| `test_constraints.py` | 5 | ConstraintSet add/query, SDC emission for generic and opensta backends (3 commands with correct targets/values), SDC import round-trip (import exported generic SDC → equivalent ConstraintSet), `emittable()` respects safe mode (LOW-confidence proposals suppressed in STRICT). |
-| `test_sdc_parser.py` | 4 | Parsing a hand-written 5-command SDC (create_clock + 2 input + 2 output delays) yields correct ConstraintSet, clock period value parses numerically (10 ns), unknown command produces a warning (not crash/error), and imported constraints carry `source_kind=IMPORT` with CONFIRMED status. |
-| `test_pareto.py` | 6 | `dominates` semantics, non-dominated Pareto extraction on a 3-candidate tradeoff set, infeasible (negative WNS) rejection, hold-failure rejection, Pareto-set cardinality on a known-good example, FIXED constraints preserved (not mutated) through optimizer candidate generation. |
+### 8.2 What is covered
+
+The suite covers time/unit conversion, parsing and inference, UCM constraints,
+SDC import/export and semantic comparison, validation/coverage/conflicts,
+formal-adapter conservatism, power-report evidence, flow/cache integrity,
+MCMM, QoR history, mutation/Pareto optimization, bounded scheduling, and
+execution-ledger evidence. The category boundaries and representative fixtures
+are maintained in `STEP24_VALIDATION.md`; that document is the source of truth
+for validation scope rather than a historical test-count snapshot.
 
 ### 8.3 Running tests
 
 ```bash
-make test            # pytest tests/ -v
-make test-cov        # adds coverage report
-python3 -m pytest tests/ -v
+make test                  # all default deterministic tests
+make test-golden           # semantic references
+make test-integration      # end-to-end mock/fake workflows
+make test-stress           # deterministic scheduler workloads
+make regression            # ordered per-suite summary
+make verify-environment    # non-mutating Python/package/tool checks
+make eda-diagnostic        # non-executing EDA/Liberty diagnostic
+make test-cov              # coverage report
 ```
 
-Current state: **28 passed, 0 failed, 1 cosmetic Pydantic V2 deprecation
-warning (now fixed in source by migrating to `ConfigDict`).**
+### 8.4 Validation taxonomy (Step 24)
 
-### 8.4 Reserved test trees
+The old reserved test trees are now active, complementary suites:
 
-`golden/`, `integration/`, `regression/`, `stress/` are scaffolded as Python
-packages (empty `__init__.py`) to be populated with:
+- **`tests/unit/`** isolates UCM, parser, validation, SDC, formal, power,
+  QoR-history, MCMM, optimizer, cache-boundary, concurrency, and ledger rules.
+- **`tests/golden/`** checks stable semantic references: timing corpus,
+  canonical SDC constructs, comparison verdicts, validation/coverage/conflict,
+  report-power evidence, MCMM aggregation, mutation, and ledger ordering.
+- **`tests/integration/`** runs complete local parse → infer → UCM → validate
+  → SDC → mock/fake-tool flow → QoR → optimization → artifacts/manifest/ledger
+  → SQLite history → CLI workflows. It also holds the opt-in real-EDA boundary.
+- **`tests/stress/`** uses short fixed workloads to exercise many repeated
+  candidate evaluations, 1/2/4 workers, deadlines/budgets, errors, cache
+  observations, MCMM, and repeatability without random workloads.
+- **`scripts/regression/run_regression.py`** invokes ordinary pytest gates in
+  core, golden, integration, stress order; it reports collected/passed/failed/
+  skipped/errors/elapsed per suite and returns non-zero on any failure.
 
-- **golden**: known-good SDC/UCM snapshots; CI diffs against them.
-- **integration**: end-to-end runs on each example invoking Yosys where
-  available and the mock backend otherwise.
-- **regression**: historical-bug reproductions.
-- **stress**: parameterized large designs / many clocks / many scenarios.
+Run `python scripts/regression/run_regression.py` for the standard gate set.
+Run `python scripts/setup/verify_environment.py` for required Python-package
+and optional-tool classification, and `python scripts/eda/diagnose_eda.py
+--config project.yaml` for non-executing EDA/Liberty readiness evidence.
+
+Optional real EDA is deliberately separated in
+`tests/integration/test_optional_real_eda.py` and marked `optional_real_eda`.
+It is skipped unless `RCA_RUN_REAL_EDA=1` and its exact prerequisites are
+provided. AVAILABLE means only a version probe completed; it does not claim
+that a real flow, a license, or signoff is functional. Missing optional tools
+never make mock-only validation pass by pretending to run EDA.
+
+See `STEP24_VALIDATION.md` for commands, normalization policy, failure matrix,
+artifact-integrity rules, and limitations.
 
 ---
 

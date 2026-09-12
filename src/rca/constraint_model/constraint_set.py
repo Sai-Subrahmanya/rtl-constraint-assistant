@@ -94,6 +94,11 @@ class ConstraintSet(BaseModel):
     def __init__(self, **data: Any) -> None:
         ledger = data.pop("assumption_ledger", None)
         super().__init__(**data)
+        # Creation time is provenance, not a snapshot-time value. Materialize
+        # it once so repeated lossless snapshots are stable across a second
+        # boundary and do not look like a UCM mutation.
+        if self.created_at is None:
+            self.created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self._ledger = ledger if isinstance(ledger, AssumptionLedger) else AssumptionLedger()
         self._snapshot_repairs = []
         max_n = 0
@@ -708,8 +713,7 @@ class ConstraintSet(BaseModel):
             "schema_version": UCM_SNAPSHOT_SCHEMA_VERSION,
             "name": self.name,
             "run_id": self.run_id,
-            "created_at": self.created_at
-                or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "created_at": self.created_at,
             "metadata": _stable_values(copy.deepcopy(self.metadata)),
             "scenarios": {sid: self._scenario_dict(s)
                           for sid, s in sorted(self.scenarios.items())},

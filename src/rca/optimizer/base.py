@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import copy
 import re
-import time
+import time as _wall_time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -61,6 +61,23 @@ from .execution import (
     TaskResultClassification,
 )
 from .search import generate_candidates
+
+
+class _OptimizerClock:
+    """Private clock seam that keeps deterministic test clocks local.
+
+    Optimizer deadline tests intentionally replace ``optimizer_base.time.time``.
+    A local proxy prevents such a controlled replacement from mutating the
+    process-wide stdlib clock used by logging/CLI handlers in a full test run.
+    """
+
+    @staticmethod
+    def time() -> float:
+        return _wall_time.time()
+
+
+time = _OptimizerClock()
+
 
 log = get_logger("optimizer")
 
@@ -309,6 +326,10 @@ class Optimizer:
         # Preserve an explicit caller stop request across that reset.
         explicit_stop_requested = self.budget.stop_reason == StopReason.USER_STOP
         self.budget = OptimizationBudget.from_config(self.cfg)
+        # Share the optimizer-local deadline clock with its budget. This keeps
+        # deterministic deadline injection scoped to an optimization run rather
+        # than modifying the interpreter-wide time module.
+        self.budget.clock = time.time
         if explicit_stop_requested:
             self.budget.stop_reason = StopReason.USER_STOP
         self._invocation_token = None

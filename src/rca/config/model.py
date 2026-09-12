@@ -474,5 +474,8 @@ def write_config(cfg: ProjectConfig, path: str | Path) -> None:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     # Use model_dump but strip internal path fields
-    data = cfg.model_dump(exclude={"config_path", "project_root"})
+    # JSON mode converts Enum/path-like Pydantic values to portable YAML
+    # primitives; ``rca init`` must generate a configuration that can be
+    # parsed back without PyYAML representer errors.
+    data = cfg.model_dump(mode="json", exclude={"config_path", "project_root"})
     p.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8")

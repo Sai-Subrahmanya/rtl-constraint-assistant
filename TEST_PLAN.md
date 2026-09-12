@@ -163,17 +163,70 @@ EDA tool. Its 37 named cases cover:
 
 ## Gate criteria
 
-- `tests/unit/test_validation.py` : **74 passed** (no weakened assertions).
-- `tests/unit/test_validation_step13.py` : **40 passed**.
-- `tests/unit/test_symbiyosys.py` : **11 passed** (Step-14 gate; no real formal tool required).
-- `tests/unit/test_pareto.py` : **125 passed** (Step-11 regression).
-- `tests/unit/test_mcmm.py` : **70 passed** (Step-12 regression).
-- `tests/unit/test_equivalence.py` : **67 passed** (Step-15 audit/hardening gate).
-- `tests/unit/test_power_reports.py` : **38 passed** (Step-20 parser/flow/cache/MCMM/CLI gate; no live power tool).
-- Full `python -m pytest -q` : **854 collected, 854 passed, 0 failed, 0 skipped, 0 errors** (in the project virtual environment).
+The named subsystem suites remain mandatory regression gates: validation,
+formal-adapter behavior (without a real formal tool), optimizer/Pareto, MCMM,
+semantic comparison, and power-report parsing/flow/cache behavior. Exact test
+counts are intentionally not recorded here because the active Step 24 taxonomy
+adds focused coverage over time. Run the maintained gates instead:
+
+```bash
+python scripts/regression/run_regression.py
+pytest tests/unit -q
+pytest tests/golden -q
+pytest tests/integration -q
+pytest tests/stress -q
+```
+
+A passing default suite may contain explicitly skipped optional real-EDA cases;
+those are not a replacement for a provisioned real-tool run. See
+`STEP24_VALIDATION.md` for the current optional-real-EDA policy and failure
+matrix.
 
 ## Environment notes
 
 The `pyslang` Verilog/SystemVerilog front-end is optional; tests that
 exercise the real RTL parser require it and are skipped/reported honestly
 in environments without it. This suite does not depend on it.
+
+---
+
+# Step 24 — Validation Taxonomy, Regression, and Stress Plan
+
+The active test layout is intentionally divided by purpose rather than by a
+raw-count target. See `STEP24_VALIDATION.md` for the maintained execution
+commands and full failure matrix.
+
+| Category | Command | Success criteria |
+|---|---|---|
+| Unit | `pytest tests/unit -q` | Existing subsystem contracts pass. |
+| Golden | `pytest tests/golden -q` | Semantic references match; no volatile fields are asserted. |
+| Integration | `pytest tests/integration -q` | Full deterministic CLI/parser/flow/artifact/history paths pass. |
+| Stress | `pytest tests/stress -q` | Fixed workloads preserve worker bounds and deterministic semantics. |
+| Regression | `python scripts/regression/run_regression.py` | Every gate reports and exits zero. |
+| Optional real EDA | `RCA_RUN_REAL_EDA=1 RCA_REAL_EDA_LIBERTY=/path/lib pytest -m optional_real_eda -q` | Provisioned real tools pass; absence is explicitly skipped. |
+
+## Reference coverage map
+
+- Existing `golden/sdc` references cover single/multiple/generated clocks,
+  input/output timing, clock relationships/groups, false paths, multicycle
+  paths, delays and DRC commands.
+- Existing timing corpus covers structural clock/reset/CDC behavior.
+- Step 24 reference checks cover semantic equivalent/different/UNKNOWN SDC,
+  validation/conflict/coverage classification, OpenROAD-format report power,
+  MCMM aggregation, optimizer mutation, and execution-ledger ordering.
+
+## Determinism rule
+
+Only invocation-specific ledger identifiers, task paths, logical worker labels,
+and artifact locators may be normalized. Constraints, lineage, QoR values,
+scenario identity, cache observation, status, Pareto/final selection, and hashes
+remain meaningful and must not be normalized away.
+
+## Failure and integrity gates
+
+The regression gates collectively cover malformed/missing RTL and config,
+unsupported/unresolved intent, missing optional tools/Liberty, flow failures,
+formal unavailable/unresolved, SQLite advisory failures, cache hash corruption,
+incomplete MCMM data, budget/deadline behavior, invalid workers, executor and
+worker failures. Run manifests/artifacts remain the evidence authority and
+SQLite remains an advisory query/index sidecar.

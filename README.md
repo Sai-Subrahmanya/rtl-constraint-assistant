@@ -301,7 +301,7 @@ With your permission, the following enhancements were incorporated (documented h
 2. **Rich CLI** for beautiful, structured console output.
 3. **FastAPI web dashboard** with live constraint/coverage/QoR views (`rca dashboard`).
 4. **JSON Schema** for the project configuration (versioned).
-5. **Pytest** test suite with dedicated Step-11 Pareto/optimizer coverage (125 tests), Step-12 MCMM coverage (70 tests), Step-13 validation scenarios (40 tests), Step-14 SymbiYosys formal-adapter coverage (11 tests), Step-15 semantic-comparison audit coverage (67 tests), and Step-20 power-report ingestion coverage (38 tests) — full suite **854 collected / 854 passed**. Coverage spans parser, constraints, SDC parsing/generation, connectivity, timing model, inference, equivalence, validation (reference/semantic/conflicts/overlap/coverage/completeness/exception-safety/scenario/SDC-import/backend), formal proof verdicts/provenance, configured power reports, EDA flow, determinism, units and expression semantics; exercising the Verilog/SystemVerilog front-end additionally requires the `pyslang` package.
+5. **Pytest validation taxonomy** with separate unit, golden/reference, integration, regression-runner, stress/concurrency, and opt-in real-EDA categories. The default suite uses deterministic mock/fake fixtures only; `tests/integration/test_optional_real_eda.py` is skipped unless a user explicitly provides tools and collateral. See `STEP24_VALIDATION.md` for current category counts, failure coverage, and commands.
 6. **Deterministic hashing** utilities for reproducibility/caching.
 
 ---
@@ -310,11 +310,24 @@ With your permission, the following enhancements were incorporated (documented h
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # run unit tests
-ruff check src/ tests/    # lint
-mypy src/rca              # type-check
-make example              # run simple_counter end-to-end
+pytest -q                                      # all deterministic validation categories
+python scripts/regression/run_regression.py    # documented core → golden → integration → stress gates
+pytest tests/golden -q                         # reference outputs
+pytest tests/integration -q                    # parser-to-artifact workflows (real EDA tests skip by default)
+pytest tests/stress -q                         # short deterministic scheduler stress suite
+python scripts/setup/verify_environment.py     # no-install prerequisite report
+python scripts/eda/diagnose_eda.py --config project.yaml  # version-probe-only EDA diagnostic
+ruff check src/ tests/                         # lint
+mypy src/rca                                   # type-check
+make example                                   # run simple_counter end-to-end
 ```
+
+The default tests do not require Yosys, OpenSTA, SymbiYosys, a Liberty library,
+or commercial software. To opt into a real flow, set `RCA_RUN_REAL_EDA=1` and
+provide `RCA_REAL_EDA_LIBERTY`; missing prerequisites produce **SKIPPED**
+optional tests, never fabricated results. `AVAILABLE` in an environment
+diagnostic means only that a version probe succeeded, not that signoff or a
+complete flow is guaranteed. See `STEP24_VALIDATION.md`.
 
 ## References
 

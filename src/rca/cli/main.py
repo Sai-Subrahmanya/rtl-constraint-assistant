@@ -583,10 +583,9 @@ def generate(config: str = typer.Argument(..., help="Path to project YAML"),
             reasons = "; ".join(errors_by_id.get(cid, ["unspecified"]))
             console.print(f"  - {cid}: {reasons}")
 
-    color = "green" if result.status.value == "COMPLETE" else "yellow"
+    color = "green" if status_str == "COMPLETE" else "yellow"
     console.print(Panel(f"[{color}]Generated {out_path}[/{color}]"))
     # Exit non-zero on BLOCKED/ERROR so CI scripts don't mistake it for success.
-    status_str = result.status if isinstance(result.status, str) else result.status.value
     if status_str in ("BLOCKED", "ERROR"):
         raise typer.Exit(code=2)
 
@@ -699,6 +698,9 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
     separated from semantic identity; unsupported or unresolved options
     surface as UNKNOWN rather than false equivalence.
     """
+    # JSON is a machine-readable contract, so suppress informational logs that
+    # a previous in-process CLI command may have enabled.
+    configure_logging(level="WARNING" if json_out else "INFO")
     # Retain the project-config argument as part of the established CLI
     # contract, but compare the supplied SDC inputs through the hardened
     # importer.  The legacy SDCParser silently drops unsupported commands,
@@ -712,7 +714,10 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
         raise typer.Exit(code=2) from exc
     result = compare_sdc_text(text_a, text_b, source_a=a, source_b=b)
     if json_out:
-        console.print_json(data=result.to_dict())
+        # ``typer.echo`` binds to Click's current invocation stream.  Unlike a
+        # module-level Rich console it stays correctly captured across repeated
+        # in-process CLI invocations (for example integration tests).
+        typer.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True, default=str))
         return
     status_color = {
         "EQUIVALENT": "green",
