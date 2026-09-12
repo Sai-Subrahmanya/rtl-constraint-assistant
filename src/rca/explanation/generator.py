@@ -15,6 +15,7 @@ from ..inference.rules import InferenceCandidate
 from ..lineage.models import ConstraintLineageReport, LineageChangeKind
 from ..optimizer import Candidate
 from ..readiness.models import ConstraintReadinessReport, ReadinessSeverity
+from ..review.models import ConstraintReview, ConstraintReviewAssessment
 
 
 def explain_constraint(c: Constraint) -> str:
@@ -207,6 +208,49 @@ def explain_constraint_lineage(report: ConstraintLineageReport) -> str:
         for event in report.change_set.readiness_events:
             lines.append(f"  Readiness: {event.message}")
     lines.append("  Boundary: lineage is a read-only traceability projection, not a second canonical history or provenance authority.")
+    return "\n".join(lines)
+
+
+def explain_constraint_review(review: ConstraintReview | ConstraintReviewAssessment) -> str:
+    """Render a Step-31 governance record without claiming EDA signoff.
+
+    This is a presentation-only view of existing review/readiness/lineage
+    evidence. It never changes the canonical UCM, accepts advice, or turns an
+    RCA approval into timing, STA, physical, or commercial-tool signoff.
+    """
+    assessment = review if isinstance(review, ConstraintReviewAssessment) else None
+    record = assessment.review if assessment is not None else review
+    current_status = assessment.current_status if assessment is not None else record.status
+    lines = [
+        f"Constraint review: {record.id}",
+        f"  Review state at record time: {record.status.value}",
+        f"  Current review state: {current_status.value}",
+        f"  Reviewed UCM content identity: {record.reviewed_snapshot.ucm_content_identity}",
+        f"  Reviewed UCM semantic identity: {record.reviewed_snapshot.ucm_semantic_identity or 'UNKNOWN'}",
+        f"  Scope: {record.scope.scope_kind} {list(record.scope.reviewed_scenario_ids)}",
+        f"  External EDA signoff: {record.external_eda_signoff.value}",
+    ]
+    if record.approval is not None:
+        lines.append(f"  Explicit decision: {record.approval.kind.value} by {record.approval.actor.identity}")
+        if record.approval.comment:
+            lines.append(f"  Comment: {record.approval.comment}")
+    else:
+        lines.append("  Explicit decision: none; assessment never auto-approves.")
+    if record.reviewed_snapshot.lineage_snapshot_identity:
+        lines.append(f"  Lineage snapshot: {record.reviewed_snapshot.lineage_snapshot_identity}")
+    active_blockers = assessment.blockers if assessment is not None else record.blockers
+    active_findings = assessment.findings if assessment is not None else record.findings
+    if active_blockers:
+        lines.append("  Approval blockers:")
+        lines.extend(f"    {item.category}: {item.message}" for item in active_blockers)
+    warnings = [item for item in active_findings if item.severity.value == "WARNING"]
+    if warnings:
+        lines.append("  Review warnings:")
+        lines.extend(f"    {item.category}: {item.message}" for item in warnings)
+    if assessment is not None and assessment.staleness_reasons:
+        lines.append("  Staleness:")
+        lines.extend(f"    {reason}" for reason in assessment.staleness_reasons)
+    lines.append("  Boundary: RCA review approval is governance only, not external EDA signoff or timing proof.")
     return "\n".join(lines)
 
 

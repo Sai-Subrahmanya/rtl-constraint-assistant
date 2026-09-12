@@ -70,38 +70,43 @@ rca readiness project.yaml --ucm reviewed-ucm.json --json
 #    This is report-only and never writes history or runs EDA.
 rca lineage project.yaml --ucm reviewed-ucm.json --json
 
-# 7. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
+# 7. Assess or explicitly approve the exact canonical UCM snapshot.
+#    Review approval is governance only, never EDA/STA/physical signoff.
+rca review project.yaml --ucm reviewed-ucm.json --json
+rca review project.yaml --ucm reviewed-ucm.json --decision APPROVE --reviewer "reviewer" --json
+
+# 8. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
 rca generate project.yaml --backend generic
 rca generate project.yaml --backend opensta
 
-# 8. Validate generated constraints
+# 9. Validate generated constraints
 #    (also runs mapped SymbiYosys jobs when formal.backend: symbiyosys is configured)
 rca validate project.yaml
 
-# 9. Show coverage
+# 10. Show coverage
 rca coverage project.yaml
 
-# 10. Inspect real-EDA prerequisites without executing synthesis or STA
+# 11. Inspect real-EDA prerequisites without executing synthesis or STA
 rca doctor project.yaml --json
 
-# 11. Run Yosys + OpenSTA only when doctor reports the real boundary ready
+# 12. Run Yosys + OpenSTA only when doctor reports the real boundary ready
 #     and flow.liberty names your readable Liberty collateral.
 rca run-sta project.yaml --backend yosys_opensta
 
-# 12. Multi-objective optimization (mock EDA backend works without tools)
+# 13. Multi-objective optimization (mock EDA backend works without tools)
 rca optimize project.yaml --backend mock
 
-# 13. Query the local historical QoR repository (never executes EDA)
+# 14. Query the local historical QoR repository (never executes EDA)
 rca history --config project.yaml --best setup_wns
 
-# 14. Search offline vendor-neutral constraint knowledge (advisory only)
+# 15. Search offline vendor-neutral constraint knowledge (advisory only)
 rca knowledge search "false path" --json
 rca knowledge suggest project.yaml --json
 
-# 15. Full human-readable report
+# 16. Full human-readable report
 rca report project.yaml
 
-# 16. Launch the web dashboard
+# 17. Launch the web dashboard
 rca dashboard project.yaml
 ```
 
@@ -229,6 +234,7 @@ rtl-constraint-assistant/
 | `rca apply`        | Resolve exactly one named advisory candidate with required `--candidate` and explicit `--decision`; validates an isolated UCM projection, supports `--dry-run`, optional repeatable `--scenario`, and writes a canonical snapshot only after a mutation. Never applies all candidates or emits SDC/history. |
 | `rca readiness CONFIG --ucm SNAPSHOT.json [--scenario ID] [--json]` | Deterministic, report-only closure assessment of a supplied canonical UCM. Aggregates existing validation, coverage, MCMM, provenance, advisory/application, and configuration-aware preflight evidence; never writes UCM/SDC/coverage/history/artifacts or executes EDA/proofs. |
 | `rca lineage CONFIG (--ucm SNAPSHOT.json \| --before A.json --after B.json) [--json]` | Deterministic read-only traceability projection for canonical constraints and explicit semantic snapshot comparison. Connects retained provenance, advice/application, validation/formal, readiness, knowledge, and MCMM evidence; never writes UCM/SDC/history/artifacts/SQLite or executes EDA/proofs. |
+| `rca review CONFIG --ucm SNAPSHOT.json [--decision APPROVE\|APPROVE_WITH_WARNINGS\|REJECT\|DEFER\|REVOKE] [--json]` | Deterministic governance review of an exact canonical snapshot. Assessment never auto-approves; explicit approval remains separate from external EDA signoff and never writes UCM/SDC/artifacts/history/SQLite or executes EDA/formal. |
 | `rca generate`     | Emit SDC (generic/opensta/synopsys/cadence backend). |
 | `rca validate`     | Validate generated or imported SDC; runs configured SymbiYosys exception proofs if opted in. |
 | `rca coverage`     | Per-category coverage report with uncovered objects. |

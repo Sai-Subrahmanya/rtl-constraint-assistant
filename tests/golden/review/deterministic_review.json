@@ -1,0 +1,292 @@
+{
+  "BLOCKED": {
+    "approval_possible": false,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [
+      "READINESS"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "INCOMPLETE": {
+    "approval_possible": false,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [
+      "READINESS"
+    ],
+    "current_status": "INCOMPLETE",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "INCOMPLETE",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "READY_WITH_WARNINGS": {
+    "approval_possible": false,
+    "approval_with_warnings_possible": true,
+    "blocker_categories": [],
+    "current_status": "NEEDS_REVIEW",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "NEEDS_REVIEW",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": [
+      "READINESS"
+    ]
+  },
+  "UNKNOWN": {
+    "approval_possible": false,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [
+      "READINESS"
+    ],
+    "current_status": "UNKNOWN",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "UNKNOWN",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "UNSUPPORTED": {
+    "approval_possible": false,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [
+      "READINESS"
+    ],
+    "current_status": "UNSUPPORTED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "UNSUPPORTED",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "clean_READY_review": {
+    "approval_possible": true,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [],
+    "current_status": "NEEDS_REVIEW",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "NEEDS_REVIEW",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "coverage_incomplete": {
+    "approval_possible": false,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [
+      "COVERAGE"
+    ],
+    "current_status": "INCOMPLETE",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "INCOMPLETE",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "deterministic_repeated_output": true,
+  "explicit_APPROVE": {
+    "decision": "APPROVE",
+    "status": "APPROVED"
+  },
+  "explicit_APPROVE_WITH_WARNINGS": {
+    "decision": "APPROVE_WITH_WARNINGS",
+    "status": "APPROVED_WITH_WARNINGS"
+  },
+  "explicit_DEFER": {
+    "decision": "DEFER",
+    "status": "DEFERRED"
+  },
+  "explicit_REJECT": {
+    "decision": "REJECT",
+    "status": "REJECTED"
+  },
+  "formal_UNVERIFIED": {
+    "approval_possible": false,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [],
+    "current_status": "NEEDS_REVIEW",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "NEEDS_REVIEW",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": [
+      "FORMAL"
+    ]
+  },
+  "inference_application_ucm_lineage_review": {
+    "candidate_id_present": true,
+    "lineage_reference": true,
+    "source": "EXPLICITLY_ACCEPTED"
+  },
+  "multi_scenario_review": {
+    "approval_possible": true,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [],
+    "current_status": "NEEDS_REVIEW",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "NEEDS_REVIEW",
+    "scope": {
+      "active_scenario_ids": [
+        "FAST",
+        "SLOW"
+      ],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [
+        "FAST",
+        "SLOW"
+      ],
+      "scenario_definition_identity": "ab66412b114dab97c5ae747640926a04a6266d62d274b0a995164a5d5f7deada",
+      "scope_kind": "ALL_ACTIVE_SCENARIOS",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "review_invalidation_revocation": {
+    "history": [
+      "APPROVE",
+      "REVOKE"
+    ],
+    "status": "REVOKED"
+  },
+  "review_policy_gating": {
+    "explicit_allow_warnings": true,
+    "strict_allow_warnings": false
+  },
+  "scenario_specific_review": {
+    "approval_possible": true,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [],
+    "current_status": "NEEDS_REVIEW",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "NEEDS_REVIEW",
+    "scope": {
+      "active_scenario_ids": [
+        "FAST",
+        "SLOW"
+      ],
+      "requested_scenario_ids": [
+        "FAST"
+      ],
+      "reviewed_scenario_ids": [
+        "FAST"
+      ],
+      "scenario_definition_identity": "ab66412b114dab97c5ae747640926a04a6266d62d274b0a995164a5d5f7deada",
+      "scope_kind": "SELECTED_SCENARIOS",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "stale_approved_review": {
+    "current_status": "STALE",
+    "reasons": [
+      "Canonical UCM content identity differs from the reviewed snapshot.",
+      "Canonical UCM semantic identity differs from the reviewed snapshot or is unsupported."
+    ]
+  },
+  "superseding_review": {
+    "status": "NEEDS_REVIEW",
+    "supersedes": true
+  },
+  "supplied_formal_VERIFIED": {
+    "approval_possible": true,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [],
+    "current_status": "NEEDS_REVIEW",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "NEEDS_REVIEW",
+    "scope": {
+      "active_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "unknown_scenario": {
+    "approval_possible": false,
+    "approval_with_warnings_possible": false,
+    "blocker_categories": [
+      "MCMM_SCOPE"
+    ],
+    "current_status": "INVALID",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "INVALID",
+    "scope": {
+      "active_scenario_ids": [
+        "FAST"
+      ],
+      "requested_scenario_ids": [
+        "UNKNOWN"
+      ],
+      "reviewed_scenario_ids": [],
+      "scenario_definition_identity": "fca301469e2a53550a21054000cd3f0d49ab986d28189fee0b72454f596fe9c5",
+      "scope_kind": "SELECTED_SCENARIOS",
+      "unknown_scenario_ids": [
+        "UNKNOWN"
+      ]
+    },
+    "warning_categories": []
+  },
+  "unsupported_unknown_lineage": {
+    "semantic_identity": "UNKNOWN"
+  },
+  "validation_warning_vs_blocker": {
+    "blocker_status": false,
+    "warning_status": false
+  }
+}

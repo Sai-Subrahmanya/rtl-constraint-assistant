@@ -5,6 +5,7 @@ from .generator import (
     explain_constraint_application,
     explain_constraint_lineage,
     explain_constraint_readiness,
+    explain_constraint_review,
     explain_inference_candidate,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "explain_constraint_application",
     "explain_constraint_lineage",
     "explain_constraint_readiness",
+    "explain_constraint_review",
     "explain_inference_candidate",
 ]

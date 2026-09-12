@@ -2,7 +2,7 @@
 RCA Command-Line Interface (Manual §59).
 
 Provides: rca init, analyze, infer, generate, validate, compare, coverage,
-explain, run-sta, optimize, inspect, report, dashboard.
+lineage, review, explain, run-sta, optimize, inspect, report, dashboard.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from ..explanation import (
     explain_constraint,
     explain_constraint_lineage,
     explain_constraint_readiness,
+    explain_constraint_review,
 )
 from ..inference import (
     ApplicationStatus,
@@ -62,6 +63,17 @@ from ..parser import SlangAdapter
 from ..provenance import AssumptionLedger
 from ..qor.repository import QoRRepositoryError, SQLiteQoRRepository
 from ..readiness import assess_constraint_readiness
+from ..review import (
+    ConstraintReview,
+    ReviewActor,
+    ReviewDecisionError,
+    ReviewDecisionKind,
+    ReviewPolicy,
+    assess_constraint_review,
+    create_constraint_review,
+    decide_review,
+    supersede_review,
+)
 from ..sdc import SDCParser, get_backend
 from ..sdc_importer import SdcImporter
 from ..search import KnowledgeEngine, KnowledgeError, load_knowledge_file
@@ -154,6 +166,51 @@ def _load_canonical_ucm(path: str | None, cfg: ProjectConfig) -> ConstraintSet:
         return ConstraintSet.from_snapshot_dict(payload, unknown_field_policy="error")
     except (OSError, TypeError, ValueError, json.JSONDecodeError, SnapshotFormatError) as exc:
         console.print(f"[red]Cannot load canonical UCM snapshot: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+def _load_review_record(path: str) -> ConstraintReview:
+    """Read an explicitly supplied review record without persisting anything."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise TypeError("review record must be a JSON object")
+        # CLI assessment JSON nests the immutable review record; accepting it
+        # lets callers inspect a prior explicit decision without a database.
+        if isinstance(payload.get("review"), dict):
+            payload = payload["review"]
+        record = ConstraintReview.from_dict(payload)
+        if not record.id or not record.reviewed_snapshot.ucm_content_identity:
+            raise ValueError("review record is missing its exact reviewed UCM identity")
+        return record
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Cannot load review record: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+def _load_review_policy(path: str | None, allow_warnings: bool) -> ReviewPolicy:
+    """Load an explicit typed policy; defaults remain visible and conservative."""
+    try:
+        data: Any = {}
+        if path:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise TypeError("review policy must be a JSON object")
+        policy = ReviewPolicy.from_dict(data)
+        if allow_warnings:
+            policy = ReviewPolicy(
+                require_readiness=policy.require_readiness,
+                require_readiness_ready=policy.require_readiness_ready,
+                require_validation_evidence=policy.require_validation_evidence,
+                require_coverage_complete=policy.require_coverage_complete,
+                require_all_active_scenarios=policy.require_all_active_scenarios,
+                allow_approval_with_warnings=True,
+                require_formal_for_constraint_types=policy.require_formal_for_constraint_types,
+                allowed_unresolved_evidence_categories=policy.allowed_unresolved_evidence_categories,
+            )
+        return policy
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Cannot load review policy: {exc}[/red]")
         raise typer.Exit(code=2) from exc
 
 
@@ -826,6 +883,131 @@ def lineage(
         border_style="cyan",
     ))
     console.print(explain_constraint_lineage(report))
+
+
+@app.command()
+def review(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    ucm: str = typer.Option(..., "--ucm", help="Canonical UCM JSON snapshot to review"),
+    decision: str | None = typer.Option(None, "--decision", help="Explicit APPROVE|APPROVE_WITH_WARNINGS|REJECT|DEFER|REVOKE"),
+    reviewer: str | None = typer.Option(None, "--reviewer", help="Explicit reviewer identity; omitted is UNSPECIFIED"),
+    reviewer_role: str | None = typer.Option(None, "--reviewer-role", help="Optional explicit reviewer role"),
+    comment: str = typer.Option("", "--comment", help="Explicit reviewer rationale/comment"),
+    scenario_ids: Annotated[list[str] | None, typer.Option(
+        "--scenario", help="Selected MCMM scenario review scope (repeatable)",
+    )] = None,
+    all_active_scenarios: bool = typer.Option(False, "--all-active-scenarios",
+                                               help="Explicitly review all active MCMM scenarios"),
+    policy: str | None = typer.Option(None, "--policy", help="Explicit ReviewPolicy JSON file"),
+    allow_warnings: bool = typer.Option(False, "--allow-warnings",
+                                        help="Explicitly set policy.allow_approval_with_warnings"),
+    prior_review: str | None = typer.Option(None, "--review", help="Prior review JSON or review-assessment JSON"),
+    supersede: str | None = typer.Option(None, "--supersede", help="Prior review JSON to supersede with a new review"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic review JSON only"),
+):
+    """Assess or explicitly decide review of one canonical UCM snapshot.
+
+    Review is governance only: it never modifies UCM, accepts a candidate,
+    generates SDC, writes artifacts/history/SQLite, or executes EDA/formal.
+    A decision is optional; without it the result always remains an assessment
+    and is never an implicit approval. Supplied/created RCA review approval is
+    distinct from external EDA signoff.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    if prior_review and supersede:
+        message = "Use at most one of --review and --supersede."
+        if json_out:
+            typer.echo(json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True))
+        else:
+            console.print(f"[red]{message}[/red]")
+        raise typer.Exit(code=2)
+    cfg = _load(config)
+    cset = _load_canonical_ucm(ucm, cfg)
+    review_policy = _load_review_policy(policy, allow_warnings)
+    # These are existing, in-memory evidence projections only. No candidate is
+    # materialized or applied, and generic validation never invokes a formal or
+    # EDA backend. Step-29 and Step-30 remain their own authorities.
+    design, _ = _do_parse(cfg)
+    timing_graph = _do_timing(cfg, design)
+    matrix = _mcmm_matrix(cfg, cset)
+    validation = run_validation(
+        design, timing_graph, cset, backend="generic",
+        active_scenarios=set(matrix.active_ids) if matrix.is_enabled else None,
+    )
+    readiness_report = assess_constraint_readiness(
+        cfg, cset, design, timing_graph, validation=validation,
+        scenario_ids=tuple(scenario_ids or ()) if scenario_ids else (),
+    )
+    lineage_report = build_constraint_lineage(
+        cset, config=cfg, design=design, timing_graph=timing_graph,
+        validation=validation, readiness=readiness_report,
+    )
+    if prior_review:
+        record = _load_review_record(prior_review)
+        if record.policy != review_policy:
+            message = "--review must be assessed under its recorded policy; omit --policy/--allow-warnings changes."
+            if json_out:
+                typer.echo(json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True))
+            else:
+                console.print(f"[red]{message}[/red]")
+            raise typer.Exit(code=2)
+    elif supersede:
+        record = supersede_review(
+            _load_review_record(supersede), cset, policy=review_policy,
+            scenario_ids=tuple(scenario_ids or ()), all_active_scenarios=all_active_scenarios,
+            config=cfg, design=design, timing_graph=timing_graph, lineage=lineage_report,
+            readiness=readiness_report, validation=validation,
+        )
+    else:
+        record = create_constraint_review(
+            cset, policy=review_policy, scenario_ids=tuple(scenario_ids or ()),
+            all_active_scenarios=all_active_scenarios, config=cfg, design=design,
+            timing_graph=timing_graph, lineage=lineage_report, readiness=readiness_report,
+            validation=validation,
+        )
+    try:
+        parsed_decision = ReviewDecisionKind(decision.strip().upper()) if decision else None
+    except ValueError:
+        message = f"Unsupported explicit review decision: {decision!r}"
+        if json_out:
+            typer.echo(json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True))
+        else:
+            console.print(f"[red]{message}[/red]")
+        raise typer.Exit(code=2) from None
+    actor = ReviewActor.from_value(reviewer, role=reviewer_role)
+    try:
+        if parsed_decision is not None:
+            record = decide_review(
+                record, cset, parsed_decision, actor=actor, comment=comment,
+                config=cfg, design=design, timing_graph=timing_graph, lineage=lineage_report,
+                readiness=readiness_report, validation=validation,
+            )
+        assessment = assess_constraint_review(
+            cset, review=record, config=cfg, design=design, timing_graph=timing_graph,
+            lineage=lineage_report, readiness=readiness_report, validation=validation,
+        )
+    except ReviewDecisionError as exc:
+        payload = {"status": "INVALID", "message": str(exc), "ucm_mutated": False}
+        if json_out:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    if json_out:
+        typer.echo(json.dumps(assessment.to_dict(), indent=2, sort_keys=True, default=str))
+        return
+    color = {
+        "APPROVED": "green", "APPROVED_WITH_WARNINGS": "yellow", "NEEDS_REVIEW": "cyan",
+        "REJECTED": "red", "DEFERRED": "yellow", "STALE": "magenta", "INVALID": "red",
+        "REVOKED": "red", "UNKNOWN": "magenta", "BLOCKED": "red", "INCOMPLETE": "yellow",
+        "UNSUPPORTED": "magenta",
+    }[assessment.current_status.value]
+    console.print(Panel(
+        f"[bold {color}]{assessment.current_status.value}[/bold {color}] — governance review only; "
+        "not external EDA signoff",
+        title="Constraint review & approval boundary", border_style=color,
+    ))
+    console.print(explain_constraint_review(assessment))
 
 
 @app.command()
