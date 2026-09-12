@@ -22,32 +22,53 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from ..constraint_model import Constraint, ConstraintSet, PathSelector
+from ..constraint_model import Constraint, ConstraintSet
 from ..utils.enums import (
     CollectionKind,
-    ComparisonLevel,
     ConstraintType,
     ImportStatus,
-    ResolutionStatus,
 )
 from ..utils.units import parse_time_string
 
 # Fields that are semantically irrelevant (presentation/provenance) and
 # must never enter a semantic identity comparison.
 _PRESENTATION_FIELDS = {
-    "id", "source_kind", "confidence", "status", "opt_status",
-    "generation_confidence", "comment", "provenance", "precedence",
-    "generated_text_by_backend", "equivalent_forms",
-    "evidence_ids", "assumption_ids", "dependency_ids", "downstream_ids",
-    "dependent_analyses", "affected_paths",
+    "id",
+    "source_kind",
+    "confidence",
+    "status",
+    "opt_status",
+    "generation_confidence",
+    "comment",
+    "provenance",
+    "precedence",
+    "generated_text_by_backend",
+    "equivalent_forms",
+    "evidence_ids",
+    "assumption_ids",
+    "dependency_ids",
+    "downstream_ids",
+    "dependent_analyses",
+    "affected_paths",
 }
 
 # Time-valued keys per constraint value dict. Values at these keys are
 # converted to seconds if they are numeric or a time-string.
 _TIME_VALUE_KEYS = {
-    "period", "delay", "uncertainty", "latency", "transition",
-    "input_delay", "output_delay", "source_latency", "early_latency",
-    "late_latency", "min_delay", "max_delay", "waveform", "edges",
+    "period",
+    "delay",
+    "uncertainty",
+    "latency",
+    "transition",
+    "input_delay",
+    "output_delay",
+    "source_latency",
+    "early_latency",
+    "late_latency",
+    "min_delay",
+    "max_delay",
+    "waveform",
+    "edges",
     "edge_shift",
 }
 
@@ -86,43 +107,46 @@ SEMANTIC_FIELDS: dict[ConstraintType, dict[str, Any]] = {
         "defaults": {"add": False},
         "unknown_on_extra": False,
         "description": "Clock identity (name), period and waveform define "
-                       "the clock. Target/source ordering is irrelevant. "
-                       "Different clock names are never equivalent.",
+        "the clock. Target/source ordering is irrelevant. "
+        "Different clock names are never equivalent.",
     },
     ConstraintType.CREATE_GENERATED_CLOCK: {
         "identity": ("name", "source", "master_clock"),
         "numeric_time": ("waveform", "edge_shift"),
         "ordered": ("edges", "edge_shift", "waveform"),
         "unordered": ("targets",),
-        "defaults": {"add": False, "combinational": False,
-                     "invert": False, "duty_cycle": None,
-                     "divide_by": None, "multiply_by": None},
+        "defaults": {
+            "add": False,
+            "combinational": False,
+            "invert": False,
+            "duty_cycle": None,
+            "divide_by": None,
+            "multiply_by": None,
+        },
         "unknown_on_extra": False,
         "description": "Generated-clock equivalence requires matching "
-                       "name, source pin, master clock, divisor/multiplier "
-                       "and edge/waveform. divide_by=2 is NOT equivalent "
-                       "to multiply_by=0.5 because 0.5 is not a legal "
-                       "integer multiplier in SDC; conservative UNKNOWN.",
+        "name, source pin, master clock, divisor/multiplier "
+        "and edge/waveform. divide_by=2 is NOT equivalent "
+        "to multiply_by=0.5 because 0.5 is not a legal "
+        "integer multiplier in SDC; conservative UNKNOWN.",
     },
     ConstraintType.SET_INPUT_DELAY: {
         "identity": ("clock",),
         "numeric_time": ("delay",),
         "ordered": (),
         "unordered": ("targets",),
-        "defaults": {"min_max": "max", "edge": "both",
-                     "add_delay": False, "clock_fall": False},
+        "defaults": {"min_max": "max", "edge": "both", "add_delay": False, "clock_fall": False},
         "unknown_on_extra": False,
         "description": "I/O delays must match min/max, rise/fall, add_delay "
-                       "and associated clock. -min/-max differ even if the "
-                       "numeric value is identical.",
+        "and associated clock. -min/-max differ even if the "
+        "numeric value is identical.",
     },
     ConstraintType.SET_OUTPUT_DELAY: {
         "identity": ("clock",),
         "numeric_time": ("delay",),
         "ordered": (),
         "unordered": ("targets",),
-        "defaults": {"min_max": "max", "edge": "both",
-                     "add_delay": False, "clock_fall": False},
+        "defaults": {"min_max": "max", "edge": "both", "add_delay": False, "clock_fall": False},
         "unknown_on_extra": False,
         "description": "Same as set_input_delay.",
     },
@@ -134,19 +158,23 @@ SEMANTIC_FIELDS: dict[ConstraintType, dict[str, Any]] = {
         "defaults": {"setup": True, "hold": True},
         "unknown_on_extra": False,
         "description": "set_clock_uncertainty applies to a (set of) clocks "
-                       "and may be setup/hold qualified.",
+        "and may be setup/hold qualified.",
     },
     ConstraintType.SET_CLOCK_LATENCY: {
         "identity": (),
-        "numeric_time": ("latency", "early_latency", "late_latency",
-                         "source_latency"),
+        "numeric_time": ("latency", "early_latency", "late_latency", "source_latency"),
         "ordered": (),
         "unordered": ("targets", "clocks"),
-        "defaults": {"min_max": "max", "source": False,
-                     "network": True, "early": False, "late": False},
+        "defaults": {
+            "min_max": "max",
+            "source": False,
+            "network": True,
+            "early": False,
+            "late": False,
+        },
         "unknown_on_extra": False,
         "description": "Latency compares -source/-network, -early/-late, "
-                       "and the associated clocks.",
+        "and the associated clocks.",
     },
     ConstraintType.SET_CLOCK_TRANSITION: {
         "identity": (),
@@ -156,7 +184,7 @@ SEMANTIC_FIELDS: dict[ConstraintType, dict[str, Any]] = {
         "defaults": {"min_max": "max", "rise": True, "fall": True},
         "unknown_on_extra": False,
         "description": "Clock transition (slew) compares the slew value, "
-                       "min/max qualifier, and clock targets.",
+        "min/max qualifier, and clock targets.",
     },
     ConstraintType.SET_PROPAGATED_CLOCK: {
         "identity": (),
@@ -166,8 +194,8 @@ SEMANTIC_FIELDS: dict[ConstraintType, dict[str, Any]] = {
         "defaults": {},
         "unknown_on_extra": False,
         "description": "set_propagated_clock is a flag-like constraint; "
-                       "equivalence is defined by the set of clocks it "
-                       "applies to.",
+        "equivalence is defined by the set of clocks it "
+        "applies to.",
     },
     ConstraintType.SET_CLOCK_GROUPS: {
         "identity": ("relationship",),
@@ -175,38 +203,48 @@ SEMANTIC_FIELDS: dict[ConstraintType, dict[str, Any]] = {
         # Groups form a PARTITION. Group order is non-semantic, order of
         # clocks *within* a group is non-semantic, but collapsing groups
         # changes the partition and is NOT equivalent.
-        "ordered": ("groups",),   # groups are compared as a sorted tuple of sorted tuples
+        "ordered": ("groups",),  # groups are compared as a sorted tuple of sorted tuples
         "unordered": (),
         "defaults": {},
         "unknown_on_extra": False,
         "description": "Clock-group partitions are compared as a sorted "
-                       "tuple of sorted clock-sets. {A B} {C} ≡ {C} {A B} "
-                       "but {A} {B} {C} is NOT equivalent to {A B} {C}.",
+        "tuple of sorted clock-sets. {A B} {C} ≡ {C} {A B} "
+        "but {A} {B} {C} is NOT equivalent to {A B} {C}.",
     },
     ConstraintType.SET_FALSE_PATH: {
         "identity": (),
         "numeric_time": (),
-        "ordered": (),        # order handled by PathSelector.semantic_key
+        "ordered": (),  # order handled by PathSelector.semantic_key
         "unordered": (),
-        "defaults": {"min_max": "both", "setup_hold": "both",
-                     "edge": None, "add_delay": False, "reset_path": False},
+        "defaults": {
+            "min_max": "both",
+            "setup_hold": "both",
+            "edge": None,
+            "add_delay": False,
+            "reset_path": False,
+        },
         "path_selector": True,
         "unknown_on_extra": False,
         "description": "False-path equivalence requires matching -from/-to/"
-                       "-through selectors with ordered -through stages, "
-                       "plus min/max/setup/hold qualifiers.",
+        "-through selectors with ordered -through stages, "
+        "plus min/max/setup/hold qualifiers.",
     },
     ConstraintType.SET_MULTICYCLE_PATH: {
         "identity": (),
         "numeric_time": (),
         "ordered": (),
         "unordered": (),
-        "defaults": {"cycles": 1, "min_max": "max", "setup_hold": "setup",
-                     "start": False, "end": True},
+        "defaults": {
+            "cycles": 1,
+            "min_max": "max",
+            "setup_hold": "setup",
+            "start": False,
+            "end": True,
+        },
         "path_selector": True,
         "unknown_on_extra": False,
         "description": "Multicycle equivalence requires matching cycle count, "
-                       "setup/hold qualifier, and start/end selector semantics.",
+        "setup/hold qualifier, and start/end selector semantics.",
     },
     ConstraintType.SET_MIN_DELAY: {
         "identity": (),
@@ -216,8 +254,7 @@ SEMANTIC_FIELDS: dict[ConstraintType, dict[str, Any]] = {
         "defaults": {},
         "path_selector": True,
         "unknown_on_extra": False,
-        "description": "set_min_delay compares the delay value and the full "
-                       "path selector.",
+        "description": "set_min_delay compares the delay value and the full path selector.",
     },
     ConstraintType.SET_MAX_DELAY: {
         "identity": (),
@@ -227,8 +264,7 @@ SEMANTIC_FIELDS: dict[ConstraintType, dict[str, Any]] = {
         "defaults": {},
         "path_selector": True,
         "unknown_on_extra": False,
-        "description": "set_max_delay compares the delay value and the full "
-                       "path selector.",
+        "description": "set_max_delay compares the delay value and the full path selector.",
     },
 }
 
@@ -252,6 +288,7 @@ _FALLBACK_UNKNOWN = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _norm_time(v: Any) -> float | str | None:
     """Return v in canonical seconds, or None if it cannot be normalized."""
@@ -293,8 +330,7 @@ def _sort_key(x: Any) -> str:
 def _frozen(v: Any) -> Any:
     """Recursively convert lists/dicts to deterministic tuples."""
     if isinstance(v, dict):
-        return tuple(sorted(((str(k), _frozen(val)) for k, val in v.items()),
-                            key=lambda kv: kv[0]))
+        return tuple(sorted(((str(k), _frozen(val)) for k, val in v.items()), key=lambda kv: kv[0]))
     if isinstance(v, (list, tuple)):
         return tuple(_frozen(x) for x in v)
     if isinstance(v, float):
@@ -371,6 +407,7 @@ def _normalize_edge_shift(es: Any) -> tuple:
 # Per-constraint normalization
 # ---------------------------------------------------------------------------
 
+
 def normalize_constraint(c: Constraint) -> tuple:
     """Return a deterministic tuple representing c's semantic identity.
 
@@ -394,12 +431,17 @@ def normalize_constraint(c: Constraint) -> tuple:
         # mark with a "__FALLBACK__" sentinel so callers don't mistake
         # this for a documented equivalence.
         if t in _FALLBACK_UNKNOWN:
-            head.append(("__UNKNOWN__", "unsupported_type",
-                         _frozen(v), _sorted_set(c.target_objects),
-                         _clocks(c)))
+            head.append(
+                (
+                    "__UNKNOWN__",
+                    "unsupported_type",
+                    _frozen(v),
+                    _sorted_set(c.target_objects),
+                    _clocks(c),
+                )
+            )
             return tuple(head)
-        head.append(("__FALLBACK__", _frozen(v),
-                     _sorted_set(c.target_objects), _clocks(c)))
+        head.append(("__FALLBACK__", _frozen(v), _sorted_set(c.target_objects), _clocks(c)))
         return tuple(head)
 
     # Identity keys
@@ -509,7 +551,8 @@ def semantic_match_key(c: Constraint) -> tuple:
             key_parts.append(("from", _sorted_set(c.path_selector.from_set)))
             key_parts.append(("to", _sorted_set(c.path_selector.to_set)))
         else:
-            key_parts.append(()); key_parts.append(())
+            key_parts.append(())
+            key_parts.append(())
     return tuple(key_parts)
 
 
@@ -529,13 +572,17 @@ def has_unsupported_options(c: Constraint) -> list[str]:
     # different set of objects.
     for ref_list_name in ("target_refs", "source_refs", "clock_refs_typed"):
         for r in getattr(c, ref_list_name, []) or []:
-            if r.collection_kind == CollectionKind.UNRESOLVED \
-                    or r.collection_kind == CollectionKind.EXPR:
-                reasons.append(f"unresolved {ref_list_name}: {r.pattern if hasattr(r,'pattern') else r}")
-    for stage in (c.through_refs or []):
+            if (
+                r.collection_kind == CollectionKind.UNRESOLVED
+                or r.collection_kind == CollectionKind.EXPR
+            ):
+                reasons.append(
+                    f"unresolved {ref_list_name}: {r.pattern if hasattr(r, 'pattern') else r}"
+                )
+    for stage in c.through_refs or []:
         for r in stage:
             if r.collection_kind in (CollectionKind.UNRESOLVED, CollectionKind.EXPR):
-                reasons.append(f"unresolved through ref: {getattr(r,'pattern', r)}")
+                reasons.append(f"unresolved through ref: {getattr(r, 'pattern', r)}")
     # provenance / import status may mark things as PARTIAL
     try:
         prov = c.provenance
@@ -557,12 +604,14 @@ def field_level_diff(a: Constraint, b: Constraint) -> list[dict[str, Any]]:
     rules = SEMANTIC_FIELDS.get(a.type) or {}
 
     def _record(field: str, va_v: Any, vb_v: Any, explanation: str) -> None:
-        diffs.append({
-            "field": field,
-            "value_a": va_v,
-            "value_b": vb_v,
-            "explanation": explanation,
-        })
+        diffs.append(
+            {
+                "field": field,
+                "value_a": va_v,
+                "value_b": vb_v,
+                "explanation": explanation,
+            }
+        )
 
     # Time-valued fields
     for k in rules.get("numeric_time", ()):
@@ -570,74 +619,134 @@ def field_level_diff(a: Constraint, b: Constraint) -> list[dict[str, Any]]:
             wa = _normalize_waveform(va.get("waveform"))
             wb = _normalize_waveform(vb.get("waveform"))
             if wa != wb:
-                _record("waveform", va.get("waveform"), vb.get("waveform"),
-                        "waveform edges differ semantically (seconds).")
+                _record(
+                    "waveform",
+                    va.get("waveform"),
+                    vb.get("waveform"),
+                    "waveform edges differ semantically (seconds).",
+                )
         else:
             xa = _norm_time(va.get(k))
             xb = _norm_time(vb.get(k))
             if xa != xb:
-                _record(k, va.get(k), vb.get(k),
-                        f"numeric timing value '{k}' differs after unit normalization.")
+                _record(
+                    k,
+                    va.get(k),
+                    vb.get(k),
+                    f"numeric timing value '{k}' differs after unit normalization.",
+                )
 
     # Scalar fields
-    for k in ("name", "source", "master_clock", "clock", "relationship",
-              "min_max", "edge", "setup_hold", "add_delay", "clock_fall",
-              "divide_by", "multiply_by", "duty_cycle", "invert",
-              "combinational", "cycles", "add", "reset_path", "rise", "fall",
-              "setup", "hold", "start", "end", "source_latency_flag"):
+    for k in (
+        "name",
+        "source",
+        "master_clock",
+        "clock",
+        "relationship",
+        "min_max",
+        "edge",
+        "setup_hold",
+        "add_delay",
+        "clock_fall",
+        "divide_by",
+        "multiply_by",
+        "duty_cycle",
+        "invert",
+        "combinational",
+        "cycles",
+        "add",
+        "reset_path",
+        "rise",
+        "fall",
+        "setup",
+        "hold",
+        "start",
+        "end",
+        "source_latency_flag",
+    ):
         if k == "name":
             # Clock name / constraint identity
             if va.get("name") != vb.get("name"):
-                _record("name", va.get("name"), vb.get("name"),
-                        "clock/constraint identity differs; not equivalent.")
+                _record(
+                    "name",
+                    va.get("name"),
+                    vb.get("name"),
+                    "clock/constraint identity differs; not equivalent.",
+                )
         elif k in va or k in vb:
             if va.get(k) != vb.get(k):
-                _record(k, va.get(k), vb.get(k),
-                        f"field '{k}' differs.")
+                _record(k, va.get(k), vb.get(k), f"field '{k}' differs.")
 
     # Generated clock integer divisor/multiplier strict comparison
     if a.type == ConstraintType.CREATE_GENERATED_CLOCK:
         for k in ("divide_by", "multiply_by"):
             if va.get(k) != vb.get(k):
-                _record(k, va.get(k), vb.get(k),
-                        f"{k} must match exactly; no cross-conversion.")
+                _record(k, va.get(k), vb.get(k), f"{k} must match exactly; no cross-conversion.")
         if _normalize_edges(va.get("edges")) != _normalize_edges(vb.get("edges")):
-            _record("edges", va.get("edges"), vb.get("edges"),
-                    "generated-clock -edges are ordered triples; differ.")
-        if _normalize_edge_shift(va.get("edge_shift")) != _normalize_edge_shift(vb.get("edge_shift")):
-            _record("edge_shift", va.get("edge_shift"), vb.get("edge_shift"),
-                    "generated-clock -edge_shift differ.")
+            _record(
+                "edges",
+                va.get("edges"),
+                vb.get("edges"),
+                "generated-clock -edges are ordered triples; differ.",
+            )
+        if _normalize_edge_shift(va.get("edge_shift")) != _normalize_edge_shift(
+            vb.get("edge_shift")
+        ):
+            _record(
+                "edge_shift",
+                va.get("edge_shift"),
+                vb.get("edge_shift"),
+                "generated-clock -edge_shift differ.",
+            )
 
     # Clock-group partition diff
     if a.type == ConstraintType.SET_CLOCK_GROUPS:
         ga = _normalize_groups(va.get("groups"))
         gb = _normalize_groups(vb.get("groups"))
         if ga != gb:
-            _record("groups", va.get("groups"), vb.get("groups"),
-                    "clock-group partition differs (groupings are not the same).")
+            _record(
+                "groups",
+                va.get("groups"),
+                vb.get("groups"),
+                "clock-group partition differs (groupings are not the same).",
+            )
 
     # Path selector diff
     if rules.get("path_selector"):
         sa = _selector_key(a)
         sb = _selector_key(b)
         if sa != sb:
-            _record("path_selector",
-                    a.path_selector.to_dict() if a.path_selector else None,
-                    b.path_selector.to_dict() if b.path_selector else None,
-                    "from/to/through selectors differ (order preserved for through stages).")
+            _record(
+                "path_selector",
+                a.path_selector.to_dict() if a.path_selector else None,
+                b.path_selector.to_dict() if b.path_selector else None,
+                "from/to/through selectors differ (order preserved for through stages).",
+            )
 
     # Targets/clock sets
     if not rules.get("path_selector"):
         if _sorted_set(a.target_objects) != _sorted_set(b.target_objects):
-            _record("targets", sorted(a.target_objects), sorted(b.target_objects),
-                    "target object sets differ.")
+            _record(
+                "targets",
+                sorted(a.target_objects),
+                sorted(b.target_objects),
+                "target object sets differ.",
+            )
         if _clocks(a) != _clocks(b):
-            _record("clocks", sorted(a.clock_refs), sorted(b.clock_refs),
-                    "referenced clock sets differ.")
+            _record(
+                "clocks",
+                sorted(a.clock_refs),
+                sorted(b.clock_refs),
+                "referenced clock sets differ.",
+            )
 
     # Scenarios
     if _sorted_set(a.scenario_ids) != _sorted_set(b.scenario_ids):
-        _record("scenarios", sorted(a.scenario_ids), sorted(b.scenario_ids),
-                "scenario applicability differs.")
+        _record(
+            "scenarios",
+            sorted(a.scenario_ids),
+            sorted(b.scenario_ids),
+            "scenario applicability differs.",
+        )
 
     return diffs

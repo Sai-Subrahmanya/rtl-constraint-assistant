@@ -22,13 +22,14 @@ Rules:
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
 
 from ..config.model import ProjectConfig
 from ..constraint_model import ConstraintSet, stable_hash_cset
 from ..constraint_model.constraint import Constraint
 from ..utils.enums import (
-    ConstraintStatus, ConstraintType, OptimizationStatus,
+    ConstraintStatus,
+    ConstraintType,
+    OptimizationStatus,
 )
 from .candidate import Candidate
 
@@ -53,8 +54,7 @@ def _clone(cset: ConstraintSet) -> ConstraintSet:
             new_cs.add(deepcopy(c))
         except Exception:
             try:
-                data = c.model_dump(exclude={"generated_text_by_backend",
-                                             "equivalent_forms"})
+                data = c.model_dump(exclude={"generated_text_by_backend", "equivalent_forms"})
                 new_cs.add(Constraint(**data))
             except Exception:
                 new_cs.add(c)
@@ -95,7 +95,6 @@ def _is_mutable(c: Constraint) -> bool:
 
 
 def _coerce_step(value: float, step: float, lo: float, hi: float) -> float:
-    import math
     v = max(lo, min(hi, value))
     if step > 0:
         v = round(v / step) * step
@@ -108,6 +107,7 @@ def _candidate_id_seq(i: int) -> str:
 
 def _linspace_steps(lo: float, hi: float, step: float) -> list[float]:
     import math
+
     if step <= 0:
         return sorted({lo, hi})
     n_lo = math.ceil(lo / step)
@@ -130,15 +130,28 @@ def _linspace_steps(lo: float, hi: float, step: float) -> list[float]:
 _MUTATION_PLANS = [
     # Clock uncertainty — only increases make slack tighter (the useful
     # direction for trading margin for PPA); decreases are allowed for exploration.
-    ({ConstraintType.SET_CLOCK_UNCERTAINTY}, "uncertainty",
-     "uncertainty_range_ns", 0.0, 1.0e-6, "clock_uncertainty"),
-    ({ConstraintType.SET_INPUT_DELAY, ConstraintType.SET_OUTPUT_DELAY}, "delay",
-     "io_delay_range_ns", -100e-9, 100e-9, "io_delay"),
+    (
+        {ConstraintType.SET_CLOCK_UNCERTAINTY},
+        "uncertainty",
+        "uncertainty_range_ns",
+        0.0,
+        1.0e-6,
+        "clock_uncertainty",
+    ),
+    (
+        {ConstraintType.SET_INPUT_DELAY, ConstraintType.SET_OUTPUT_DELAY},
+        "delay",
+        "io_delay_range_ns",
+        -100e-9,
+        100e-9,
+        "io_delay",
+    ),
 ]
 
 
-def _sorted_mutable_constraints(cset: ConstraintSet, types: set[ConstraintType]
-                                ) -> list[Constraint]:
+def _sorted_mutable_constraints(
+    cset: ConstraintSet, types: set[ConstraintType]
+) -> list[Constraint]:
     out = [c for c in cset if c.type in types and _is_mutable(c)]
     # Deterministic order: (type.value, id) ascending.
     out.sort(key=lambda c: (c.type.value, c.id))
@@ -162,8 +175,7 @@ def generate_candidates(
     """
     opt = cfg.optimization
     pert = opt.perturbation
-    max_candidates = (max_candidates if max_candidates is not None
-                      else opt.max_iterations * 4)
+    max_candidates = max_candidates if max_candidates is not None else opt.max_iterations * 4
 
     candidates: list[Candidate] = []
     seen_hashes: set[str] = set()
@@ -183,23 +195,24 @@ def generate_candidates(
                 if abs(delta_ns) < 1e-15:
                     continue
                 cand = _mutate_one(
-                    base, cset,
+                    base,
+                    cset,
                     target_id=con.id,
                     value_key=value_key,
                     delta_seconds=delta_ns * 1e-9,
                     lo_seconds=lo_sec,
                     hi_seconds=hi_sec,
                     step_seconds=step_sec,
-                    change_label=(f"{label_prefix}[{con.id}]_"
-                                  f"delta={delta_ns:+.3g}ns"),
+                    change_label=(f"{label_prefix}[{con.id}]_delta={delta_ns:+.3g}ns"),
                 )
                 if cand is None:
                     continue
                 if not _record_unique(cand, seen_hashes):
                     continue
                 # Exactly one constraint id per baseline-strategy candidate
-                assert len(cand.mutated_constraint_ids) == 1, \
+                assert len(cand.mutated_constraint_ids) == 1, (
                     f"expected one mutated constraint, got {cand.mutated_constraint_ids}"
+                )
                 cand.id = _candidate_id_seq(_id_start + len(candidates))
                 candidates.append(cand)
                 if len(candidates) >= max_candidates:
@@ -209,7 +222,9 @@ def generate_candidates(
 
 
 def _mutate_one(
-    base: Candidate, cset: ConstraintSet, *,
+    base: Candidate,
+    cset: ConstraintSet,
+    *,
     target_id: str,
     value_key: str,
     delta_seconds: float,
@@ -224,7 +239,8 @@ def _mutate_one(
     target = None
     for c in new_cset:
         if c.id == target_id:
-            target = c; break
+            target = c
+            break
     if target is None or not _is_mutable(target):
         return None
     # Do NOT fabricate a missing tunable value with a default of zero.
@@ -238,8 +254,7 @@ def _mutate_one(
         base_v = float(raw_v)
     except (TypeError, ValueError):
         return None
-    new_v = _coerce_step(base_v + delta_seconds, step_seconds,
-                         lo_seconds, hi_seconds)
+    new_v = _coerce_step(base_v + delta_seconds, step_seconds, lo_seconds, hi_seconds)
     if abs(new_v - base_v) < 1e-15:
         return None
     try:
@@ -255,7 +270,9 @@ def _mutate_one(
         mutated_constraint_ids=[target_id],
         decision_reason=f"Perturbation: {change_label}",
         constraint_model_hash=identity,
-        scenario=base.scenario, corner=base.corner, mode=base.mode,
+        scenario=base.scenario,
+        corner=base.corner,
+        mode=base.mode,
     )
 
 

@@ -315,13 +315,13 @@ class Constraint(BaseModel):
             self.disabled,
         )
 
-    def semantically_equivalent(self, other: "Constraint") -> bool:
+    def semantically_equivalent(self, other: Constraint) -> bool:
         return self.semantic_key() == other.semantic_key()
 
     # ---------- cloning / immutability ----------
 
     def clone(self, *, new_id: str | None = None,
-              overrides: dict[str, Any] | None = None) -> "Constraint":
+              overrides: dict[str, Any] | None = None) -> Constraint:
         data = self.to_canonical_dict()
         data = copy.deepcopy(data)
         data["id"] = new_id or f"{self.id}_cand"
@@ -403,7 +403,7 @@ class Constraint(BaseModel):
 
     @classmethod
     def from_canonical_dict(cls, d: dict[str, Any],
-                            unknown_field_policy: str = "keep") -> "Constraint":
+                            unknown_field_policy: str = "keep") -> Constraint:
         """Rebuild from canonical dict.
 
         unknown_field_policy:

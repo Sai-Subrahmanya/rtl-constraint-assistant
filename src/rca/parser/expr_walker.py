@@ -39,7 +39,6 @@ from typing import Any
 from ..design_model import SourceLocation
 from ..utils.enums import DependencyKind
 
-
 # Expression kinds for part/element select and concatenation:
 _SELECT_KINDS = {
     "RangeSelectExpression",

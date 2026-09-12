@@ -18,9 +18,7 @@ points at exactly what is missing.
 
 from __future__ import annotations
 
-from typing import Any
-
-from ..constraint_model import Constraint, ConstraintSet
+from ..constraint_model import ConstraintSet
 from ..design_model import Design
 from ..timing_model import TimingGraph
 from ..utils.enums import (
@@ -31,7 +29,7 @@ from ..utils.enums import (
     TimingPathClass,
     ValidationCategory,
 )
-from .base import ValidationIssue, ValidationReport, _issue
+from .base import ValidationReport, _issue
 
 _REQUIRES = "REQUIRES_USER_INPUT"
 

@@ -5,18 +5,21 @@ groups, and path-selector coherence (Step 7 §5–§9).
 from __future__ import annotations
 
 import math
-from typing import Any
 
-from ..constraint_model import Constraint, ConstraintSet, PathSelector
-from ..constraint_model.targets import CollectionKind
+from ..constraint_model import Constraint, ConstraintSet
 from ..design_model import Design
 from ..timing_model import TimingGraph
 from ..utils.enums import (
-    ClockDomainRelationship, ConstraintType, ErrorCode, Severity,
+    ConstraintType,
+    ErrorCode,
+    Severity,
     ValidationCategory,
 )
-from .base import ValidationIssue, ValidationReport, _issue  # noqa: F401  (re-export for convenience)
-
+from .base import (  # noqa: F401  (re-export for convenience)
+    ValidationIssue,
+    ValidationReport,
+    _issue,
+)
 
 # ---------------------------------------------------------------------------
 # Orchestrator
@@ -422,7 +425,6 @@ def _validate_path_selectors(cset: ConstraintSet, report: ValidationReport) -> N
                        f"set_multicycle_path {c.id} has invalid cycle count {cyc!r} (must be >= 1).",
                        constraint_id=c.id,
                        suggestion="Set -cycle to an integer >= 1.")
-            sh = ps.setup_hold
             if c.values.get("start") and c.values.get("end"):
                 _issue(report, Severity.WARNING, ValidationCategory.EXCEPTION,
                        ErrorCode.EXCEPTION_SETUP_HOLD_INCOHERENT,

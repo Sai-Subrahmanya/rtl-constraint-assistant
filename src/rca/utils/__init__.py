@@ -1,6 +1,6 @@
 """RCA utility modules."""
 
-from .enums import *  # re-export enums for convenience
+from .enums import *  # noqa: F403 -- intentional convenience re-export of enums
 from .hashing import hash_file, hash_source_set, stable_hash
 from .logging import configure_logging, console, err_console, get_logger
 from .units import (

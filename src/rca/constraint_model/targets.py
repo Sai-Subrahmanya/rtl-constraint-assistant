@@ -14,15 +14,14 @@ design, never when *emitting*.
 
 from __future__ import annotations
 
-import fnmatch
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..utils.enums import CollectionKind, ResolutionStatus
 
 if TYPE_CHECKING:
-    from ..design_model import Design
-    from ..timing_model import TimingGraph
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +50,7 @@ class TargetRef:
 
     # -- factories ----------------------------------------------------
     @classmethod
-    def literal(cls, name: str) -> "TargetRef":
+    def literal(cls, name: str) -> TargetRef:
         """Plain unqualified name. The generator treats this as needing
         a default selector per constraint type (e.g. get_ports for
         input_delay targets), but when an explicit target_ref is
@@ -60,47 +59,47 @@ class TargetRef:
                    members=[name] if name else [], resolution_status=ResolutionStatus.RESOLVED)
 
     @classmethod
-    def port(cls, name: str) -> "TargetRef":
+    def port(cls, name: str) -> TargetRef:
         return cls(collection_kind=CollectionKind.PORT, pattern=name, members=[name])
 
     @classmethod
-    def pin(cls, name: str) -> "TargetRef":
+    def pin(cls, name: str) -> TargetRef:
         return cls(collection_kind=CollectionKind.PIN, pattern=name, members=[name])
 
     @classmethod
-    def net(cls, name: str) -> "TargetRef":
+    def net(cls, name: str) -> TargetRef:
         return cls(collection_kind=CollectionKind.NET, pattern=name, members=[name])
 
     @classmethod
-    def cell(cls, name: str) -> "TargetRef":
+    def cell(cls, name: str) -> TargetRef:
         return cls(collection_kind=CollectionKind.CELL, pattern=name, members=[name])
 
     @classmethod
-    def clock(cls, name: str) -> "TargetRef":
+    def clock(cls, name: str) -> TargetRef:
         return cls(collection_kind=CollectionKind.CLOCK, pattern=name, members=[name])
 
     @classmethod
-    def register(cls, name: str) -> "TargetRef":
+    def register(cls, name: str) -> TargetRef:
         return cls(collection_kind=CollectionKind.REGISTER, pattern=name, members=[name])
 
     @classmethod
-    def all_inputs(cls) -> "TargetRef":
+    def all_inputs(cls) -> TargetRef:
         return cls(collection_kind=CollectionKind.ALL_INPUTS)
 
     @classmethod
-    def all_outputs(cls) -> "TargetRef":
+    def all_outputs(cls) -> TargetRef:
         return cls(collection_kind=CollectionKind.ALL_OUTPUTS)
 
     @classmethod
-    def all_clocks(cls) -> "TargetRef":
+    def all_clocks(cls) -> TargetRef:
         return cls(collection_kind=CollectionKind.ALL_CLOCKS)
 
     @classmethod
-    def all_registers(cls) -> "TargetRef":
+    def all_registers(cls) -> TargetRef:
         return cls(collection_kind=CollectionKind.ALL_REGISTERS)
 
     @classmethod
-    def unresolved(cls, expression: str, reason: str) -> "TargetRef":
+    def unresolved(cls, expression: str, reason: str) -> TargetRef:
         return cls(collection_kind=CollectionKind.EXPR, expression=expression,
                    resolution_status=ResolutionStatus.UNRESOLVED, unresolved_reason=reason)
 
@@ -137,7 +136,7 @@ class TargetRef:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "TargetRef":
+    def from_dict(cls, d: dict[str, Any]) -> TargetRef:
         return cls(
             collection_kind=CollectionKind(d["collection_kind"]),
             pattern=d.get("pattern"),

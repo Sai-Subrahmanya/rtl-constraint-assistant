@@ -12,16 +12,17 @@ from typing import Any
 
 from ...constraint_model import Constraint, ConstraintSet, PathSelector
 from ...constraint_model.targets import (
-    CollectionKind, TargetRef, targets_from_strings,
+    CollectionKind,
+    TargetRef,
 )
 from ...utils.enums import (
-    ConstraintStatus, ConstraintType, SafeMode,
+    ConstraintType,
+    SafeMode,
 )
 from ...utils.hashing import stable_hash
 from .preflight import preflight_constraint
 from .result import GenerationDiagnostic, GenerationStatus, SdcGenerationResult
 from .tcl_quote import format_ns, tcl_quote, tcl_quote_list
-
 
 # Canonical emission order (Step 6 §16).
 EMISSION_ORDER: dict[ConstraintType, int] = {
@@ -90,7 +91,7 @@ _ALL_CMD = {
 }
 
 
-def _scenario_applies(c: "Constraint", scenario_id: str) -> bool:
+def _scenario_applies(c: Constraint, scenario_id: str) -> bool:
     """Return True when a constraint applies to an MCMM scenario (Step 12 §2).
 
     empty ``scenario_ids`` => applies to all active scenarios; non-empty
@@ -513,7 +514,6 @@ class SdcRenderer:
         if v.get("combinational"):
             parts.append("-combinational")
         edges = v.get("edges")
-        edge_shift_emitted = False
         if edges and len(edges) >= 3:
             parts.append("-edges { " + " ".join(str(int(e)) for e in edges[:3]) + " }")
             es = v.get("edge_shift")
@@ -535,7 +535,6 @@ class SdcRenderer:
                     return None
                 parts.append("-edge_shift { " + " ".join(
                     format_ns(x) for x in es[:3]) + " }")
-                edge_shift_emitted = True
         if v.get("add"):
             parts.append("-add")
         targets = render_target_list(c.target_refs, c.target_objects,

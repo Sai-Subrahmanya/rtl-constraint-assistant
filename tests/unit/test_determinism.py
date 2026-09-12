@@ -14,7 +14,6 @@ import sys
 import tempfile
 import textwrap
 
-
 WORKER = textwrap.dedent(r"""
 import sys, os, json, tempfile
 sys.path.insert(0, sys.argv[1])
@@ -75,7 +74,10 @@ def _run_in_subprocess():
     try:
         proc = subprocess.run(
             [sys.executable, script, src_dir],
-            capture_output=True, text=True, check=True, timeout=60,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
         )
         return json.loads(proc.stdout)
     finally:
@@ -86,15 +88,15 @@ def test_cross_process_evidence_ids_and_canonical_json_identical():
     a = _run_in_subprocess()
     b = _run_in_subprocess()
     # Evidence IDs
-    assert a["evidence_ids"] == b["evidence_ids"], \
+    assert a["evidence_ids"] == b["evidence_ids"], (
         f"evidence ids differ between processes\na={a['evidence_ids']}\nb={b['evidence_ids']}"
+    )
     # All evidence IDs start with "ev_" and have no Python hash artifacts.
     for eid in a["evidence_ids"]:
         assert eid.startswith("ev_"), f"evidence id not using stable prefix: {eid}"
         assert len(eid) == 3 + 12, f"evidence id unexpected length: {eid}"
         # The suffix after "ev_" must be pure hex (no process-unique hash leaks).
-        assert all(c in "0123456789abcdef" for c in eid[3:]), \
-            f"evidence id suffix not hex: {eid}"
+        assert all(c in "0123456789abcdef" for c in eid[3:]), f"evidence id suffix not hex: {eid}"
     # Constraint semantic keys
     assert a["constraint_semkeys"] == b["constraint_semkeys"]
     # Canonical JSON byte-identical
@@ -107,15 +109,27 @@ def test_cross_process_evidence_ids_and_canonical_json_identical():
 def test_same_evidence_same_id_in_process():
     """Quick in-process sanity: two semantically identical evidences get the same id."""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-    from rca.inference._evidence import evidence_id, make_evidence
-    e1 = make_evidence("CLK-001", "structural", "Clock 'clk' drives 1 register(s).",
-                       source_objects=["clk"], created_at="2025-01-01T00:00:00+00:00")
-    e2 = make_evidence("CLK-001", "structural", "Clock 'clk' drives 1 register(s).",
-                       source_objects=["clk"], created_at="2026-01-01T00:00:00+00:00")
+    from rca.inference._evidence import make_evidence
+
+    e1 = make_evidence(
+        "CLK-001",
+        "structural",
+        "Clock 'clk' drives 1 register(s).",
+        source_objects=["clk"],
+        created_at="2025-01-01T00:00:00+00:00",
+    )
+    e2 = make_evidence(
+        "CLK-001",
+        "structural",
+        "Clock 'clk' drives 1 register(s).",
+        source_objects=["clk"],
+        created_at="2026-01-01T00:00:00+00:00",
+    )
     assert e1.id == e2.id
     # different description
-    e3 = make_evidence("CLK-001", "structural", "Clock 'clk' drives 2 register(s).",
-                       source_objects=["clk"])
+    e3 = make_evidence(
+        "CLK-001", "structural", "Clock 'clk' drives 2 register(s).", source_objects=["clk"]
+    )
     assert e1.id != e3.id
     # source-object ordering must not matter
     e4 = make_evidence("X", "structural", "desc", source_objects=["a", "b"])
@@ -133,23 +147,28 @@ def test_same_evidence_same_id_in_process():
 def test_evidence_dedup_uses_stable_ids():
     """Verifies the engine deduplicates across rules by stable evidence key."""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-    sv = ("module m(input clk, d, output reg q); "
-          "always_ff @(posedge clk) q<=d; endmodule")
+    sv = "module m(input clk, d, output reg q); always_ff @(posedge clk) q<=d; endmodule"
     import tempfile
+
     with tempfile.NamedTemporaryFile("w", suffix=".sv", delete=False) as f:
-        f.write(sv); p = f.name
-    from rca.parser.slang_adapter import SlangAdapter
-    from rca.timing_model import TimingGraph
-    from rca.inference import InferenceEngine
+        f.write(sv)
+        p = f.name
     from rca.config.model import ProjectConfig, ProjectInfo, UserClockSpec
     from rca.constraint_model import ConstraintSet
+    from rca.inference import InferenceEngine
+    from rca.parser.slang_adapter import SlangAdapter
     from rca.provenance import AssumptionLedger
-    d = SlangAdapter().parse([p], top='m'); os.unlink(p)
-    cfg = ProjectConfig(project=ProjectInfo(name='m', top='m', rtl_files=[p]))
-    cfg.constraints.user.clocks.append(UserClockSpec(name='clk', period='10ns'))
-    ucs = [{'name': 'clk', 'fixed': True, 'port': None, 'period_seconds': 10e-9}]
+    from rca.timing_model import TimingGraph
+
+    d = SlangAdapter().parse([p], top="m")
+    os.unlink(p)
+    cfg = ProjectConfig(project=ProjectInfo(name="m", top="m", rtl_files=[p]))
+    cfg.constraints.user.clocks.append(UserClockSpec(name="clk", period="10ns"))
+    ucs = [{"name": "clk", "fixed": True, "port": None, "period_seconds": 10e-9}]
     tg = TimingGraph.build(d, user_clocks=ucs)
-    cs = ConstraintSet(); ledg = AssumptionLedger(); eng = InferenceEngine()
+    cs = ConstraintSet()
+    ledg = AssumptionLedger()
+    eng = InferenceEngine()
     eng.run(d, tg, cfg, cs, ledg, run_ts="2025-01-01T00:00:00+00:00")
     clks = [c for c in cs if c.type.value == "create_clock"]
     assert len(clks) == 1

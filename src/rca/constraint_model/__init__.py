@@ -1,4 +1,4 @@
-from .constraint import Constraint, UCM_SNAPSHOT_SCHEMA_VERSION
+from .constraint import UCM_SNAPSHOT_SCHEMA_VERSION, Constraint
 from .constraint_set import (
     ConstraintSet,
     SnapshotFormatError,

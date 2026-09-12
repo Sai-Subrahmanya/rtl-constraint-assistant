@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ...qor.model import Feasibility, PowerStatus, QoRResult
 from ...utils.enums import RunStatus
@@ -32,7 +32,7 @@ class MockEDA(ToolBackend):
                         executable="mock", available=True,
                         capabilities={"sta": True, "synthesis": True, "mock": True})
 
-    def evaluate_candidate(self, cand: "Candidate", work_dir: Path) -> QoRResult:
+    def evaluate_candidate(self, cand: Candidate, work_dir: Path) -> QoRResult:
         """Return synthetic QoR for optimizer testing (clearly labeled)."""
         rng = random.Random(f"{cand.id}-{self.seed}")
         n = len(cand.constraint_set) if cand.constraint_set else 0

@@ -1,18 +1,16 @@
 """Step 7 multi-layer validation engine unit tests."""
 from __future__ import annotations
 
-import pytest
-
 from rca.constraint_model import (
     Constraint,
     ConstraintSet,
     PathSelector,
 )
 from rca.design_model.design import Design
-from rca.timing_model.timing_graph import TimingGraph
-from rca.timing_model.timing_path import TimingPath
 from rca.timing_model.clock import Clock
 from rca.timing_model.clock_domain import ClockDomainEdge
+from rca.timing_model.timing_graph import TimingGraph
+from rca.timing_model.timing_path import TimingPath
 from rca.utils.enums import (
     ClockDomainRelationship,
     ConstraintType,
@@ -21,9 +19,8 @@ from rca.utils.enums import (
     TimingPathClass,
     ValidationStatus,
 )
-from rca.validation.engine import run_validation
 from rca.validation.base import ValidationIssue, ValidationReport
-
+from rca.validation.engine import run_validation
 
 # ---------------------------------------------------------------------------
 # Helper builders

@@ -28,7 +28,7 @@ from ..utils.enums import (
     Severity,
     ValidationCategory,
 )
-from .base import ValidationIssue, ValidationReport, _issue
+from .base import ValidationReport, _issue
 
 
 def validate_sdc_import(cset: ConstraintSet,

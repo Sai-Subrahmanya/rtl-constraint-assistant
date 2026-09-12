@@ -20,8 +20,9 @@ The analyzer is OBSERVATIONAL: it never mutates the ``ConstraintSet``,
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from typing import Any, Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from typing import Any
 
 from ..constraint_model import Constraint, ConstraintSet, PathSelector
 from ..design_model import Design

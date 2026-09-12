@@ -36,7 +36,6 @@ from ..constraint_model import Constraint, ConstraintSet
 from ..design_model import Design
 from ..timing_model import TimingGraph
 from ..utils.enums import (
-    ClockDomainRelationship,
     ConstraintType,
     ErrorCode,
     Severity,
@@ -45,7 +44,7 @@ from ..utils.enums import (
     ValidationCategory,
 )
 from ..utils.logging import get_logger
-from .base import ValidationIssue, ValidationReport, _issue
+from .base import ValidationReport, _issue
 
 log = get_logger("validation.coverage")
 

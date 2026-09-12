@@ -5,9 +5,8 @@ from __future__ import annotations
 import math
 import re
 
-from ...utils.units import from_seconds, parse_time_string
 from ...utils.enums import TimeUnit
-
+from ...utils.units import from_seconds
 
 # Names that are Tcl metacharacter-free and do not need quoting.
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_/\[\].:-]*$")

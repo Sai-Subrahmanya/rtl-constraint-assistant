@@ -8,15 +8,23 @@ Three stages:
 See README_SDC_IMPORTER.md for the supported Tcl subset and security model.
 """
 
-from .lexer import LexToken, TclLexer, LexError
-from .parser import (
-    SdcCommand, SdcOption, ParsedSdc, SdcParseResult, SdcParser, ParseDiagnostic,
-)
 from .collections import (
-    TargetCollection, DesignResolver,
+    DesignResolver,
+    TargetCollection,
 )
+from .lexer import LexError, LexToken, TclLexer
 from .normalizer import (
-    SdcImportResult, SdcImporter, ImportedConstraint,
+    ImportedConstraint,
+    SdcImporter,
+    SdcImportResult,
+)
+from .parser import (
+    ParseDiagnostic,
+    ParsedSdc,
+    SdcCommand,
+    SdcOption,
+    SdcParser,
+    SdcParseResult,
 )
 
 __all__ = [

@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from .targets import CollectionKind, TargetRef, targets_from_strings
+from .targets import TargetRef
 
 EdgeQualifier = Literal["rise", "fall", "both"]
 MinMax = Literal["min", "max", "both"]
@@ -103,7 +103,7 @@ class PathSelector(BaseModel):
             self.scenario or "",
         )
 
-    def semantically_equivalent(self, other: "PathSelector") -> bool:
+    def semantically_equivalent(self, other: PathSelector) -> bool:
         return self.semantic_key() == other.semantic_key()
 
     # ---------------- canonical serialization ----------------
@@ -128,7 +128,7 @@ class PathSelector(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "PathSelector":
+    def from_dict(cls, d: dict[str, Any]) -> PathSelector:
         return cls(
             from_set=list(d.get("from_set", [])),
             through_set=[list(stage) for stage in d.get("through_set", [])],

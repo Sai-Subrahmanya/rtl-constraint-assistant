@@ -8,8 +8,7 @@ subsystems. See Project Manual sections 8, 9, 80, 86, 88, 89.
 
 from __future__ import annotations
 
-from enum import Enum, auto
-
+from enum import Enum
 
 # ---------------------------------------------------------------------------
 # Constraint / source / provenance

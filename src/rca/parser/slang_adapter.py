@@ -37,7 +37,6 @@ from ..design_model import (
     Process,
     Register,
     SensitivityItem,
-    SourceLocation,
 )
 from ..utils.enums import (
     ClockEdge,
@@ -52,8 +51,8 @@ from .base import ParserAdapter
 from .diagnostics import Diagnostic, Severity
 from .expr_walker import (
     ExprRef,
-    ExprWalkResult,
     ExprWalker,
+    ExprWalkResult,
     source_location,
     walk_assignment,
 )
@@ -61,7 +60,6 @@ from .expr_walker import (
 try:
     from pyslang import Bag, SourceManager
     from pyslang.ast import (
-        ArgumentDirection,
         Compilation,
         CompilationOptions,
         EdgeKind,
@@ -71,6 +69,7 @@ try:
     )
     from pyslang.parsing import ParserOptions, PreprocessorOptions
     from pyslang.syntax import SyntaxTree
+
     _SLANG_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _SLANG_AVAILABLE = False
@@ -87,9 +86,7 @@ class SlangAdapter(ParserAdapter):
     def __init__(self) -> None:
         super().__init__()
         if not _SLANG_AVAILABLE:
-            raise RuntimeError(
-                "pyslang is not installed. Install it via: pip install pyslang"
-            )
+            raise RuntimeError("pyslang is not installed. Install it via: pip install pyslang")
         self._sm = SourceManager()
 
     def parse(
@@ -106,18 +103,24 @@ class SlangAdapter(ParserAdapter):
         abs_files = [str(Path(f).resolve()) for f in files]
         for f in abs_files:
             if not Path(f).is_file():
-                self.diagnostics.add(Diagnostic(
-                    code=ErrorCode.PARSER_ERROR,
-                    severity=Severity.ERROR,
-                    message=f"Source file not found: {f}",
-                    file=f,
-                ))
+                self.diagnostics.add(
+                    Diagnostic(
+                        code=ErrorCode.PARSER_ERROR,
+                        severity=Severity.ERROR,
+                        message=f"Source file not found: {f}",
+                        file=f,
+                    )
+                )
 
         include_dirs = [str(Path(d).resolve()) for d in (include_dirs or [])]
         defines = defines or {}
 
-        log.info("Slang parsing %d files (includes=%d, defines=%d)",
-                 len(abs_files), len(include_dirs), len(defines))
+        log.info(
+            "Slang parsing %d files (includes=%d, defines=%d)",
+            len(abs_files),
+            len(include_dirs),
+            len(defines),
+        )
 
         bag = Bag()
         pp_opts = PreprocessorOptions()
@@ -142,11 +145,13 @@ class SlangAdapter(ParserAdapter):
         try:
             tree = SyntaxTree.fromFiles(abs_files, self._sm, bag)
         except Exception as e:
-            self.diagnostics.add(Diagnostic(
-                code=ErrorCode.PARSER_ERROR,
-                severity=Severity.CRITICAL,
-                message=f"SyntaxTree creation failed: {e}",
-            ))
+            self.diagnostics.add(
+                Diagnostic(
+                    code=ErrorCode.PARSER_ERROR,
+                    severity=Severity.CRITICAL,
+                    message=f"SyntaxTree creation failed: {e}",
+                )
+            )
             raise
 
         for diag in tree.diagnostics:
@@ -161,16 +166,21 @@ class SlangAdapter(ParserAdapter):
 
         top_instances = list(root.topInstances)
         if not top_instances:
-            self.diagnostics.add(Diagnostic(
-                code=ErrorCode.ELABORATION_ERROR,
-                severity=Severity.ERROR,
-                message="No top-level modules found after elaboration.",
-            ))
+            self.diagnostics.add(
+                Diagnostic(
+                    code=ErrorCode.ELABORATION_ERROR,
+                    severity=Severity.ERROR,
+                    message="No top-level modules found after elaboration.",
+                )
+            )
             design_name = top or Path(abs_files[0]).stem
             return Design(name=design_name)
 
-        chosen = (next((t for t in top_instances if t.name == top), top_instances[0])
-                  if top else top_instances[0])
+        chosen = (
+            next((t for t in top_instances if t.name == top), top_instances[0])
+            if top
+            else top_instances[0]
+        )
 
         design = Design(name=chosen.name, top_module=chosen.name, source_files=abs_files)
         self._walk_instance(chosen, design, parent_path="")
@@ -273,6 +283,7 @@ class SlangAdapter(ParserAdapter):
 
     def _collect_variables(self, body, design: Design, mod_name: str, hier: str) -> None:
         """Collect Net and Variable symbols (wires, regs, logic, etc.)."""
+
         def _add(v):
             try:
                 vname = v.name
@@ -280,12 +291,14 @@ class SlangAdapter(ParserAdapter):
                 if hier_name in design.nets:
                     return
                 w, ws, dt, nk = _type_info(v)
-                is_in = (hier_name in design.ports
-                         and design.ports[hier_name].direction in
-                         (PortDirection.INPUT, PortDirection.INOUT))
-                is_out = (hier_name in design.ports
-                          and design.ports[hier_name].direction in
-                          (PortDirection.OUTPUT, PortDirection.INOUT))
+                is_in = hier_name in design.ports and design.ports[hier_name].direction in (
+                    PortDirection.INPUT,
+                    PortDirection.INOUT,
+                )
+                is_out = hier_name in design.ports and design.ports[hier_name].direction in (
+                    PortDirection.OUTPUT,
+                    PortDirection.INOUT,
+                )
                 net = Net(
                     hierarchical_name=hier_name,
                     local_name=vname,
@@ -302,12 +315,14 @@ class SlangAdapter(ParserAdapter):
                 log.debug("var collect error: %s", e)
 
         kinds = {SymbolKind.Net, SymbolKind.Variable}
+
         def _root(node):
             if hasattr(node, "kind") and node.kind == SymbolKind.Instance:
                 return VisitAction.Skip
             if hasattr(node, "kind") and node.kind in kinds:
                 _add(node)
             return VisitAction.Advance
+
         body.visit(f=_root)
 
     def _collect_procedural_blocks(self, body, design: Design, mod_name: str, hier: str) -> None:
@@ -368,8 +383,11 @@ class SlangAdapter(ParserAdapter):
                         sig_name = _extract_signal_name(node.expr)
                         if sig_name is None:
                             return VisitAction.Advance
-                        edge = (ClockEdge.POSEDGE if node.edge == EdgeKind.PosEdge
-                                else ClockEdge.NEGEDGE)
+                        edge = (
+                            ClockEdge.POSEDGE
+                            if node.edge == EdgeKind.PosEdge
+                            else ClockEdge.NEGEDGE
+                        )
                         sensitivity_events.append((sig_name, edge))
                     except Exception:
                         pass
@@ -405,7 +423,7 @@ class SlangAdapter(ParserAdapter):
                 elif s in direct_predicate_signals and e == ClockEdge.POSEDGE:
                     # Active-high async reset (if (rst) q<=0 with rst on posedge)
                     reset_candidates.append(s)
-            clock_candidates = [s for s, _ in sensitivity_events if s not in reset_candidates]
+            [s for s, _ in sensitivity_events if s not in reset_candidates]
 
             # Pick reset (must be edge-sensitive AND negated in predicate).
             if len(reset_candidates) == 1:
@@ -418,14 +436,15 @@ class SlangAdapter(ParserAdapter):
                 rst_hier = f"{hier}.{rst_signal}"
                 rst_ctrl_signals.append(rst_hier)
             elif len(reset_candidates) > 1:
-                log.debug("ambiguous async-reset candidates in %s: %s",
-                          proc_id, reset_candidates)
-                ambiguous_event_signals.extend(
-                    f"{hier}.{s}" for s in reset_candidates)
+                log.debug("ambiguous async-reset candidates in %s: %s", proc_id, reset_candidates)
+                ambiguous_event_signals.extend(f"{hier}.{s}" for s in reset_candidates)
 
             # Pick clock from remaining candidates.
-            posedge_clocks = [s for s, e in sensitivity_events
-                              if s not in reset_candidates and e == ClockEdge.POSEDGE]
+            posedge_clocks = [
+                s
+                for s, e in sensitivity_events
+                if s not in reset_candidates and e == ClockEdge.POSEDGE
+            ]
             if len(posedge_clocks) == 1:
                 clk_signal = posedge_clocks[0]
                 for s, e in sensitivity_events:
@@ -451,8 +470,7 @@ class SlangAdapter(ParserAdapter):
                 #     as reset).  This ensures the register is still
                 #     created with a known clock; ambiguity is surfaced
                 #     via `ambiguous_event_signals` for later review.
-                non_reset = [s for s, e in sensitivity_events
-                             if s not in reset_candidates]
+                non_reset = [s for s, e in sensitivity_events if s not in reset_candidates]
                 if len(non_reset) == 1 and not rst_signal:
                     clk_signal = non_reset[0]
                     for s, e in sensitivity_events:
@@ -464,8 +482,11 @@ class SlangAdapter(ParserAdapter):
                     # Multiple edge signals, none identified as reset.
                     # Pick the first posedge (if any) as clock; mark rest
                     # ambiguous.  If all are negedge, pick the first edge.
-                    posedge_nr = [s for s, e in sensitivity_events
-                                  if s in non_reset and e == ClockEdge.POSEDGE]
+                    posedge_nr = [
+                        s
+                        for s, e in sensitivity_events
+                        if s in non_reset and e == ClockEdge.POSEDGE
+                    ]
                     if posedge_nr:
                         clk_signal = posedge_nr[0]
                         for s, e in sensitivity_events:
@@ -486,11 +507,13 @@ class SlangAdapter(ParserAdapter):
                         for s in non_reset[1:]:
                             ambiguous_event_signals.append(f"{hier}.{s}")
                 else:
-                    ambiguous_event_signals.extend(
-                        f"{hier}.{s}" for s in non_reset)
-                    log.debug("ambiguous clock classification in %s: "
-                              "events=%s reset_candidates=%s",
-                              proc_id, sensitivity_events, reset_candidates)
+                    ambiguous_event_signals.extend(f"{hier}.{s}" for s in non_reset)
+                    log.debug(
+                        "ambiguous clock classification in %s: events=%s reset_candidates=%s",
+                        proc_id,
+                        sensitivity_events,
+                        reset_candidates,
+                    )
 
             # --- Extract assignments (blocking + nonblocking) ---
             # We use a manual recursive sub-walker (see _subvisit below)
@@ -499,7 +522,7 @@ class SlangAdapter(ParserAdapter):
             # reached inside that branch as CONDITIONAL control deps.
             all_targets: dict[str, ExprWalkResult] = {}
             ordered_assign_lhs: list[str] = []
-            control_signal_list: list[str] = []   # insertion-ordered
+            control_signal_list: list[str] = []  # insertion-ordered
             _control_seen: set[str] = set()
             read_signal_set: set[str] = set()
             # cond_stack entries are (hier_name, DependencyKind) —
@@ -553,13 +576,12 @@ class SlangAdapter(ParserAdapter):
                     res = walk_assignment(node, self._sm)
                     # Attach enclosing if/case predicates as CONDITIONAL
                     # refs (unless already present).
-                    enclosing_names = {n for n, _ in cond_stack}
+                    {n for n, _ in cond_stack}
                     for cs_name, cs_kind in cond_stack:
                         short = cs_name.split(".")[-1]
                         if short in res.names():
                             continue
-                        res.refs.append(ExprRef(
-                            name=short, kind=cs_kind, op="if"))
+                        res.refs.append(ExprRef(name=short, kind=cs_kind, op="if"))
                     for tgt in res.targets:
                         hier_tgt = f"{hier}.{tgt}"
                         if hier_tgt not in all_targets:
@@ -573,8 +595,7 @@ class SlangAdapter(ParserAdapter):
                             continue
                         hn = f"{hier}.{r.name}"
                         read_signal_set.add(hn)
-                        if r.kind in (DependencyKind.CONDITIONAL,
-                                     DependencyKind.MUX_SELECT):
+                        if r.kind in (DependencyKind.CONDITIONAL, DependencyKind.MUX_SELECT):
                             _add_control(hn)
                 except Exception as e:
                     log.debug("procedural assign error: %s", e)
@@ -587,7 +608,8 @@ class SlangAdapter(ParserAdapter):
                 if nm == "BlockStatement":
                     for a in ("body", "stmts", "statements", "items"):
                         v = getattr(node, a, None)
-                        if v is None: continue
+                        if v is None:
+                            continue
                         tnm = type(v).__name__
                         if tnm == "StatementList":
                             lst = getattr(v, "list", None)
@@ -595,54 +617,77 @@ class SlangAdapter(ParserAdapter):
                                 for x in lst:
                                     out.append(x)
                         elif isinstance(v, (list, tuple)):
-                            for x in v: out.append(x)
+                            for x in v:
+                                out.append(x)
                         else:
                             out.append(v)
                     return out
                 if nm in ("ConditionalStatement",):
                     for a in ("conditions", "ifTrue", "ifFalse"):
                         v = getattr(node, a, None)
-                        if v is None: continue
+                        if v is None:
+                            continue
                         if isinstance(v, (list, tuple)):
-                            for x in v: out.append(x)
+                            for x in v:
+                                out.append(x)
                         else:
                             out.append(v)
                     return out
                 if nm in ("CaseStatement",):
                     v = getattr(node, "expr", None)
-                    if v is not None: out.append(v)
+                    if v is not None:
+                        out.append(v)
                     for a in ("items", "defaultCase"):
                         v = getattr(node, a, None)
-                        if v is None: continue
+                        if v is None:
+                            continue
                         if isinstance(v, (list, tuple)):
-                            for x in v: out.append(x)
+                            for x in v:
+                                out.append(x)
                         else:
                             out.append(v)
                     return out
-                if nm in ("IfCaseItem", "StandardCaseItem", "PatternCaseItem",
-                          "DefaultCaseItem"):
+                if nm in ("IfCaseItem", "StandardCaseItem", "PatternCaseItem", "DefaultCaseItem"):
                     for a in ("exprs", "expr", "body", "stmt"):
                         v = getattr(node, a, None)
-                        if v is None: continue
+                        if v is None:
+                            continue
                         if isinstance(v, (list, tuple)):
-                            for x in v: out.append(x)
+                            for x in v:
+                                out.append(x)
                         else:
                             out.append(v)
                     return out
                 if nm == "ExpressionStatement":
                     v = getattr(node, "expr", None)
-                    if v is not None: out.append(v)
+                    if v is not None:
+                        out.append(v)
                     return out
-                if nm in ("ForLoopStatement", "WhileLoopStatement",
-                          "DoWhileLoopStatement", "ForeachLoopStatement",
-                          "RepeatLoopStatement", "ForeverLoopStatement",
-                          "ReturnStatement"):
-                    for a in ("body", "stmt", "init", "stop", "iteration",
-                              "loopVars", "expr", "arrayExpr"):
+                if nm in (
+                    "ForLoopStatement",
+                    "WhileLoopStatement",
+                    "DoWhileLoopStatement",
+                    "ForeachLoopStatement",
+                    "RepeatLoopStatement",
+                    "ForeverLoopStatement",
+                    "ReturnStatement",
+                ):
+                    for a in (
+                        "body",
+                        "stmt",
+                        "init",
+                        "stop",
+                        "iteration",
+                        "loopVars",
+                        "expr",
+                        "arrayExpr",
+                    ):
                         v = getattr(node, a, None)
-                        if v is None: continue
+                        if v is None:
+                            continue
                         if isinstance(v, (list, tuple)):
-                            for x in v: out.append(x)
+                            for x in v:
+                                out.append(x)
                         else:
                             out.append(v)
                     return out
@@ -651,15 +696,36 @@ class SlangAdapter(ParserAdapter):
                     return list(node)
                 except Exception:
                     pass
-                for a in ("body", "stmt", "stmts", "statements", "items",
-                          "left", "right", "expr", "operand", "operands",
-                          "ifTrue", "ifFalse", "conditions", "defaultCase",
-                          "value", "target", "source", "concat", "count",
-                          "thenExpr", "elseExpr", "predicate"):
+                for a in (
+                    "body",
+                    "stmt",
+                    "stmts",
+                    "statements",
+                    "items",
+                    "left",
+                    "right",
+                    "expr",
+                    "operand",
+                    "operands",
+                    "ifTrue",
+                    "ifFalse",
+                    "conditions",
+                    "defaultCase",
+                    "value",
+                    "target",
+                    "source",
+                    "concat",
+                    "count",
+                    "thenExpr",
+                    "elseExpr",
+                    "predicate",
+                ):
                     v = getattr(node, a, None)
-                    if v is None: continue
+                    if v is None:
+                        continue
                     if isinstance(v, (list, tuple)):
-                        for x in v: out.append(x)
+                        for x in v:
+                            out.append(x)
                     else:
                         out.append(v)
                 return out
@@ -671,11 +737,20 @@ class SlangAdapter(ParserAdapter):
                 if node is None or depth > 64:
                     return
                 nm = type(node).__name__
-                if nm in ("IntegerLiteral", "IntegerLiteralExpression",
-                          "RealLiteral", "TimeLiteral", "ParameterSymbol",
-                          "UnbasedUnsizedIntegerLiteral", "NullLiteral",
-                          "StringLiteral", "EmptyArgumentExpression",
-                          "PortSymbol", "NetSymbol", "VariableSymbol"):
+                if nm in (
+                    "IntegerLiteral",
+                    "IntegerLiteralExpression",
+                    "RealLiteral",
+                    "TimeLiteral",
+                    "ParameterSymbol",
+                    "UnbasedUnsizedIntegerLiteral",
+                    "NullLiteral",
+                    "StringLiteral",
+                    "EmptyArgumentExpression",
+                    "PortSymbol",
+                    "NetSymbol",
+                    "VariableSymbol",
+                ):
                     return
                 if nm == "AssignmentExpression":
                     _process_assignment(node)
@@ -717,18 +792,22 @@ class SlangAdapter(ParserAdapter):
                         for _ in pushed:
                             cond_stack.pop()
                     return
-                if nm in ("IfCaseItem", "PatternCaseItem", "DefaultCaseItem",
-                          "StandardCaseItem"):
+                if nm in ("IfCaseItem", "PatternCaseItem", "DefaultCaseItem", "StandardCaseItem"):
                     for att in ("expr", "exprs", "body", "stmt"):
                         _subvisit(getattr(node, att, None), depth + 1)
                     return
                 if nm == "ExpressionStatement":
                     _subvisit(getattr(node, "expr", None), depth + 1)
                     return
-                if nm in ("BlockStatement", "ForLoopStatement",
-                          "WhileLoopStatement", "DoWhileLoopStatement",
-                          "ForeachLoopStatement", "RepeatLoopStatement",
-                          "ForeverLoopStatement"):
+                if nm in (
+                    "BlockStatement",
+                    "ForLoopStatement",
+                    "WhileLoopStatement",
+                    "DoWhileLoopStatement",
+                    "ForeachLoopStatement",
+                    "RepeatLoopStatement",
+                    "ForeverLoopStatement",
+                ):
                     for ch in _children(node):
                         _subvisit(ch, depth + 1)
                     return
@@ -755,8 +834,7 @@ class SlangAdapter(ParserAdapter):
                 for r in res.refs:
                     if not r.name:
                         continue
-                    hier_src = (f"{hier}.{r.name}" if "." not in r.name
-                                else r.name)
+                    hier_src = f"{hier}.{r.name}" if "." not in r.name else r.name
                     if hier_src == tgt:
                         continue
                     if r.kind == DependencyKind.CONDITIONAL:
@@ -771,14 +849,16 @@ class SlangAdapter(ParserAdapter):
                     if key in added_pairs:
                         continue
                     added_pairs.add(key)
-                    design.comb_edges.append(CombEdge(
-                        src=hier_src,
-                        dst=tgt,
-                        kind=kind,
-                        via=proc_id,
-                        source_location=source_location(self._sm, pb),
-                        context=r.op,
-                    ))
+                    design.comb_edges.append(
+                        CombEdge(
+                            src=hier_src,
+                            dst=tgt,
+                            kind=kind,
+                            via=proc_id,
+                            source_location=source_location(self._sm, pb),
+                            context=r.op,
+                        )
+                    )
 
             # --- Populate process fields ---
             proc.inferred_clock = clk_signal
@@ -799,7 +879,8 @@ class SlangAdapter(ParserAdapter):
             # couldn't classify as clk vs reset).
             if ambiguous_event_signals:
                 proc.control_signals = sorted(
-                    set(proc.control_signals) | set(ambiguous_event_signals))
+                    set(proc.control_signals) | set(ambiguous_event_signals)
+                )
 
             design.processes[proc_id] = proc
             design.modules[mod_name].process_ids.append(proc_id)
@@ -807,8 +888,14 @@ class SlangAdapter(ParserAdapter):
             # --- Build registers for non-blocking assignments in always_ff/always ---
             if kind_name in ("always_ff", "always") and clk_signal:
                 self._make_registers_from_targets(
-                    all_targets, design, mod_name, hier,
-                    clk_signal, clk_edge, rst_signal, rst_edge,
+                    all_targets,
+                    design,
+                    mod_name,
+                    hier,
+                    clk_signal,
+                    clk_edge,
+                    rst_signal,
+                    rst_edge,
                     proc_id,
                 )
 
@@ -823,6 +910,7 @@ class SlangAdapter(ParserAdapter):
             if hasattr(node, "kind") and node.kind == SymbolKind.ProceduralBlock:
                 return on_proc(node)
             return VisitAction.Advance
+
         body.visit(f=_root)
 
     def _make_registers_from_targets(
@@ -840,8 +928,11 @@ class SlangAdapter(ParserAdapter):
         reset_type = ResetType.ASYNCHRONOUS if rst_signal else ResetType.UNKNOWN
         polarity = ResetPolarity.UNKNOWN
         if rst_signal and rst_edge is not None:
-            polarity = (ResetPolarity.ACTIVE_LOW if rst_edge == ClockEdge.NEGEDGE
-                        else ResetPolarity.ACTIVE_HIGH)
+            polarity = (
+                ResetPolarity.ACTIVE_LOW
+                if rst_edge == ClockEdge.NEGEDGE
+                else ResetPolarity.ACTIVE_HIGH
+            )
 
         clk_hier = f"{hier}.{clk_signal}"
         rst_hier = f"{hier}.{rst_signal}" if rst_signal else None
@@ -960,6 +1051,7 @@ class SlangAdapter(ParserAdapter):
 
         def on_assign(sym):
             counter[0] += 1
+
             # Each continuous-assign symbol has one AssignmentExpression child.
             def find_ae(node):
                 if type(node).__name__ == "AssignmentExpression":
@@ -977,16 +1069,19 @@ class SlangAdapter(ParserAdapter):
                                 dk = DependencyKind.MUX_SELECT
                             else:
                                 dk = DependencyKind.CONTINUOUS_ASSIGN
-                            design.comb_edges.append(CombEdge(
-                                src=hier_src,
-                                dst=hier_tgt,
-                                kind=dk,
-                                via=f"{hier}.assign{counter[0]}",
-                                source_location=loc,
-                                context=r.op,
-                            ))
+                            design.comb_edges.append(
+                                CombEdge(
+                                    src=hier_src,
+                                    dst=hier_tgt,
+                                    kind=dk,
+                                    via=f"{hier}.assign{counter[0]}",
+                                    source_location=loc,
+                                    context=r.op,
+                                )
+                            )
                     return VisitAction.Skip
                 return VisitAction.Advance
+
             try:
                 sym.visit(f=find_ae)
             except Exception as e:
@@ -999,6 +1094,7 @@ class SlangAdapter(ParserAdapter):
             if hasattr(node, "kind") and node.kind == SymbolKind.ContinuousAssign:
                 return on_assign(node)
             return VisitAction.Advance
+
         body.visit(f=_root)
         design.modules[mod_name].continuous_assignments += counter[0]
 
@@ -1044,14 +1140,16 @@ class SlangAdapter(ParserAdapter):
                     if actual is not None:
                         actual_hier = f"{hier}.{actual}"
                         conn[formal] = actual
-                        design.hier_conns.append(HierPortConn(
-                            instance_hier=inst_hier,
-                            module_name=defn.name,
-                            port_name=formal,
-                            direction=direction,
-                            actual_signal=actual_hier,
-                            source_location=source_location(self._sm, sym),
-                        ))
+                        design.hier_conns.append(
+                            HierPortConn(
+                                instance_hier=inst_hier,
+                                module_name=defn.name,
+                                port_name=formal,
+                                direction=direction,
+                                actual_signal=actual_hier,
+                                source_location=source_location(self._sm, sym),
+                            )
+                        )
                     else:
                         conn[formal] = formal
 
@@ -1075,6 +1173,7 @@ class SlangAdapter(ParserAdapter):
             if hasattr(node, "kind") and node.kind == SymbolKind.Instance:
                 return on_inst(node)
             return VisitAction.Advance
+
         body.visit(f=_root)
 
     # ------------------------------------------------------------------
@@ -1095,12 +1194,20 @@ class SlangAdapter(ParserAdapter):
                 line = self._sm.getLineNumber(loc)
             except Exception:
                 pass
-        code = (ErrorCode.PARSER_ERROR
-                if sev in (Severity.ERROR, Severity.CRITICAL)
-                else ErrorCode.INFERENCE_WARNING)
-        self.diagnostics.add(Diagnostic(
-            code=code, severity=sev, message=str(diag), file=fname, line=line,
-        ))
+        code = (
+            ErrorCode.PARSER_ERROR
+            if sev in (Severity.ERROR, Severity.CRITICAL)
+            else ErrorCode.INFERENCE_WARNING
+        )
+        self.diagnostics.add(
+            Diagnostic(
+                code=code,
+                severity=sev,
+                message=str(diag),
+                file=fname,
+                line=line,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1280,7 +1387,7 @@ def _type_info(sym) -> tuple[int, str | None, str, str]:
             pass
         ts = str(t)
         if "[" in ts and "]" in ts:
-            width_spec = ts[ts.index("["):]
+            width_spec = ts[ts.index("[") :]
         if "reg" in ts:
             net_kind = "reg"
         elif "wire" in ts:

@@ -9,14 +9,17 @@ and an actionable suggestion.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from ..utils.enums import (
-    ErrorCode, Severity, ValidationCategory, ValidationStatus,
+    ErrorCode,
+    Severity,
+    ValidationCategory,
+    ValidationStatus,
 )
 from ..utils.hashing import stable_hash
-
 
 # Severity groups that are considered blocking under the default
 # blocking policy.  Safe-mode tweaks are handled by the engine, not here.
@@ -80,7 +83,7 @@ class ValidationIssue:
         )
         return "V" + stable_hash(key)[:8].upper()
 
-    def with_blocking(self, blocking: bool = True) -> "ValidationIssue":
+    def with_blocking(self, blocking: bool = True) -> ValidationIssue:
         self.blocking = blocking
         return self
 

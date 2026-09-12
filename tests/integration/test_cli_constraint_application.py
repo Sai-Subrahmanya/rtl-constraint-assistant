@@ -8,10 +8,11 @@ import json
 import yaml
 from typer.testing import CliRunner
 
-cli = importlib.import_module("rca.cli.main")
 from rca.constraint_model import ConstraintSet
 
 from .conftest import make_project
+
+cli = importlib.import_module("rca.cli.main")
 
 runner = CliRunner()
 

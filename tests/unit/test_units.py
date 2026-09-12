@@ -1,11 +1,16 @@
 """Unit tests for units/hashing (Manual §72, §73)."""
+
 import pytest
+
+from rca.utils.hashing import hash_file, stable_hash
 from rca.utils.units import (
-    freq_mhz_to_period_ns, from_seconds, parse_frequency_string, parse_time_string,
-    period_ns_to_freq_mhz, to_seconds,
+    freq_mhz_to_period_ns,
+    from_seconds,
+    parse_frequency_string,
+    parse_time_string,
+    period_ns_to_freq_mhz,
+    to_seconds,
 )
-from rca.utils.hashing import stable_hash, hash_file
-from pathlib import Path
 
 
 def test_time_conversion_ns():

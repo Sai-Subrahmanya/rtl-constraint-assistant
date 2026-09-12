@@ -10,18 +10,17 @@ error.
 
 from __future__ import annotations
 
-import fnmatch
-from typing import Iterable
-
 from ..constraint_model import Constraint, ConstraintSet, PathSelector
 from ..constraint_model.targets import CollectionKind, TargetRef
 from ..design_model import Design
 from ..timing_model import TimingGraph
 from ..utils.enums import (
-    ConstraintType, ErrorCode, Severity, ValidationCategory,
+    ConstraintType,
+    ErrorCode,
+    Severity,
+    ValidationCategory,
 )
 from .base import ValidationIssue, ValidationReport
-
 
 # ---------------------------------------------------------------------------
 # Index helpers

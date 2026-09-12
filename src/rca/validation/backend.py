@@ -8,12 +8,14 @@ PASS while the generator is forced to drop constraints.
 from __future__ import annotations
 
 from ..constraint_model import ConstraintSet
-from ..utils.enums import (
-    ConstraintType, ErrorCode, Severity, ValidationCategory,
-)
 from ..sdc import get_backend
 from ..sdc.generation.preflight import preflight_constraint
-from .base import ValidationIssue, ValidationReport, _issue
+from ..utils.enums import (
+    ErrorCode,
+    Severity,
+    ValidationCategory,
+)
+from .base import ValidationReport, _issue
 
 
 def validate_backend(cset: ConstraintSet, backend_name: str,

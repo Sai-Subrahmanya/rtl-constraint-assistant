@@ -10,8 +10,6 @@ the project configuration without introducing a second scenario model.
 
 from __future__ import annotations
 
-from typing import Any
-
 from ..constraint_model import Scenario
 
 __all__ = ["Scenario", "build_scenarios"]

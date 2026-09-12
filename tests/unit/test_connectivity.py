@@ -12,30 +12,20 @@ with SlangAdapter, builds the structural graph, and asserts on:
 These tests verify that real connectivity is derived from evidence and
 that no heuristic path-count formulas remain.
 """
+
 from __future__ import annotations
 
 import textwrap
 from typing import Any
 
-import pytest
-
 from rca.design_model.connectivity import (
     MAX_COMB_DEPTH,
     MAX_EDGES,
-    build_structural_connectivity,
 )
 from rca.parser import SlangAdapter
-from rca.parser.expr_walker import (
-    ExprWalker,
-    walk_assignment,
-    walk_expression,
-)
-from rca.timing_model import TimingGraph
 from rca.utils.enums import (
     DependencyKind,
-    TimingPathClass,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,7 +34,9 @@ from rca.utils.enums import (
 
 def parse_sv(sv: str, top: str = "top") -> Any:
     """Parse an SV string and return a Design with connectivity built."""
-    import tempfile, os
+    import os
+    import tempfile
+
     sv = textwrap.dedent(sv)
     with tempfile.NamedTemporaryFile("w", suffix=".sv", delete=False) as f:
         f.write(sv)
@@ -72,8 +64,9 @@ def reg(d, leaf: str):
     for r in d.registers.values():
         if r.local_name == leaf:
             return r
-    raise AssertionError(f"register '{leaf}' not found. "
-                         f"Have: {[r.local_name for r in d.registers.values()]}")
+    raise AssertionError(
+        f"register '{leaf}' not found. Have: {[r.local_name for r in d.registers.values()]}"
+    )
 
 
 def proc_of(d, idx: int = 0):
@@ -192,8 +185,7 @@ def test_reg_to_output_direct_port():
     ps = path_set(d)
     assert ("d", "q", "input_to_register") in ps
     # REG->OUT via port-alias
-    assert any(s == "q" and e == "q" and c == "register_to_output"
-               for s, e, c in ps)
+    assert any(s == "q" and e == "q" and c == "register_to_output" for s, e, c in ps)
 
 
 # ---------------------------------------------------------------------------
@@ -306,8 +298,11 @@ def test_mux_select_classification():
     assert ("sel", "q", "input_to_register") not in ps
     # The conditional edge does exist in the structural edge list.
     g = d._structural_graph_internal
-    cond_edges = [(e.src.split(".")[-1], e.dst.split(".")[-1], e.kind.value)
-                  for lst in g.edge_meta.values() for e in lst]
+    cond_edges = [
+        (e.src.split(".")[-1], e.dst.split(".")[-1], e.kind.value)
+        for lst in g.edge_meta.values()
+        for e in lst
+    ]
     assert ("sel", "q", "conditional") in cond_edges
 
 
@@ -331,7 +326,7 @@ def test_part_select():
 
 
 def test_concatenation_lhs():
-    d = parse_sv("""
+    parse_sv("""
         module top(input clk, a, b, output y1, y2);
             reg pair;
             always_ff @(posedge clk) pair <= {a, b};  // not strictly legal width but ok
@@ -420,8 +415,7 @@ def test_cdc_detected():
             always_ff @(posedge clk_a) r <= d;
             always_ff @(posedge clk_b) q <= r;
         endmodule""")
-    cdc = {(p.startpoint.split(".")[-1], p.endpoint.split(".")[-1])
-           for p in d.cdc_paths}
+    cdc = {(p.startpoint.split(".")[-1], p.endpoint.split(".")[-1]) for p in d.cdc_paths}
     assert ("r", "q") in cdc
     # Class is CDC
     assert any(c == "cdc" for _, _, c in path_set(d))
@@ -491,10 +485,10 @@ def test_hierarchy_flows_through():
     ps = path_set(d)
     assert ("a", "q", "input_to_register") in ps
     reg_to_reg = [(s, e) for s, e, c in ps if c == "register_to_register"]
-    assert any(s == "q" and e == "q" for s, e in reg_to_reg), \
+    assert any(s == "q" and e == "q" for s, e in reg_to_reg), (
         f"missing u0.q->u1.q reg-reg, got {reg_to_reg}"
-    assert any(e == "y" and c == "register_to_output"
-               for s, e, c in ps)
+    )
+    assert any(e == "y" and c == "register_to_output" for s, e, c in ps)
 
 
 # ---------------------------------------------------------------------------
@@ -512,8 +506,7 @@ def test_self_feedback_no_spurious_path():
         endmodule""")
     ps = path_set(d)
     # No q->q register-to-register path
-    assert not any(s == "q" and e == "q" and c == "register_to_register"
-                   for s, e, c in ps)
+    assert not any(s == "q" and e == "q" and c == "register_to_register" for s, e, c in ps)
     r = reg(d, "q")
     # self-feedback IS recorded in data_sources (transparency)
     assert any(ds.split(".")[-1] == "q" for ds in r.data_sources)
@@ -595,10 +588,13 @@ def test_process_read_write_control_separation():
 
 def _walk_expr_string(sv_expr: str, kind=DependencyKind.DATA):
     """Build a tiny module that assigns y = <sv_expr>; walk the RHS."""
-    import tempfile, os
+    import os
+    import tempfile
+
     src = f"module top(input a, b, c, sel, input [7:0] bus, output y); assign y = {sv_expr}; endmodule"
     with tempfile.NamedTemporaryFile("w", suffix=".sv", delete=False) as f:
-        f.write(src); path = f.name
+        f.write(src)
+        path = f.name
     try:
         a = SlangAdapter()
         d = a.parse([path], top="top")
@@ -802,6 +798,7 @@ def test_bounds_constants_are_documentable():
 
 def test_design_snapshot_is_jsonable():
     import json
+
     d = parse_sv("""
         module top(input clk, d, output reg q);
             always_ff @(posedge clk) q <= d;

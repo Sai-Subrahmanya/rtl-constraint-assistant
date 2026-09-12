@@ -9,17 +9,14 @@ to accidental ordering differences.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from rca.parser.slang_adapter import SlangAdapter
 from rca.timing_model import TimingGraph
-from rca.utils.enums import ClockDomainRelationship, TimingPathClass
+from rca.utils.enums import TimingPathClass
 
 CORPUS = Path(__file__).parent / "timing_corpus"
 

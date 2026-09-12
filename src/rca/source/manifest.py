@@ -5,7 +5,6 @@ Source manifest handling (Manual §10, §11).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from ..config.model import ProjectConfig
 from ..utils.logging import get_logger

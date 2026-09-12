@@ -48,7 +48,6 @@ from .normalize import (
     semantic_match_key,
 )
 
-
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -73,6 +72,7 @@ class FieldDifference:
 @dataclass
 class PairResult:
     """Result of comparing one semantic pair of constraints."""
+
     status: ConstraintPairStatus = ConstraintPairStatus.UNKNOWN
     level: ComparisonLevel = ComparisonLevel.UNKNOWN
     a_id: str | None = None
@@ -110,7 +110,8 @@ class PairResult:
 @dataclass
 class DuplicateRecord:
     """A duplicate (identical or conflicting) within one side."""
-    side: str               # "left" | "right"
+
+    side: str  # "left" | "right"
     classification: ConstraintPairStatus
     ids: list[str]
     constraint_type: str
@@ -135,6 +136,7 @@ class ScenarioDifference:
     report record keeps context findings separate from constraint-pair results
     without introducing a second scenario model.
     """
+
     status: str  # DIFFERENT | ONLY_IN_LEFT | ONLY_IN_RIGHT | UNKNOWN
     scenario_id: str | None
     field: str
@@ -156,6 +158,7 @@ class ScenarioDifference:
 @dataclass
 class ComparisonResult:
     """Structured comparison report (Step 9 §16)."""
+
     overall_status: EquivalenceResult = EquivalenceResult.UNKNOWN
     comparison_level: ComparisonLevel = ComparisonLevel.UNKNOWN
 
@@ -325,19 +328,23 @@ def _scenario_context(
     if not active_a and not active_b:
         return None, None, []
     if not active_a or not active_b:
-        return None, None, [
-            ScenarioDifference(
-                status="UNKNOWN",
-                scenario_id=None,
-                field="active_scenario_context",
-                value_a=sorted(active_a),
-                value_b=sorted(active_b),
-                explanation=(
-                    "Only one constraint set supplies active MCMM scenario definitions; "
-                    "wildcard scenario scope cannot be compared safely."
-                ),
-            )
-        ]
+        return (
+            None,
+            None,
+            [
+                ScenarioDifference(
+                    status="UNKNOWN",
+                    scenario_id=None,
+                    field="active_scenario_context",
+                    value_a=sorted(active_a),
+                    value_b=sorted(active_b),
+                    explanation=(
+                        "Only one constraint set supplies active MCMM scenario definitions; "
+                        "wildcard scenario scope cannot be compared safely."
+                    ),
+                )
+            ],
+        )
 
     differences: list[ScenarioDifference] = []
     for scenario_id in sorted(set(active_a) | set(active_b)):
@@ -448,9 +455,9 @@ def _group_by_semantic_key(cs: list[Constraint] | ConstraintSet) -> dict[tuple, 
     return out
 
 
-def _detect_side_duplicates(side: str,
-                            groups: dict[tuple, list[Constraint]]
-                            ) -> list[DuplicateRecord]:
+def _detect_side_duplicates(
+    side: str, groups: dict[tuple, list[Constraint]]
+) -> list[DuplicateRecord]:
     """Within one side, classify multiple constraints sharing a semantic
     match key as DUPLICATE (identical sig), REDUNDANT (overlap e.g. two
     broad clock defs with same params), or CONFLICTING (same identity
@@ -465,13 +472,15 @@ def _detect_side_duplicates(side: str,
             sigs.setdefault(sig, []).append(c)
         type_str = items[0].type.value
         if len(sigs) == 1:
-            dups.append(DuplicateRecord(
-                side=side,
-                classification=ConstraintPairStatus.DUPLICATE,
-                ids=[c.id for c in items],
-                constraint_type=type_str,
-                note="identical semantic duplicate",
-            ))
+            dups.append(
+                DuplicateRecord(
+                    side=side,
+                    classification=ConstraintPairStatus.DUPLICATE,
+                    ids=[c.id for c in items],
+                    constraint_type=type_str,
+                    note="identical semantic duplicate",
+                )
+            )
         else:
             # All items share match key but signatures differ — check
             # whether they are REDUNDANT (overlapping selectors, e.g.
@@ -483,26 +492,33 @@ def _detect_side_duplicates(side: str,
             for c in items[1:]:
                 vc = dict(c.values or {})
                 for fld in ident_fields:
-                    if vrep.get(fld) is not None and vc.get(fld) is not None \
-                            and vrep.get(fld) == vc.get(fld):
+                    if (
+                        vrep.get(fld) is not None
+                        and vc.get(fld) is not None
+                        and vrep.get(fld) == vc.get(fld)
+                    ):
                         # Same scalar identity but different sigs = conflict
                         scalar_conflict = True
             if scalar_conflict:
-                dups.append(DuplicateRecord(
-                    side=side,
-                    classification=ConstraintPairStatus.CONFLICTING,
-                    ids=[c.id for c in items],
-                    constraint_type=type_str,
-                    note="same identity but conflicting values",
-                ))
+                dups.append(
+                    DuplicateRecord(
+                        side=side,
+                        classification=ConstraintPairStatus.CONFLICTING,
+                        ids=[c.id for c in items],
+                        constraint_type=type_str,
+                        note="same identity but conflicting values",
+                    )
+                )
             else:
-                dups.append(DuplicateRecord(
-                    side=side,
-                    classification=ConstraintPairStatus.REDUNDANT,
-                    ids=[c.id for c in items],
-                    constraint_type=type_str,
-                    note="overlapping but not identical (e.g. broad + specific)",
-                ))
+                dups.append(
+                    DuplicateRecord(
+                        side=side,
+                        classification=ConstraintPairStatus.REDUNDANT,
+                        ids=[c.id for c in items],
+                        constraint_type=type_str,
+                        note="overlapping but not identical (e.g. broad + specific)",
+                    )
+                )
     # Deterministic ordering.
     dups.sort(key=lambda d: (d.constraint_type, d.ids[0] if d.ids else ""))
     return dups
@@ -611,8 +627,7 @@ def compare(base: ConstraintSet, other: ConstraintSet) -> ComparisonResult:
     result.duplicates_left = _detect_side_duplicates("left", groups_a)
     result.duplicates_right = _detect_side_duplicates("right", groups_b)
 
-    all_keys = sorted(set(groups_a.keys()) | set(groups_b.keys()),
-                      key=lambda k: stable_hash(k))
+    all_keys = sorted(set(groups_a.keys()) | set(groups_b.keys()), key=lambda k: stable_hash(k))
 
     for k in all_keys:
         list_a = list(groups_a.get(k, []))
@@ -636,36 +651,45 @@ def compare(base: ConstraintSet, other: ConstraintSet) -> ComparisonResult:
                 result.different_constraints.append(pr)
 
         for ca in rem_a:
-            result.only_in_left.append(PairResult(
-                status=ConstraintPairStatus.ONLY_IN_LEFT,
-                level=ComparisonLevel.SEMANTIC_DIFFERENT,
-                a_id=ca.id,
-                constraint_type=ca.type.value,
-                a_source_kind=ca.source_kind.value if ca.source_kind else "",
-                a_provenance=_provenance_summary(ca),
-                semantic_key_digest=stable_hash(k),
-                scenarios=sorted(ca.scenario_ids),
-                notes=["present in A but not in B (no unambiguous B counterpart)"],
-            ))
+            result.only_in_left.append(
+                PairResult(
+                    status=ConstraintPairStatus.ONLY_IN_LEFT,
+                    level=ComparisonLevel.SEMANTIC_DIFFERENT,
+                    a_id=ca.id,
+                    constraint_type=ca.type.value,
+                    a_source_kind=ca.source_kind.value if ca.source_kind else "",
+                    a_provenance=_provenance_summary(ca),
+                    semantic_key_digest=stable_hash(k),
+                    scenarios=sorted(ca.scenario_ids),
+                    notes=["present in A but not in B (no unambiguous B counterpart)"],
+                )
+            )
         for cb in rem_b:
-            result.only_in_right.append(PairResult(
-                status=ConstraintPairStatus.ONLY_IN_RIGHT,
-                level=ComparisonLevel.SEMANTIC_DIFFERENT,
-                b_id=cb.id,
-                constraint_type=cb.type.value,
-                b_source_kind=cb.source_kind.value if cb.source_kind else "",
-                b_provenance=_provenance_summary(cb),
-                semantic_key_digest=stable_hash(k),
-                scenarios=sorted(cb.scenario_ids),
-                notes=["present in B but not in A (no unambiguous A counterpart)"],
-            ))
+            result.only_in_right.append(
+                PairResult(
+                    status=ConstraintPairStatus.ONLY_IN_RIGHT,
+                    level=ComparisonLevel.SEMANTIC_DIFFERENT,
+                    b_id=cb.id,
+                    constraint_type=cb.type.value,
+                    b_source_kind=cb.source_kind.value if cb.source_kind else "",
+                    b_provenance=_provenance_summary(cb),
+                    semantic_key_digest=stable_hash(k),
+                    scenarios=sorted(cb.scenario_ids),
+                    notes=["present in B but not in A (no unambiguous A counterpart)"],
+                )
+            )
 
     # Deterministic ordering of all lists.
     def _sig(p: PairResult) -> str:
         return stable_hash((p.constraint_type, p.a_id or "", p.b_id or ""))
-    for lst in (result.equivalent_constraints, result.different_constraints,
-                result.unknown_constraints, result.only_in_left,
-                result.only_in_right):
+
+    for lst in (
+        result.equivalent_constraints,
+        result.different_constraints,
+        result.unknown_constraints,
+        result.only_in_left,
+        result.only_in_right,
+    ):
         lst.sort(key=_sig)
 
     # Overall status rollup. Scenario-context differences are known timing
@@ -685,11 +709,9 @@ def compare(base: ConstraintSet, other: ConstraintSet) -> ComparisonResult:
         result.comparison_level = ComparisonLevel.UNKNOWN
     else:
         any_normalized = any(
-            any("provenance differs" in n for n in p.notes)
-            for p in result.equivalent_constraints
+            any("provenance differs" in n for n in p.notes) for p in result.equivalent_constraints
         ) or any(
-            any(n.startswith("paired by") for n in p.notes)
-            for p in result.equivalent_constraints
+            any(n.startswith("paired by") for n in p.notes) for p in result.equivalent_constraints
         )
         if any_normalized:
             result.overall_status = EquivalenceResult.EQUIVALENT_AFTER_NORMALIZATION
@@ -707,6 +729,7 @@ def compare(base: ConstraintSet, other: ConstraintSet) -> ComparisonResult:
 # Multiset pairing
 # ---------------------------------------------------------------------------
 
+
 def _identity_sig(c: Constraint) -> tuple:
     """Scalar identity signature — used to find unambiguous pairs
     within a match-key group when exact signature differs."""
@@ -714,15 +737,19 @@ def _identity_sig(c: Constraint) -> tuple:
     t = c.type
     parts = [t.value]
     # Scalar identity fields by type
-    if t in (ConstraintType.CREATE_CLOCK,
-             ConstraintType.CREATE_GENERATED_CLOCK):
+    if t in (ConstraintType.CREATE_CLOCK, ConstraintType.CREATE_GENERATED_CLOCK):
         parts.append(v.get("name"))
         if t == ConstraintType.CREATE_GENERATED_CLOCK:
             parts.append(v.get("source"))
             parts.append(v.get("master_clock"))
-    if t in (ConstraintType.SET_INPUT_DELAY, ConstraintType.SET_OUTPUT_DELAY,
-             ConstraintType.SET_CLOCK_UNCERTAINTY, ConstraintType.SET_CLOCK_LATENCY,
-             ConstraintType.SET_CLOCK_TRANSITION, ConstraintType.SET_PROPAGATED_CLOCK):
+    if t in (
+        ConstraintType.SET_INPUT_DELAY,
+        ConstraintType.SET_OUTPUT_DELAY,
+        ConstraintType.SET_CLOCK_UNCERTAINTY,
+        ConstraintType.SET_CLOCK_LATENCY,
+        ConstraintType.SET_CLOCK_TRANSITION,
+        ConstraintType.SET_PROPAGATED_CLOCK,
+    ):
         parts.append(tuple(sorted(c.clock_refs)))
         parts.append(tuple(sorted(c.target_objects)))
         parts.append(v.get("min_max", "max"))
@@ -730,8 +757,12 @@ def _identity_sig(c: Constraint) -> tuple:
     if t == ConstraintType.SET_CLOCK_GROUPS:
         # partition is identity
         parts.append(tuple(sorted(tuple(sorted(g)) for g in v.get("groups", []))))
-    if t in (ConstraintType.SET_FALSE_PATH, ConstraintType.SET_MULTICYCLE_PATH,
-             ConstraintType.SET_MIN_DELAY, ConstraintType.SET_MAX_DELAY):
+    if t in (
+        ConstraintType.SET_FALSE_PATH,
+        ConstraintType.SET_MULTICYCLE_PATH,
+        ConstraintType.SET_MIN_DELAY,
+        ConstraintType.SET_MAX_DELAY,
+    ):
         if c.path_selector is not None:
             parts.append(c.path_selector.semantic_key())
         else:
@@ -741,9 +772,9 @@ def _identity_sig(c: Constraint) -> tuple:
     return tuple(parts)
 
 
-def _pair_multiset(list_a: list[Constraint], list_b: list[Constraint]
-                   ) -> tuple[list[tuple[Constraint, Constraint, str]],
-                              list[Constraint], list[Constraint]]:
+def _pair_multiset(
+    list_a: list[Constraint], list_b: list[Constraint]
+) -> tuple[list[tuple[Constraint, Constraint, str]], list[Constraint], list[Constraint]]:
     """Return (pairs, remaining_a, remaining_b) using the hierarchy:
        1. exact normalized signature (multiset)
        2. unambiguous identity-sig match
@@ -766,7 +797,8 @@ def _pair_multiset(list_a: list[Constraint], list_b: list[Constraint]
             for ib, cb in enumerate(remaining_b):
                 if _sig(cb) == sa:
                     pairs.append((ca, cb, "signature"))
-                    remaining_a.pop(ia); remaining_b.pop(ib)
+                    remaining_a.pop(ia)
+                    remaining_b.pop(ib)
                     matched = True
                     break
             if matched:
@@ -782,12 +814,12 @@ def _pair_multiset(list_a: list[Constraint], list_b: list[Constraint]
         matched = False
         for ia, ca in enumerate(remaining_a):
             ia_sig = _identity_sig(ca)
-            hits = [ib for ib, cb in enumerate(remaining_b)
-                    if _identity_sig(cb) == ia_sig]
+            hits = [ib for ib, cb in enumerate(remaining_b) if _identity_sig(cb) == ia_sig]
             if len(hits) == 1:
                 ib = hits[0]
                 pairs.append((ca, remaining_b[ib], "identity"))
-                remaining_a.pop(ia); remaining_b.pop(ib)
+                remaining_a.pop(ia)
+                remaining_b.pop(ib)
                 matched = True
                 break
         if not matched:
@@ -809,11 +841,14 @@ def _legacy_diff(r: ComparisonResult) -> list[DiffEntry]:
     out: list[DiffEntry] = []
     for p in r.different_constraints:
         note = p.fields[0].explanation if p.fields else "semantic difference"
-        out.append(DiffEntry(
-            action=DiffAction.MODIFIED,
-            a_id=p.a_id, b_id=p.b_id,
-            note=f"{p.constraint_type}: {note}",
-        ))
+        out.append(
+            DiffEntry(
+                action=DiffAction.MODIFIED,
+                a_id=p.a_id,
+                b_id=p.b_id,
+                note=f"{p.constraint_type}: {note}",
+            )
+        )
     for p in r.only_in_left:
         out.append(DiffEntry(action=DiffAction.REMOVED, a_id=p.a_id, note="in A not B"))
     for p in r.only_in_right:
@@ -826,14 +861,16 @@ def _legacy_diff(r: ComparisonResult) -> list[DiffEntry]:
 # ---------------------------------------------------------------------------
 
 
-def compare_sdc_text(a_text: str, b_text: str,
-                     *,
-                     importer: Any = None,
-                     design: Any = None,
-                     tg: Any = None,
-                     source_a: str = "<a>",
-                     source_b: str = "<b>",
-                     ) -> ComparisonResult:
+def compare_sdc_text(
+    a_text: str,
+    b_text: str,
+    *,
+    importer: Any = None,
+    design: Any = None,
+    tg: Any = None,
+    source_a: str = "<a>",
+    source_b: str = "<b>",
+) -> ComparisonResult:
     """High-level helper: import two SDC text strings via the existing
     Step-5 :class:`SdcImporter` and compare the resulting UCMs.
 
@@ -871,12 +908,14 @@ def compare_sdc_text(a_text: str, b_text: str,
         result.diagnostics.append(f"cannot load SDC importer: {exc}")
         return result
 
-    def _do_import(text: str, source: str, side: str
-                   ) -> tuple[ConstraintSet | None, list[str]]:
+    def _do_import(text: str, source: str, side: str) -> tuple[ConstraintSet | None, list[str]]:
         diags: list[str] = []
         try:
-            imp = importer if importer is not None else SdcImporter(
-                design=design, tg=tg, source_file=source)
+            imp = (
+                importer
+                if importer is not None
+                else SdcImporter(design=design, tg=tg, source_file=source)
+            )
             res = imp.from_text(text, source_file=source)
         except Exception as exc:
             diags.append(f"{side} import raised {type(exc).__name__}: {exc}")
@@ -887,7 +926,7 @@ def compare_sdc_text(a_text: str, b_text: str,
                 sev = getattr(d, "severity", None)
                 msg = getattr(d, "message", str(d))
                 code = getattr(d, "code", "")
-                diags.append(f"{side}: [{getattr(sev,'value',sev)}] {code} {msg}")
+                diags.append(f"{side}: [{getattr(sev, 'value', sev)}] {code} {msg}")
             except Exception:
                 diags.append(f"{side}: {d!r}")
         # Count ERROR-level import diagnostics
@@ -896,12 +935,17 @@ def compare_sdc_text(a_text: str, b_text: str,
             for d in getattr(ic, "diagnostics", []) or []:
                 sev = getattr(d, "severity", None)
                 if sev == DiagnosticSeverity.ERROR or (
-                        hasattr(sev, "value") and sev.value == "ERROR"):
+                    hasattr(sev, "value") and sev.value == "ERROR"
+                ):
                     err_count += 1
-        err_sev = sum(1 for d in (getattr(res, "diagnostics", []) or [])
-                      if (getattr(d, "severity", None) == DiagnosticSeverity.ERROR
-                          or (hasattr(getattr(d, "severity", None), "value")
-                              and d.severity.value == "ERROR")))
+        err_sev = sum(
+            1
+            for d in (getattr(res, "diagnostics", []) or [])
+            if (
+                getattr(d, "severity", None) == DiagnosticSeverity.ERROR
+                or (hasattr(getattr(d, "severity", None), "value") and d.severity.value == "ERROR")
+            )
+        )
         if err_count + err_sev > 0:
             diags.append(f"{side}: SDC import reported {err_count + err_sev} error(s)")
             return None, diags

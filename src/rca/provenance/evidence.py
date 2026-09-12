@@ -78,7 +78,7 @@ class Evidence(BaseModel):
 
     # Allow construction with confidence as a string.
     @classmethod
-    def create(cls, **data: Any) -> "Evidence":
+    def create(cls, **data: Any) -> Evidence:
         data["confidence"] = _normalize_confidence(data.get("confidence", Confidence.MEDIUM))
         return cls(**data)
 
@@ -102,7 +102,7 @@ class Evidence(BaseModel):
             self.confidence.value,
         )
 
-    def semantically_equivalent(self, other: "Evidence") -> bool:
+    def semantically_equivalent(self, other: Evidence) -> bool:
         return self.semantic_key() == other.semantic_key()
 
     # --- serialization ---
@@ -122,7 +122,7 @@ class Evidence(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "Evidence":
+    def from_dict(cls, d: dict[str, Any]) -> Evidence:
         return cls(
             id=d["id"],
             kind=d["kind"],

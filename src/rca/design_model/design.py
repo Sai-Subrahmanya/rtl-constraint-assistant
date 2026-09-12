@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,7 +61,7 @@ class Design(BaseModel):
     # Populated lazily by build_structural_connectivity()
     structural_paths: list[Any] = Field(default_factory=list)
     cdc_paths: list[Any] = Field(default_factory=list)
-    _structural_graph_internal: "StructuralGraph | None" = None
+    _structural_graph_internal: StructuralGraph | None = None
 
     # ------------------------------------------------------------------
     # Index helpers
@@ -123,14 +123,14 @@ class Design(BaseModel):
             g[e.dst].add(e.src)
         return g.get(signal, set())
 
-    def structural_graph(self) -> "StructuralGraph | None":
+    def structural_graph(self) -> StructuralGraph | None:
         return self._structural_graph_internal
 
     # ------------------------------------------------------------------
     # Connectivity build entry point
     # ------------------------------------------------------------------
 
-    def build_connectivity(self) -> "StructuralGraph":
+    def build_connectivity(self) -> StructuralGraph:
         """Build structural connectivity if not already done.  Safe to
         call multiple times (idempotent)."""
         if self._structural_graph_internal is not None:

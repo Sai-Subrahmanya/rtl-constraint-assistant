@@ -21,8 +21,9 @@ from __future__ import annotations
 import copy
 import json
 from collections import deque
+from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Any, Iterator
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -652,7 +653,7 @@ class ConstraintSet(BaseModel):
     # ------------------------------------------------------------------
 
     def clone(self, *, name: str | None = None,
-              clone_assumptions: bool = True) -> "ConstraintSet":
+              clone_assumptions: bool = True) -> ConstraintSet:
         new = ConstraintSet(
             name=name or self.name,
             metadata=copy.deepcopy(self.metadata),
@@ -731,7 +732,7 @@ class ConstraintSet(BaseModel):
                            *, unknown_field_policy: str = "keep",
                            schema_version: int | None = None,
                            repair_reverse_edges: bool = False,
-                           allow_cycles: bool = True) -> "ConstraintSet":
+                           allow_cycles: bool = True) -> ConstraintSet:
         """Restore a ConstraintSet from a canonical snapshot dict.
 
         Parameters
@@ -941,7 +942,7 @@ class ConstraintSet(BaseModel):
         return cs
 
     @classmethod
-    def from_canonical_json(cls, text: str, **kw: Any) -> "ConstraintSet":
+    def from_canonical_json(cls, text: str, **kw: Any) -> ConstraintSet:
         return cls.from_snapshot_dict(json.loads(text), **kw)
 
     # ---- helpers ----
@@ -962,7 +963,7 @@ class ConstraintSet(BaseModel):
         }
 
     @classmethod
-    def from_snapshot(cls, snap: dict[str, Any], **kw: Any) -> "ConstraintSet":
+    def from_snapshot(cls, snap: dict[str, Any], **kw: Any) -> ConstraintSet:
         """Backward-compat alias: previously summary-level restore.
 
         NOTE: for new code, prefer ``from_snapshot_dict`` which performs
@@ -977,7 +978,7 @@ class ConstraintSet(BaseModel):
         return cls.from_snapshot_dict(snap, **kw)
 
 
-def _find_dependency_cycles(cs: "ConstraintSet") -> list[list[str]]:
+def _find_dependency_cycles(cs: ConstraintSet) -> list[list[str]]:
     """Return a list of dependency cycles (each cycle a list of ids).
 
     Traverses only forward ``dependency_ids`` edges; downstream_ids
@@ -1113,7 +1114,7 @@ def _hashable_val(v: Any) -> Any:
     return str(v)
 
 
-def _constraint_semantic_key(c: "Constraint") -> tuple:
+def _constraint_semantic_key(c: Constraint) -> tuple:
     """Semantic key for a single Constraint.
 
     Includes every field that materially affects generated SDC or EDA
@@ -1162,7 +1163,7 @@ def _constraint_semantic_key(c: "Constraint") -> tuple:
     )
 
 
-def stable_hash_cset(cset: "ConstraintSet | None") -> str:
+def stable_hash_cset(cset: ConstraintSet | None) -> str:
     """Canonical deterministic semantic hash for a ConstraintSet.
 
     Insertion-order independent at the constraint level (constraints sorted

@@ -8,7 +8,6 @@ User-facing helpers convert to/from ns/ps/fs and MHz/GHz.
 from __future__ import annotations
 
 import math
-from typing import Union
 
 from .enums import FrequencyUnit, TimeUnit
 
@@ -29,7 +28,7 @@ _FREQ_TO_HZ: dict[FrequencyUnit, float] = {
 }
 
 
-Number = Union[int, float]
+Number = int | float
 
 
 def to_seconds(value: Number, unit: TimeUnit | str) -> float:

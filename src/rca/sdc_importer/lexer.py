@@ -18,9 +18,8 @@ command, i.e. after ``;``/newline/BOS).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Iterator
-
+from collections.abc import Iterator
+from dataclasses import dataclass
 
 # Token kinds
 WORD = "WORD"
@@ -85,9 +84,22 @@ class _Cursor:
 # \newline (line continuation, replaced by nothing), \a, \b, \f, \0..
 # plus octal \ooo and hex \xHH and unicode \uHHHH / \UHHHHHHHH.
 _SIMPLE_BACKSLASH = {
-    "a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r",
-    "t": "\t", "v": "\v", "\\": "\\", '"': '"', "[": "[", "]": "]",
-    "{": "{", "}": "}", "$": "$", ";": ";", " ": " ",
+    "a": "\a",
+    "b": "\b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+    "\\": "\\",
+    '"': '"',
+    "[": "[",
+    "]": "]",
+    "{": "{",
+    "}": "}",
+    "$": "$",
+    ";": ";",
+    " ": " ",
 }
 
 
@@ -142,8 +154,9 @@ class TclLexer:
 
     # -- public API -----------------------------------------------------
 
-    def tokenize_commands(self, text: str, source_file: str | None = None,
-                          start_line: int = 1) -> Iterator[list[LexToken]]:
+    def tokenize_commands(
+        self, text: str, source_file: str | None = None, start_line: int = 1
+    ) -> Iterator[list[LexToken]]:
         text = _fold_line_continuations(text)
         cur = _Cursor(text, line=start_line)
         current_cmd: list[LexToken] = []
@@ -161,13 +174,17 @@ class TclLexer:
                 # so subsequent lines can parse.
                 if brace_depth > 0 or bracket_depth > 0 or in_quote:
                     if in_quote:
-                        self.errors.append(LexError("unterminated quoted string", cur.line, cur.col))
+                        self.errors.append(
+                            LexError("unterminated quoted string", cur.line, cur.col)
+                        )
                         in_quote = False
                     if brace_depth > 0:
                         self.errors.append(LexError("unterminated brace group", cur.line, cur.col))
                         brace_depth = 0
                     if bracket_depth > 0:
-                        self.errors.append(LexError("unterminated command substitution", cur.line, cur.col))
+                        self.errors.append(
+                            LexError("unterminated command substitution", cur.line, cur.col)
+                        )
                         bracket_depth = 0
                 if current_cmd:
                     yield current_cmd
@@ -189,13 +206,18 @@ class TclLexer:
                 cur.advance()
                 at_cmd_start = at_cmd_start and not current_cmd
                 continue
-            if ch == "#" and at_cmd_start and brace_depth == 0 and bracket_depth == 0 and not in_quote:
+            if (
+                ch == "#"
+                and at_cmd_start
+                and brace_depth == 0
+                and bracket_depth == 0
+                and not in_quote
+            ):
                 tok = self._lex_comment(cur)
                 yield [tok]
                 at_cmd_start = True
                 continue
             # Track nesting by scanning ahead one character then lex the word.
-            pre_pos = cur.pos
             tok = self._lex_word(cur)
             # Update depth counters from the token text so recovery at
             # newline works. This is an approximation (it doesn't handle
@@ -232,7 +254,7 @@ class TclLexer:
         # consume until newline or EOF
         while not cur.eof() and cur.peek() != "\n":
             cur.advance()
-        text = cur.text[start:cur.pos]
+        text = cur.text[start : cur.pos]
         return LexToken(COMMENT, text, line0, col0, inner=text)
 
     def _lex_word(self, cur: _Cursor) -> LexToken:
@@ -246,7 +268,8 @@ class TclLexer:
         return self._lex_bare(cur)
 
     def _lex_bare(self, cur: _Cursor) -> LexToken:
-        line0 = cur.line; col0 = cur.col; start = cur.pos
+        line0 = cur.line
+        col0 = cur.col
         out: list[str] = []
         while not cur.eof():
             ch = cur.peek()
@@ -299,7 +322,8 @@ class TclLexer:
         return LexToken(WORD, "".join(out), line0, col0)
 
     def _lex_qword(self, cur: _Cursor) -> LexToken:
-        line0 = cur.line; col0 = cur.col
+        line0 = cur.line
+        col0 = cur.col
         assert cur.peek() == '"'
         cur.advance()  # opening quote
         out: list[str] = []
@@ -354,12 +378,12 @@ class TclLexer:
         line returns the partial content (with a LEX_ERROR) instead of
         consuming the rest of the file.
         """
-        line0 = cur.line; col0 = cur.col
+        line0 = cur.line
+        col0 = cur.col
         assert cur.peek() == "{"
         cur.advance()  # opening brace
         depth = 1
         out: list[str] = []
-        saw_newline = False
         while not cur.eof():
             ch = cur.peek()
             if ch == "\\" and cur.pos + 1 < len(cur.text) and cur.text[cur.pos + 1] in ("\n", "\r"):
@@ -392,10 +416,10 @@ class TclLexer:
         """Command substitution [ ... ]. We lex the inner text as a raw
         string (nested brackets balanced) and leave it to the parser to
         interpret only the safe supported subset."""
-        line0 = cur.line; col0 = cur.col
+        line0 = cur.line
+        col0 = cur.col
         assert cur.peek() == "["
         cur.advance()  # opening [
-        start_pos = cur.pos
         depth = 1
         out: list[str] = []
         # Track inner quoting/bracing so nested brackets inside strings

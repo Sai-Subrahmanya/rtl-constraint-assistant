@@ -43,7 +43,7 @@ from ..utils.enums import (
 )
 from ..utils.logging import get_logger
 from .design import Design
-from .net import CombEdge, HierPortConn
+from .net import CombEdge
 from .register import Register
 from .timing_path_lite import StructuralPath
 
@@ -126,8 +126,10 @@ class StructuralGraph:
         log.info(
             "Structural graph built: %d data edges, %d control signals, "
             "%d timing paths, %d CDC paths",
-            self.stats["data_edges"], self.stats["control_signals"],
-            self.stats["paths_total"], self.stats["cdc_paths"],
+            self.stats["data_edges"],
+            self.stats["control_signals"],
+            self.stats["paths_total"],
+            self.stats["cdc_paths"],
         )
 
     # ------------------------------------------------------------------
@@ -144,10 +146,14 @@ class StructuralGraph:
         def add(src: str, dst: str) -> None:
             if src == dst or (src, dst) in existing:
                 return
-            d.comb_edges.append(CombEdge(
-                src=src, dst=dst, kind=DependencyKind.DATA,
-                via="port-alias",
-            ))
+            d.comb_edges.append(
+                CombEdge(
+                    src=src,
+                    dst=dst,
+                    kind=DependencyKind.DATA,
+                    via="port-alias",
+                )
+            )
             existing.add((src, dst))
 
         for port in d.ports.values():
@@ -213,22 +219,29 @@ class StructuralGraph:
             if not (_signal_exists(d, actual) and _signal_exists(d, formal)):
                 self.warnings.append(
                     f"hier port {conn.instance_hier}.{conn.port_name}: "
-                    f"unresolved connection (actual={actual})")
+                    f"unresolved connection (actual={actual})"
+                )
                 continue
             if conn.direction in ("input", "inout"):
-                new_edges.append(CombEdge(
-                    src=actual, dst=formal,
-                    kind=DependencyKind.HIER_PORT_CONN,
-                    via=conn.instance_hier,
-                    source_location=conn.source_location,
-                ))
+                new_edges.append(
+                    CombEdge(
+                        src=actual,
+                        dst=formal,
+                        kind=DependencyKind.HIER_PORT_CONN,
+                        via=conn.instance_hier,
+                        source_location=conn.source_location,
+                    )
+                )
             if conn.direction in ("output", "inout"):
-                new_edges.append(CombEdge(
-                    src=formal, dst=actual,
-                    kind=DependencyKind.HIER_PORT_CONN,
-                    via=conn.instance_hier,
-                    source_location=conn.source_location,
-                ))
+                new_edges.append(
+                    CombEdge(
+                        src=formal,
+                        dst=actual,
+                        kind=DependencyKind.HIER_PORT_CONN,
+                        via=conn.instance_hier,
+                        source_location=conn.source_location,
+                    )
+                )
         if new_edges:
             d.comb_edges.extend(new_edges)
 
@@ -267,7 +280,7 @@ class StructuralGraph:
         GUARD_KINDS = {
             DependencyKind.CONDITIONAL,
         }
-        reg_q_names = {r.q_name() for r in d.registers.values()}
+        {r.q_name() for r in d.registers.values()}
 
         truncated = False
         for e in d.comb_edges:
@@ -295,8 +308,7 @@ class StructuralGraph:
                 # registers.
 
             if (added_data + added_guard) >= MAX_EDGES and not truncated:
-                self.warnings.append(
-                    f"structural edge cap ({MAX_EDGES}) reached; truncating.")
+                self.warnings.append(f"structural edge cap ({MAX_EDGES}) reached; truncating.")
                 truncated = True
                 break
 
@@ -338,11 +350,12 @@ class StructuralGraph:
           fanout (Manual §F).
         """
         d = self.design
-        top_inputs = [p.hierarchical_name for p in d.top_ports()
-                      if p.direction.value == "input"
-                      and p.hierarchical_name not in self.control_signals]
-        top_outputs = {p.hierarchical_name for p in d.top_ports()
-                       if p.direction.value == "output"}
+        top_inputs = [
+            p.hierarchical_name
+            for p in d.top_ports()
+            if p.direction.value == "input" and p.hierarchical_name not in self.control_signals
+        ]
+        top_outputs = {p.hierarchical_name for p in d.top_ports() if p.direction.value == "output"}
         regs = list(d.registers.values())
         reg_by_q: dict[str, Register] = {r.q_name(): r for r in regs}
 
@@ -360,8 +373,9 @@ class StructuralGraph:
         # register Q node (stops there); returns reached signals +
         # per-hop via labels.
         # ------------------------------------------------------------------
-        def comb_sweep(start: str, allow_through_reg_q: bool = False
-                       ) -> tuple[set[str], dict[str, list[str]]]:
+        def comb_sweep(
+            start: str, allow_through_reg_q: bool = False
+        ) -> tuple[set[str], dict[str, list[str]]]:
             """BFS combinational fanout from ``start``.
 
             If ``allow_through_reg_q`` is False (default), traversal
@@ -382,7 +396,8 @@ class StructuralGraph:
                     for nxt in sorted(self.data_fanout.get(node, ())):
                         if nxt in visited:
                             continue
-                        visited.add(nxt); reached.add(nxt)
+                        visited.add(nxt)
+                        reached.add(nxt)
                         nv = vpath + [self._via_label(node, nxt)]
                         vias[nxt] = nv
                         if nxt in reg_by_q and not allow_through_reg_q:
@@ -396,7 +411,8 @@ class StructuralGraph:
             if depth >= MAX_COMB_DEPTH and queue:
                 self.warnings.append(
                     f"combinational depth cap ({MAX_COMB_DEPTH}) reached "
-                    f"from {start}; further paths truncated.")
+                    f"from {start}; further paths truncated."
+                )
             return reached, vias
 
         # ------------------------------------------------------------------
@@ -404,40 +420,55 @@ class StructuralGraph:
         # ------------------------------------------------------------------
         pid = [0]
 
-        def add(start: str, end: str, cls: TimingPathClass,
-                launch: str | None, capture: str | None,
-                via: list[str]) -> None:
+        def add(
+            start: str,
+            end: str,
+            cls: TimingPathClass,
+            launch: str | None,
+            capture: str | None,
+            via: list[str],
+        ) -> None:
             pid[0] += 1
             sp = StructuralPath(
                 id=f"sp{pid[0]:04d}",
-                startpoint=start, endpoint=end,
+                startpoint=start,
+                endpoint=end,
                 path_class=cls,
-                launch_clock=launch, capture_clock=capture,
+                launch_clock=launch,
+                capture_clock=capture,
                 combinational_via=list(via),
             )
             if cls is TimingPathClass.CDC:
                 sp.cross_domain = True
-                sp.evidence.append(
-                    f"structural crossing: launch={launch}, capture={capture}")
+                sp.evidence.append(f"structural crossing: launch={launch}, capture={capture}")
                 self.cdc_paths.append(sp)
             else:
                 self.paths.append(sp)
 
         seen: set[tuple[str, str, str]] = set()
 
-        def addp(start: str, end: str, cls: TimingPathClass,
-                 launch: str | None, capture: str | None,
-                 via: list[str]) -> None:
+        def addp(
+            start: str,
+            end: str,
+            cls: TimingPathClass,
+            launch: str | None,
+            capture: str | None,
+            via: list[str],
+        ) -> None:
             key = (start, end, cls.value)
             if key in seen:
                 return
             seen.add(key)
             add(start, end, cls, launch, capture, via)
 
-        def report_endpoints(start: str, sig: str, v: list[str],
-                             cls_reg: TimingPathClass,
-                             launch: str | None,
-                             start_is_reg_q: bool) -> None:
+        def report_endpoints(
+            start: str,
+            sig: str,
+            v: list[str],
+            cls_reg: TimingPathClass,
+            launch: str | None,
+            start_is_reg_q: bool,
+        ) -> None:
             """Emit paths for endpoints reached at ``sig`` when
             sweeping from ``start``.  ``start_is_reg_q`` distinguishes
             input-side sweeps (where landing on a reg Q is a REG
@@ -450,29 +481,30 @@ class StructuralGraph:
                     continue
                 capture = _clk_leaf(r.clock_signal)
                 is_cdc = bool(launch and capture and launch != capture)
-                cls = (TimingPathClass.CDC if is_cdc else cls_reg)
+                cls = TimingPathClass.CDC if is_cdc else cls_reg
                 addp(start, r.hierarchical_name, cls, launch, capture, v)
             # If sig IS a register Q by name
             if sig in reg_by_q:
                 r = reg_by_q[sig]
                 if r.hierarchical_name != start and sig not in [
-                        rr.hierarchical_name
-                        for rr in signal_feeds_d_of.get(sig, ())]:
+                    rr.hierarchical_name for rr in signal_feeds_d_of.get(sig, ())
+                ]:
                     capture = _clk_leaf(r.clock_signal)
                     is_cdc = bool(launch and capture and launch != capture)
-                    cls = (TimingPathClass.CDC if is_cdc else cls_reg)
+                    cls = TimingPathClass.CDC if is_cdc else cls_reg
                     addp(start, r.hierarchical_name, cls, launch, capture, v)
                 # Register-as-output: only when starting from THIS
                 # register and at zero hops.
                 if start_is_reg_q and sig == start and sig in top_outputs:
-                    addp(start, sig, TimingPathClass.REG_TO_OUTPUT,
-                         launch, None, v)
+                    addp(start, sig, TimingPathClass.REG_TO_OUTPUT, launch, None, v)
             else:
                 # sig is a plain output port (not also a register Q).
                 if sig in top_outputs:
-                    out_cls = (TimingPathClass.REG_TO_OUTPUT
-                               if cls_reg == TimingPathClass.REG_TO_REG
-                               else TimingPathClass.INPUT_TO_OUTPUT)
+                    out_cls = (
+                        TimingPathClass.REG_TO_OUTPUT
+                        if cls_reg == TimingPathClass.REG_TO_REG
+                        else TimingPathClass.INPUT_TO_OUTPUT
+                    )
                     addp(start, sig, out_cls, launch, None, v)
 
         # ------------------------------------------------------------------
@@ -482,10 +514,14 @@ class StructuralGraph:
             reached, vias = comb_sweep(inp)
             for sig in sorted(reached):
                 v = vias.get(sig, [])
-                report_endpoints(inp, sig, v,
-                                 cls_reg=TimingPathClass.INPUT_TO_REG,
-                                 launch=None,
-                                 start_is_reg_q=False)
+                report_endpoints(
+                    inp,
+                    sig,
+                    v,
+                    cls_reg=TimingPathClass.INPUT_TO_REG,
+                    launch=None,
+                    start_is_reg_q=False,
+                )
 
         # ------------------------------------------------------------------
         # REG -> REG (including CDC) / REG -> OUTPUT
@@ -496,10 +532,14 @@ class StructuralGraph:
             reached, vias = comb_sweep(q)
             for sig in sorted(reached):
                 v = vias.get(sig, [])
-                report_endpoints(q, sig, v,
-                                 cls_reg=TimingPathClass.REG_TO_REG,
-                                 launch=launch,
-                                 start_is_reg_q=(sig == q))
+                report_endpoints(
+                    q,
+                    sig,
+                    v,
+                    cls_reg=TimingPathClass.REG_TO_REG,
+                    launch=launch,
+                    start_is_reg_q=(sig == q),
+                )
 
     # ------------------------------------------------------------------
     # Utilities
@@ -518,8 +558,7 @@ class StructuralGraph:
 
 
 def _signal_exists(d: Design, hier: str) -> bool:
-    return (hier in d.nets or hier in d.ports or hier in d.registers
-            or hier in d.instances)
+    return hier in d.nets or hier in d.ports or hier in d.registers or hier in d.instances
 
 
 def _clk_leaf(clk_signal: str | None) -> str | None:
