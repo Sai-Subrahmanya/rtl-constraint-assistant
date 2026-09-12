@@ -2,13 +2,15 @@
 Artifact management for RCA runs (Manual §57, §58).
 
 Every RCA invocation produces a deterministic output directory containing
-JSON / text / SDC artifacts and a ``manifest.json`` that records hashes
-of inputs, tool versions, and the configuration used.
+JSON / text / SDC artifacts and a run-local ``run_manifest.json`` that records
+hashes of inputs, tool versions, and the configuration used.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +40,12 @@ class RunManifest:
     artifact_hashes: dict[str, str] = field(default_factory=dict)
     tool_identity: dict[str, Any] = field(default_factory=dict)
     input_hashes: dict[str, Any] = field(default_factory=dict)
+    # Execution evidence is descriptive only. It never replaces manifest
+    # hashes as cache authority, QoR as QoR authority, or the execution ledger.
+    execution_mode: str = ""  # explicit MOCK or REAL boundary label
+    execution_status: str = ""
+    failure_classification: str = ""
+    environment_fingerprint: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -57,11 +65,15 @@ class RunManifest:
             "artifact_hashes": self.artifact_hashes,
             "tool_identity": self.tool_identity,
             "input_hashes": self.input_hashes,
+            "execution_mode": self.execution_mode,
+            "execution_status": self.execution_status,
+            "failure_classification": self.failure_classification,
+            "environment_fingerprint": self.environment_fingerprint,
             "extra": self.extra,
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "RunManifest":
+    def from_dict(cls, d: dict[str, Any]) -> RunManifest:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
@@ -94,11 +106,49 @@ class ArtifactManager:
         log.debug("Wrote JSON artifact %s", p)
         return p
 
+    def write_json_atomic(self, rel: str, data: Any) -> Path:
+        """Atomically replace one JSON artifact after fully serializing it.
+
+        Existing run artifacts remain authoritative. This is used by the
+        optimizer execution ledger so an interrupted coordinator cannot leave
+        a partially-written ledger that appears complete.
+        """
+        p = self.path(rel)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        serialized = json.dumps(data, indent=2, sort_keys=False, default=str) + "\n"
+        fd, temporary_name = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".tmp", dir=p.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as temporary:
+                temporary.write(serialized)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_name, p)
+        except Exception:
+            try:
+                os.unlink(temporary_name)
+            except OSError:
+                pass
+            raise
+        log.debug("Atomically wrote JSON artifact %s", p)
+        return p
+
     def read_json(self, rel: str) -> Any:
         return json.loads(self.path(rel).read_text(encoding="utf-8"))
 
     def write_manifest(self, manifest: RunManifest) -> Path:
+        """Write a non-run-scoped manifest for legacy callers."""
         return self.write_json("manifest.json", manifest.to_dict())
+
+    def write_manifest_to(self, run_id: str, manifest: RunManifest) -> Path:
+        """Atomically write the sole authoritative manifest for one EDA run.
+
+        Run artifacts and the cache read ``run_manifest.json``.  Keeping one
+        evidence file prevents a partially updated compatibility copy from
+        diverging from the cache/provenance authority.
+        """
+        return self.write_json_atomic(
+            str(Path("runs") / run_id / "run_manifest.json"), manifest.to_dict()
+        )
 
     def candidate_dir(self, candidate_id: str) -> Path:
         d = self.runs_dir / candidate_id

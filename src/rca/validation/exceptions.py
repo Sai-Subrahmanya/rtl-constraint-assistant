@@ -7,8 +7,14 @@ inconsistencies)."""
 
 from __future__ import annotations
 
-from ..constraint_model import Constraint, ConstraintSet
+from ..constraint_model import ConstraintSet
 from ..design_model import Design
+
+# Used to determine whether a timing exception has been formally verified.
+# When no formal backend is attached, verify_exceptions uses the
+# ConservativeFormalBackend, which returns UNRESOLVED for every query.
+from ..exceptions.formal_backend import FormalBackend
+from ..exceptions.verifier import verify_exceptions
 from ..timing_model import TimingGraph
 from ..utils.enums import (
     ClockDomainRelationship,
@@ -18,19 +24,15 @@ from ..utils.enums import (
     ValidationCategory,
     VerificationStatus,
 )
-from .base import ValidationIssue, ValidationReport, _issue
-
-# Used to determine whether a timing exception has been formally verified.
-# When no formal backend is attached, verify_exceptions uses the
-# ConservativeFormalBackend, which returns UNRESOLVED for every query.
-from ..exceptions.verifier import verify_exceptions
 from ..utils.logging import get_logger
+from .base import ValidationReport, _issue
 
 log = get_logger("validation.exceptions")
 
 
 def validate_exceptions(design: Design | None, tg: TimingGraph | None,
-                        cset: ConstraintSet, report: ValidationReport) -> None:
+                        cset: ConstraintSet, report: ValidationReport,
+                        formal_backend: FormalBackend | None = None) -> None:
     report.checks_run.append("exceptions")
     exc_types = (ConstraintType.SET_FALSE_PATH, ConstraintType.SET_MULTICYCLE_PATH,
                  ConstraintType.SET_MIN_DELAY, ConstraintType.SET_MAX_DELAY)
@@ -44,7 +46,7 @@ def validate_exceptions(design: Design | None, tg: TimingGraph | None,
             try:
                 if cyc is None or int(cyc) < 0:
                     raise ValueError
-            except Exception:
+            except (TypeError, ValueError):
                 _issue(report, Severity.ERROR, ValidationCategory.EXCEPTION,
                        ErrorCode.EXCEPTION_BAD_CYCLES,
                        f"set_multicycle_path {c.id} has invalid cycle count {cyc!r}.",
@@ -105,7 +107,7 @@ def validate_exceptions(design: Design | None, tg: TimingGraph | None,
     # Never conclude an exception is safe merely because it may improve
     # timing.  If formal verification is unavailable (the default
     # ConservativeFormalBackend), mark it UNRESOLVED / UNVERIFIED.
-    _record_verification_state(design, tg, cset, report)
+    _record_verification_state(design, tg, cset, report, formal_backend=formal_backend)
 
     report.exception_summary = {
         "exception_count": sum(1 for c in cset if c.type in exc_types and not c.disabled),
@@ -114,7 +116,8 @@ def validate_exceptions(design: Design | None, tg: TimingGraph | None,
 
 def _record_verification_state(design: Design | None, tg: TimingGraph | None,
                                cset: ConstraintSet,
-                               report: ValidationReport) -> None:
+                               report: ValidationReport,
+                               formal_backend: FormalBackend | None = None) -> None:
     """Surface the formal-verification state of timing exceptions.
 
     Uses the existing ``verify_exceptions`` harness (Step 8) which feeds a
@@ -130,14 +133,28 @@ def _record_verification_state(design: Design | None, tg: TimingGraph | None,
     if not exc_ids:
         return
     try:
-        vrep = verify_exceptions(cset, design=design, tg=tg)
-    except Exception as exc:
-        log.warning("exception verification skipped: %s", exc)
+        vrep = verify_exceptions(cset, design=design, tg=tg, backend=formal_backend)
+    except Exception as exc:  # noqa: BLE001 - external formal/backend safety boundary
+        log.warning("exception verification failed: %s", exc)
+        _issue(report, Severity.ERROR, ValidationCategory.EXCEPTION,
+               ErrorCode.EXCEPTION_VERIFICATION_ERROR,
+               "Formal exception verification aborted before an outcome was produced.",
+               suggestion="Correct the formal backend failure; do not treat exceptions as proven.",
+               blocking=True, resolution_status="UNRESOLVED",
+               evidence={"error": f"{type(exc).__name__}: {exc}"},
+               origin="exceptions.verifier")
         return
     for r in vrep:
         if r.constraint_id not in exc_ids:
             continue
         vs = r.verification_status
+        verification = r.verification.to_dict() if r.verification is not None else {}
+        evidence = {
+            "verification": verification,
+            "analysis": dict(r.evidence or {}),
+            "risk": r.risk.value,
+            "emission_status": r.emission_status.value,
+        }
         if vs == VerificationStatus.UNRESOLVED:
             _issue(report, Severity.INFO, ValidationCategory.EXCEPTION,
                    ErrorCode.EXCEPTION_UNVERIFIED,
@@ -148,8 +165,27 @@ def _record_verification_state(design: Design | None, tg: TimingGraph | None,
                    suggestion=("Mark the exception safe only after formal "
                                "verification or explicit user confirmation."),
                    blocking=False, resolution_status="UNRESOLVED",
-                   evidence=dict(r.evidence or {}),
-                   origin="exceptions.verifier")
+                   evidence=evidence, origin="exceptions.verifier")
+        elif vs == VerificationStatus.INVALID:
+            _issue(report, Severity.ERROR, ValidationCategory.EXCEPTION,
+                   ErrorCode.EXCEPTION_FORMAL_INVALID,
+                   f"Timing exception {r.constraint_id} "
+                   f"({r.constraint_type}) is INVALID: formal verification "
+                   f"reported a counterexample or structural contradiction.",
+                   constraint_id=r.constraint_id,
+                   suggestion="Remove or correct the exception; inspect preserved formal counterexample artifacts.",
+                   blocking=True, resolution_status="RESOLVED",
+                   evidence=evidence, origin="exceptions.verifier")
+        elif vs == VerificationStatus.ERROR:
+            _issue(report, Severity.ERROR, ValidationCategory.EXCEPTION,
+                   ErrorCode.EXCEPTION_VERIFICATION_ERROR,
+                   f"Timing exception {r.constraint_id} "
+                   f"({r.constraint_type}) could not be verified because the "
+                   f"formal backend reported an error.",
+                   constraint_id=r.constraint_id,
+                   suggestion="Correct the formal proof job or backend error; do not treat this exception as proven.",
+                   blocking=True, resolution_status="UNRESOLVED",
+                   evidence=evidence, origin="exceptions.verifier")
 
 
 def validate_scenarios(cset: ConstraintSet, report: ValidationReport,

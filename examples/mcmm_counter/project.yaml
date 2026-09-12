@@ -41,6 +41,7 @@ flow:
   output_dir: output
 optimization:
   enabled: true
+  workers: 1  # bounded complete-candidate evaluations; raise to 2..8 if local resources permit
   max_iterations: 4
   max_eda_runs: 30
   max_runtime_minutes: 5

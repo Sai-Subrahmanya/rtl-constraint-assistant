@@ -16,9 +16,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
-import time as _time
 
+from ..constraint_model import Constraint
 from ..utils.enums import VerificationStatus
+from ..utils.hashing import stable_hash
 
 
 @dataclass
@@ -39,11 +40,18 @@ class VerificationResult:
     runtime_seconds: float | None = None
     message: str = ""
     source_constraint_id: str | None = None
+    # Bound only by ``bind_verification_result`` after the backend returns.
+    # It distinguishes a proof for the current canonical exception from an
+    # identically named stale result without using a timestamp as identity.
+    constraint_semantic_identity: str = ""
+    formal_evidence_identity: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "constraint_id": self.constraint_id,
             "source_constraint_id": self.source_constraint_id or self.constraint_id,
+            "constraint_semantic_identity": self.constraint_semantic_identity or None,
+            "formal_evidence_identity": self.formal_evidence_identity or None,
             "status": self.status.value,
             "property_checked": self.property_checked,
             "evidence": dict(self.evidence),
@@ -169,3 +177,50 @@ class MockFormalBackend(FormalBackend):
                 evidence={"cycles": cycles},
                 message="mock: no verdict configured → UNRESOLVED"), constraint_id)
         return self._fill(v, constraint_id)
+
+
+def bind_verification_result(result: VerificationResult, constraint: Constraint) -> VerificationResult:
+    """Bind returned formal evidence to immutable current UCM semantics.
+
+    A formal backend receives a selector, not a mutable constraint object. This
+    post-backend binding keeps the canonical UCM source authoritative and makes
+    replay/staleness checks possible. It does not upgrade any status.
+    """
+    semantic = stable_hash(constraint.to_canonical_dict())
+    result.constraint_id = constraint.id
+    result.source_constraint_id = constraint.id
+    result.constraint_semantic_identity = semantic
+    result.formal_evidence_identity = stable_hash({
+        "schema": "rca-formal-evidence-v1",
+        "constraint_id": constraint.id,
+        "constraint_semantic_identity": semantic,
+        "status": result.status.value,
+        "property_checked": result.property_checked,
+        "tool": result.tool,
+        "tool_version": result.tool_version,
+        # Evidence is a retained observation; the hash is not a proof claim.
+        "evidence": _portable_evidence(result.evidence),
+        "counterexample": _portable_evidence(result.counterexample),
+    })
+    return result
+
+
+def formal_result_is_current(result: VerificationResult, constraint: Constraint) -> bool:
+    """Return whether an evidence result is explicitly bound to this UCM item."""
+    return bool(result.formal_evidence_identity and result.constraint_id == constraint.id
+                and result.constraint_semantic_identity == stable_hash(constraint.to_canonical_dict()))
+
+
+def _portable_evidence(value: Any) -> Any:
+    """Strip host-specific absolute locations from a formal evidence identity."""
+    if isinstance(value, dict):
+        return {str(key): _portable_evidence(item) for key, item in sorted(value.items())}
+    if isinstance(value, (list, tuple)):
+        return [_portable_evidence(item) for item in value]
+    if isinstance(value, str):
+        # Evidence retains its actual locator separately. Its deterministic
+        # identity must not differ solely because a checkout root differs.
+        from pathlib import Path
+        path = Path(value)
+        return path.name if path.is_absolute() else value
+    return value

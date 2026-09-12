@@ -27,6 +27,7 @@
 16. [Optimization & Pareto Loop](#16-optimization-and-pareto)
 17. [Web Dashboard](#17-web-dashboard)
 18. [Docker](#18-docker)
+18.2. [Constraint Release Baseline and Package](#182-constraint-release-baseline-and-package)
 19. [Known Gaps and Roadmap](#19-known-gaps)
 20. [Troubleshooting / FAQ](#20-faq)
 
@@ -216,7 +217,7 @@ rtl-constraint-assistant/
 |---|---|---|
 | `pyproject.toml` | 68 | PEP-621 project metadata, build system, dependencies, entry points, pytest/ruff/mypy config. |
 | `Makefile` | 44 | Convenience targets: `install`, `dev-install`, `test`, `test-cov`, `lint`, `typecheck`, `clean`, `example`, `example-pipeline`, `example-multiclock`, `dashboard`. |
-| `Dockerfile` | 34 | Reproducible container with Debian trixie, Python 3, Yosys, build tools, RCA installed via pip, optional OpenSTA build (commented out). Entrypoint `rca`, port 8765 for dashboard. |
+| `Dockerfile` | — | Default RCA/Python runtime plus explicit `open-source-yosys` target. No default OpenSTA/PDK/commercial software or runtime tool download; entrypoint is `rca`, port 8765 for dashboard. |
 | `LICENSE` | 21 | MIT license. |
 | `README.md` | 221 | Quick-start overview, architecture diagram, CLI list, installation. |
 | `.gitignore` | 22 | Excludes bytecode, virtualenvs, caches, build artifacts, example output dirs, IDE files. |
@@ -372,26 +373,29 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | `conflicts.py` | ~420 | Conflict and overlap/shadow detection (§42): duplicate/conflicting clocks, IO delays, latency/uncertainty, min/max delay, plus Step-13 precedence-aware user-vs-inference conflicts and contradictory exceptions. |
 | `coverage.py` | ~661 | Coverage analyzer (§43): clock-source, input/output timing path, reg-to-reg, CDC path, and clock-relationship coverage. `UNKNOWN` when graph unavailable; `NOT_APPLICABLE` when zero applicable; retains numerator/denominator evidence. |
 | `completeness.py` | ~150 | Step-13 completeness / missing-info: unresolved clock relationships, generated-clock transforms, missing IO timing, unresolved timing environment. Never invents a value. |
-| `exceptions.py` | ~260 | Exception sanity (§14) + scenario coherence (§15). Step-13: records formal-verification state via `verify_exceptions`; unverified ⇒ `EXCEPTION_UNVERIFIED`, never concluded safe. |
+| `exceptions.py` | ~300 | Exception sanity (§14) + scenario coherence (§15). Step-13 records formal-verification state via `verify_exceptions`; Step-14 accepts an optional `FormalBackend`, exposes counterexamples as blocking `EXCEPTION_FORMAL_INVALID`, backend errors as blocking `EXCEPTION_VERIFICATION_ERROR`, and retains unproven evidence as `EXCEPTION_UNVERIFIED`. |
 | `sdc_import.py` | ~120 | Step-13 SDC import/parse classification (§16/Req 10): consumes importer diagnostics and classifies `SYNTAX_INVALID / SEMANTIC_INVALID / INCOMPLETE / COMPLETE / UNRESOLVED` without re-parsing. |
 | `backend.py` | ~50 | Backend capability (§16): preflight via the chosen `SDCBackend`; vendor syntax checks stay behind the backend abstraction. |
 
-### 5.11 `src/rca/exceptions/` — exception effectiveness & formal (WP-K)
+### 5.11 `src/rca/exceptions/` — exception effectiveness & formal (WP-K, Step 14 adapter)
 
-| File | Lines | Purpose |
-|---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `analyzer.py` | ~70 | Classifies false paths and multicycle paths by effectiveness: *necessary* (blocks a real failing path), *useless* (does not intersect any failing path — shadowed or redundant), *harmful* (hides a real timing problem that would otherwise be caught). Hooks into the QoR loop. |
-| `verifier.py` | ~60 | Orchestrates formal verification of exceptions via `FormalBackend`; defaults to "unverified" with a CONFIDENCE.LOW marker if no formal backend is connected. |
-| `formal_backend.py` | ~50 | Abstract formal backend (interface reserved for SymbiYosys/VC Formal/Conformal LEC plug-in). The default implementation returns `UNVERIFIED`. |
+| File | Purpose |
+|---|---|
+| `__init__.py` | Re-exports the structural, verification, and concrete adapter APIs. |
+| `analyzer.py` | Classifies false paths and multicycle paths by effectiveness: *necessary* (blocks a real failing path), *useless* (does not intersect any failing path — shadowed or redundant), *harmful* (hides a real timing problem that would otherwise be caught). Hooks into the QoR loop. |
+| `verifier.py` | Sole formal orchestration path. Retains UCM `scenario_ids` in the proof input, dispatches false-path/multicycle proofs through `FormalBackend`, and defaults to the conservative UNRESOLVED backend. |
+| `formal_backend.py` | Vendor-neutral `FormalBackend` / `VerificationResult` contract plus conservative and deterministic mock implementations. |
+| `symbiyosys.py` | **Step 14.** Concrete `SymbiYosysFormalBackend`: safely invokes explicit user-authored `.sby` jobs, requires an unambiguous SBY `PASS` plus exit code 0 for `VERIFIED`, retains job/tool/run/counterexample provenance, and otherwise stays UNRESOLVED or reports an error. |
+
+A timing exception selector is not itself a formal property. RCA therefore never synthesizes an assertion from an SDC selector: the user-owned `.sby` collateral supplies design-specific temporal assumptions and assertions, and `formal.proofs` maps that job to the exact UCM exception ID. This keeps UCM/SDC vendor-neutral and preserves the no-fabrication invariant.
 
 ### 5.12 `src/rca/equivalence/` — semantic constraint comparison (WP-L)
 
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | — | Re-exports. |
-| `normalize.py` | ~70 | Constraint normalization (§50): before comparing two constraints, canonicalize their target lists, clock references, waveform representation, and unit formatting so semantically identical constraints compare equal even when textually different (e.g., `10000ps` vs `10ns`, `-name clk` vs positional). |
-| `semantic_compare.py` | ~100 | `compare(a: ConstraintSet, b: ConstraintSet) → ComparisonResult`: returns equivalence (EQUIVALENT / DIFFERENT / OVERLAPPING / CONFLICTING), plus added/removed/modified constraint lists. Used by `rca compare` and by the optimizer to detect regressions. |
+| `normalize.py` | ~70 | Constraint normalization (§50): before comparing two constraints, canonicalize their target lists, clock references, waveform representation, and unit formatting. This makes semantically identical constraints compare equal even when textually different (e.g., `10000ps` vs `10ns`, `-name clk` vs positional). |
+| `semantic_compare.py` | ~100 | `compare(a: ConstraintSet, b: ConstraintSet) → ComparisonResult`: returns semantic equivalence/differences plus added/removed/modified constraint lists, deterministic `scenario_differences`, and source provenance summaries separate from semantic identity. It projects `scenario_ids=[]` to all active scenarios only when both UCMs provide comparable active matrices; one-sided matrices remain UNKNOWN. Used by `rca compare` and by the optimizer to detect regressions. |
 
 ### 5.13 `src/rca/source/` — source manifest and resolution (WP-A)
 
@@ -405,7 +409,7 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | 3 | Re-exports `ProjectConfig`, `load_config`, `default_config`, `write_config`, `PROJECT_SCHEMA`, `SCHEMA_VERSION`, `write_schema`. |
-| `model.py` | 286 | Pydantic v2 models: `ProjectConfig` (project, rtl, clocks, constraints, io, scenarios, optimization, eda, output, validation, dashboard sections with nested models `ProjectMeta`, `RTLConfig`, `ClockSpec`, `IOSpec`, `ConstraintDefaults`, `ScenarioSpec`, `OptimizationConfig`, `EDAConfig`, `OutputConfig`, `ValidationConfig`, `DashboardConfig`). `load_config(path) → ProjectConfig` reads YAML and validates; `default_config(top)` returns a starter config (used by `rca init`); `write_config(cfg, path)` writes YAML. |
+| `model.py` | ~340 | Pydantic v2 models: `ProjectConfig` (project, sources, constraints, analysis, flow, optimization, scenarios, MCMM, and optional `formal` sections). Step 14 adds `FormalConfig` and `FormalProofSpec` for explicit SymbiYosys job mappings; paths resolve from the project YAML. `load_config(path) → ProjectConfig` reads YAML and validates; `default_config(top)` returns a starter config (used by `rca init`); `write_config(cfg, path)` writes YAML. |
 | `schema.py` | 282 | Derives a **JSON Schema** (draft 2020-12) from the Pydantic model for editor support / external validation. `PROJECT_SCHEMA` is the schema dict; `SCHEMA_VERSION` is a monotonic integer; `write_schema(path)` serializes it to disk (already written to `configs/schemas/project.schema.json`). |
 
 ### 5.15 `src/rca/eda/` — EDA backends: synthesis / STA / PPA (WP-M)
@@ -413,21 +417,66 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | — | Re-exports backend registry. |
-| `base.py` | ~80 | Abstract `EDABackend` ABC: `synthesize(design, cset, workdir) → SynthesizeResult`, `run_sta(design, cset, workdir, sdc_file) → TimingResult`, `name`, `capabilities()`. Also defines result dataclasses `SynthesizeResult`, `TimingResult` (wns, tns, whs, ths, worst_path, endpoints, area, power, cells, raw_log). |
-| `yosys/backend.py` | ~220 | **Yosys synthesis backend.** Writes a `synth.ys` script (`read_verilog`, `hierarchy -check -top <top>`, `proc; opt; fsm; opt; memory; opt`, `stat -top …`), executes Yosys via subprocess, parses stdout to extract cell counts and estimated area. Verifies the design elaborates and reports synthesis errors as diagnostics. Requires `yosys` on PATH (verified working: 24 cells on counter.sv — 8×DFFE, 8×AND, 7×XOR, 1×NOT). |
-| `opensta/backend.py` | ~180 | OpenSTA backend skeleton. Writes a `.tcl` command file (`read_verilog`, `link_design`, `read_sdc`, `report_wns`, `report_hold`, `report_power`) and invokes `sta` if available. Real STA requires a Liberty standard-cell library (not present in the sandbox); falls back to "not available" gracefully. |
+| `base.py` | — | `ToolBackend`, `ToolInfo`, and bounded `CommandRecord`. Tool invocation uses a deterministic argv list, explicit cwd, `shell=False`, timeout, bounded stdout/stderr tails, and POSIX process-group cleanup on timeout. Runtime environment values are intentionally not recorded. |
+| `preflight.py` | — | **Step 25.** Vendor-neutral `CapabilityStatus`, `CapabilityCheck`, and `EDAPreflight`. Performs non-executing selected-backend, executable/version, collateral, generated-SDC, include-dir, and output-location checks; produces a deterministic non-secret environment fingerprint. |
+| `yosys/backend.py` | — | **Yosys synthesis backend.** Writes a deterministic `synth.ys`, validates its exit status and fresh netlist output, records bounded command evidence, and removes old current-run netlist/stat outputs before a new invocation. Failure is classified rather than converted to QoR. |
+| `opensta/backend.py` | — | **OpenSTA backend.** Writes a deterministic Tcl/report map, requires readable Liberty and fresh synthesized netlist/SDC, validates every required report plus parseable setup/hold WNS, records bounded command evidence, and removes old timing-report outputs before invocation. Missing/malformed/failed/timed-out output has no QoR fallback. |
 | `synopsys/__init__.py` and `cadence/__init__.py` | — | Placeholder subpackages for future PrimeTime/DC and Tempus/Genus adapters. |
 | `common/__init__.py` | — | Re-exports shared EDA helpers. |
 | `common/mock.py` | ~120 | **Mock EDA backend** — a fast, deterministic surrogate used for CI, unit tests, and optimization smoke runs. It returns plausible timing results derived from clock period, register count, and SDC budgets (setup/hold slacks are modeled as `period - delay_estimate - budget`), and deterministically produces area/power numbers for Pareto smoke tests. It deliberately never crashes, so closed-loop tests always run. Imports guarded by `TYPE_CHECKING` to avoid a circular import with `qor.model`. |
 
-### 5.16 `src/rca/qor/` — QoR database + Pareto (WP-N, WP-O)
+#### Step 25 real-EDA execution contract
 
-| File | Lines | Purpose |
-|---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `model.py` | ~100 | `QoRResult`: per-candidate metrics (`constraint_set_id`, `wns_setup`, `tns_setup`, `wns_hold`, `tns_hold`, `area`, `dynamic_power`, `leakage_power`, `fmax`, `runtime_seconds`, `feasible`, `fail_reason`, `raw_report_path`, `scenario`). Knows how to serialize to JSON lines and deserialize. |
-| `metrics.py` | ~60 | Metric aggregation helpers: `combine_scenario_results(...)`, `score(cset, qor)` scalarization for ranking. |
-| `pareto.py` | ~170 | `ParetoFront`: non-dominated-sort over (setup-slack, hold-slack, -area, -power). `dominates(a,b)` returns true if a is no worse in all objectives and strictly better in at least one (using epsilon tolerance). `feasible(qr)` rejects candidates with negative WNS (setup or hold) or with constraint violations. Used by the optimizer to select the Pareto set (WP-O). Unit tested. |
+A `yosys_opensta` request is never interpreted as a request for mock data.
+Before launching either executable, RCA emits a typed `EDAPreflight` with
+checks for the selected execution boundary, a bounded safe version probe for
+each executable, RTL sources, include directories, readable Liberty collateral,
+the fresh generated SDC, and output locations. Checks are classified with
+`executable_missing`, `executable_found`, `version_discovered`,
+`collateral_missing`, `configuration_invalid`, `environment_ready`,
+`output_location_ready`, or `unsupported`. A found executable whose bounded
+version probe fails is intentionally not ready. Commercial execution is
+`unsupported`; Synopsys/Cadence support is restricted to their established SDC
+serializers.
+
+Tool command evidence is argv/cwd/timeout/return code, terminal execution
+classification (`execution_completed`, `execution_failed`, or
+`execution_timed_out`), and bounded output tails. There is no shell command
+string or serialized environment map; conventional credential-like command
+options and matching output are redacted from persisted evidence. A real flow
+removes run-local stale netlist/timing/stat/QoR/power outputs before tool launch.
+Nonzero, timeout,
+missing-output, and malformed-report paths do not yield canonical QoR, power,
+or a cache hit. A real timing violation is distinct: it has valid measured QoR
+and the normal `TIMING_FAIL` result.
+
+The sole run-local evidence file is `runs/<run-id>/run_manifest.json`. Its
+existing `RunManifest` records backend/tool versions, command provenance,
+input/output hashes, explicit `MOCK`/`REAL` execution mode, execution/failure
+state, preflight, configured power-report provenance, and a deterministic
+environment fingerprint. The
+fingerprint includes RCA/Python/platform/tool-version/Liberty/config identity,
+but excludes environment variables, timestamps, process IDs, random paths, and
+secrets. It is provenance only and does not alter the established cache-key
+contract. `QoRResult` remains canonical QoR, filesystem manifest/hash evidence
+remains cache authority, and SQLite stays advisory historical/query storage.
+
+`rca doctor project.yaml --json` is the operator-facing form of this bounded
+preflight. It reports RCA/Python, configuration context, configured SDC backend,
+selected real backend, Yosys/OpenSTA/SymbiYosys and Liberty readiness. The SDC
+that a real run creates is reported as an expected non-required doctor input;
+the real flow checks its generated copy before execution. An `AVAILABLE` probe
+is not a functional-flow or signoff claim.
+
+### 5.16 `src/rca/qor/` — canonical QoR, Pareto, and history repository (WP-N, WP-O)
+
+| File | Purpose |
+|---|---|
+| `model.py` | Canonical `QoRResult`, `CriticalPath`, and `Feasibility` model. Internal timing values are seconds and absent metrics remain `None`; persisted summaries are compatibility artifacts, not a second QoR model. |
+| `metrics.py`, `objectives.py`, `pareto.py` | Existing QoR comparison, objective, feasibility, and Pareto utilities. |
+| `repository.py` | **Step 21.** Local `sqlite3` historical-query sidecar at `<flow.output_dir>/qor.sqlite3`. It indexes existing QoR/manifests/candidates/MCMM evidence with schema migrations (`PRAGMA user_version` plus `schema_migrations`), WAL, foreign keys, FULL synchronous writes, and parameterized deterministic queries. It is not an EDA cache or artifact store. |
+
+The repository preserves run/candidate/session/scenario/cache/tool/constraint identity, artifacts/hashes, real-vs-proxy area distinction, nullable metrics, and report-derived power provenance. Existing `qor.json`, manifests, candidate JSONL, and optimizer JSON remain supported file artifacts. Its `rca history --import-legacy` path is explicit, deterministic, idempotent, and never rewrites those inputs; it prefers a retained `candidates.jsonl` snapshot and uses `optimizer_state.json` only when JSONL is absent.
 
 ### 5.17 `src/rca/optimizer/` — closed-loop multi-objective optimizer (WP-O)
 
@@ -436,8 +485,9 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 | `__init__.py` | — | Re-exports. |
 | `candidate.py` | ~90 | `Candidate`: wraps a `ConstraintSet` with an `id` (C000, C001…), a `parent_id`, `mutations_applied`, `feasible`, `qr: QoRResult | None`, and a `score`. |
 | `budget.py` | ~80 | `TimingBudgetAllocator`: apportions available slack across input/output delays and clock uncertainty as the optimizer tightens/loosens budgets (Manual §122 — timing-margin utilization). |
-| `base.py` | ~60 | Abstract `Optimizer` ABC with `step(...)` interface. |
-| `search.py` | ~220 | `ParetoSearchOptimizer`: closed-loop driver. Iterates: (1) score current candidates, (2) reject infeasible (WNS<0 or hold<0), (3) filter Pareto front, (4) mutate the best candidates (tune I/O delays, uncertainty, design rules within bounds and **only for TUNABLE constraints — FIXED/FORMAL/USER are never touched**), (5) invoke the EDA backend on each, (6) record QoR, (7) stop on `max_iterations`, `convergence` (front stable for N iterations), `no_improvement`, or `timeout`. Produces `OptimizationResult` (pareto_front, history, best, stop_reason, n_eda_runs, elapsed). |
+| `base.py` | — | Closed-loop optimizer, bounded candidate scheduling, candidate/QoR/Pareto selection, and the coordinator-owned execution-ledger projection attached to `OptimizationResult`. |
+| `execution.py` | — | **Step 23.** Typed execution/admission/submission/result/failure/cache/stop enums plus the deterministic per-invocation ledger. It is observability only, never a cache or QoR authority. |
+| `search.py` | ~220 | Candidate generation/mutation helpers. Only TUNABLE constraints are changed; FIXED/FORMAL/USER constraints are never touched. |
 
 ### 5.18 `src/rca/scenarios/` — MCMM scenario helpers (WP-P)
 
@@ -451,25 +501,35 @@ Package docstring describing RCA. Re-exports the public `__version__`.
 |---|---|---|
 | `__init__.py` | 9 | Placeholder/docstring. At present elaboration is performed inside `slang_adapter.py`; this package is reserved for parser-independent elaboration passes (parameter binding, generate unrolling, hierarchy flattening). |
 
-### 5.20 `src/rca/search/`
+### 5.20 `src/rca/search/` — deterministic search and knowledge reuse (Step 26)
 
 | File | Lines | Purpose |
 |---|---|---|
-| `__init__.py` | — | Reserved package for future "search for existing constraints" / knowledge-base lookup (Manual §146-149). |
+| `__init__.py` | — | Re-exports the typed offline knowledge/reuse API while preserving optimizer-search namespace separation. |
+| `knowledge.py` | ~1,000 | `KnowledgePattern`/`KnowledgeSuggestion`/`KnowledgeEngine` and explicit UCM acceptance. Reuses canonical UCM, Step-9 semantic normalization, provenance/evidence, and read-only SQLite projections; it is advisory only, never a second constraint model, parser, cache, or history authority. Strict JSON files are data-only and never execute Tcl/shell/Python/expressions. |
 
-### 5.21 `src/rca/artifacts/` — artifact & cache manager (WP-A, WP-N)
+Built-in patterns have declarative applicability requirements and no directly
+acceptable constraint template. Project UCM items are read-only indexes;
+history requires a hash-verified retained canonical snapshot and does not promote
+history to `VERIFIED`. Relevance ranking is deterministic lookup order, not a
+correctness probability. See `STEP26_KNOWLEDGE_REUSE.md` for the format,
+trust/applicability rules, acceptance boundary, and `rca knowledge` CLI.
+
+### 5.21 `src/rca/artifacts/` — artifact/provenance and cache authority (WP-A, WP-N)
+
+| File | Lines | Purpose |
+|---|---|---|
+| `manager.py` | `ArtifactManager` writes run directories and JSON/text artifacts; `RunManifest` records hashes, tool identity, artifact locators, and cache-relevant input evidence. Filesystem manifest/hash validation remains the experiment-reuse/cache authority. |
+
+The Step-21 SQLite sidecar indexes these existing artifacts only after they are written. It neither stores artifact contents nor changes cache lookup. A SQLite write failure leaves the physical artifact set, QoR, run status, and cache identity unchanged and is surfaced as a persistence warning for later explicit import/reconciliation.
+
+### 5.22 `src/rca/reports/` — timing and power report parsing
 
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | — | Re-exports. |
-| `manager.py` | ~140 | `ArtifactManager`: writes runs into `<results_dir>/runs/<timestamp>-<slug>/`, writes SDC files, QoR JSONL, manifests, optimization history, and UCM snapshots. Uses the deterministic hashes from `utils.hashing` to skip redundant EDA runs when inputs are identical (Manual §66, §153). |
-
-### 5.22 `src/rca/reports/` — human-readable reports
-
-| File | Lines | Purpose |
-|---|---|---|
-| `__init__.py` | — | Re-exports. |
-| `timing.py` | ~120 | `TimingReport`: builds structured timing summary (WNS, TNS, WHS, critical path, endpoints, per-domain breakdown). Also `design_report(design_summary, tg_summary, validation, coverage, constraints) → str` which is the Rich table shown by `rca report`. |
+| `timing.py` | ~120 | Parses OpenSTA-style timing summaries and Yosys area/cell statistics conservatively. |
+| `power.py` | ~300 | Parses only OpenROAD/OpenSTA `report_power` group summaries with explicit units and one total row; returns report provenance/status for the existing QoR model and never estimates power. |
 
 ### 5.23 `src/rca/explanation/` — natural-language explainability (Manual §151)
 
@@ -560,52 +620,73 @@ Pareto history. These are **not** versioned.
 
 ```
 tests/
-├── __init__.py
-├── conftest.py                 ← adds src/ to sys.path
-├── unit/
-│   ├── __init__.py
-│   ├── test_units.py           (7 tests)
-│   ├── test_parser.py          (7 tests)
-│   ├── test_constraints.py     (5 tests)
-│   ├── test_sdc_parser.py      (4 tests)
-│   └── test_pareto.py          (6 tests)
-├── golden/__init__.py          (empty, reserved)
-├── integration/__init__.py     (empty, reserved)
-├── regression/__init__.py      (empty, reserved)
-└── stress/__init__.py          (empty, reserved)
+├── unit/          ← isolated subsystem contracts
+├── golden/        ← semantic/reference fixtures and assertions
+├── integration/   ← complete deterministic workflows and CLI boundaries
+├── stress/        ← bounded-concurrency and repeatability workloads
+└── support/       ← shared deterministic test-only evaluators
 ```
 
-### 8.2 What is covered (28 tests total, all passing)
+The regression gate is intentionally a thin runner rather than a duplicate test
+tree: `scripts/regression/run_regression.py` composes the appropriate unit,
+golden, integration, and stress tests and preserves their pytest results.
 
-| Test file | Tests | Covers |
-|---|---|---|
-| `test_units.py` | 7 | `to_ns/ps/fs`, `parse_time` (ns/ps/fs/sec), `parse_freq` (MHz/GHz/kHz/Hz → period), period↔freq inversion, `stable_hash` determinism and collision-avoidance on small inputs, `hash_file`. |
-| `test_parser.py` | 7 | Parsing `examples/simple_counter/rtl/counter.sv` with pyslang: module/port/net/register counts, clock candidate detection (`clk`), reset detection (`rst_n`), register attributes (8-bit width, async active-low), port directions, zero diagnostics on a clean design, diagnostic emission for missing files. |
-| `test_constraints.py` | 5 | ConstraintSet add/query, SDC emission for generic and opensta backends (3 commands with correct targets/values), SDC import round-trip (import exported generic SDC → equivalent ConstraintSet), `emittable()` respects safe mode (LOW-confidence proposals suppressed in STRICT). |
-| `test_sdc_parser.py` | 4 | Parsing a hand-written 5-command SDC (create_clock + 2 input + 2 output delays) yields correct ConstraintSet, clock period value parses numerically (10 ns), unknown command produces a warning (not crash/error), and imported constraints carry `source_kind=IMPORT` with CONFIRMED status. |
-| `test_pareto.py` | 6 | `dominates` semantics, non-dominated Pareto extraction on a 3-candidate tradeoff set, infeasible (negative WNS) rejection, hold-failure rejection, Pareto-set cardinality on a known-good example, FIXED constraints preserved (not mutated) through optimizer candidate generation. |
+### 8.2 What is covered
+
+The suite covers time/unit conversion, parsing and inference, UCM constraints,
+SDC import/export and semantic comparison, validation/coverage/conflicts,
+formal-adapter conservatism, power-report evidence, flow/cache integrity,
+MCMM, QoR history, mutation/Pareto optimization, bounded scheduling, and
+execution-ledger evidence. The category boundaries and representative fixtures
+are maintained in `STEP24_VALIDATION.md`; that document is the source of truth
+for validation scope rather than a historical test-count snapshot.
 
 ### 8.3 Running tests
 
 ```bash
-make test            # pytest tests/ -v
-make test-cov        # adds coverage report
-python3 -m pytest tests/ -v
+make test                  # all default deterministic tests
+make test-golden           # semantic references
+make test-integration      # end-to-end mock/fake workflows
+make test-stress           # deterministic scheduler workloads
+make regression            # ordered per-suite summary
+make verify-environment    # non-mutating Python/package/tool checks
+make eda-diagnostic        # non-executing EDA/Liberty diagnostic
+make test-cov              # coverage report
 ```
 
-Current state: **28 passed, 0 failed, 1 cosmetic Pydantic V2 deprecation
-warning (now fixed in source by migrating to `ConfigDict`).**
+### 8.4 Validation taxonomy (Step 24)
 
-### 8.4 Reserved test trees
+The old reserved test trees are now active, complementary suites:
 
-`golden/`, `integration/`, `regression/`, `stress/` are scaffolded as Python
-packages (empty `__init__.py`) to be populated with:
+- **`tests/unit/`** isolates UCM, parser, validation, SDC, formal, power,
+  QoR-history, MCMM, optimizer, cache-boundary, concurrency, and ledger rules.
+- **`tests/golden/`** checks stable semantic references: timing corpus,
+  canonical SDC constructs, comparison verdicts, validation/coverage/conflict,
+  report-power evidence, MCMM aggregation, mutation, and ledger ordering.
+- **`tests/integration/`** runs complete local parse → infer → UCM → validate
+  → SDC → mock/fake-tool flow → QoR → optimization → artifacts/manifest/ledger
+  → SQLite history → CLI workflows. It also holds the opt-in real-EDA boundary.
+- **`tests/stress/`** uses short fixed workloads to exercise many repeated
+  candidate evaluations, 1/2/4 workers, deadlines/budgets, errors, cache
+  observations, MCMM, and repeatability without random workloads.
+- **`scripts/regression/run_regression.py`** invokes ordinary pytest gates in
+  core, golden, integration, stress order; it reports collected/passed/failed/
+  skipped/errors/elapsed per suite and returns non-zero on any failure.
 
-- **golden**: known-good SDC/UCM snapshots; CI diffs against them.
-- **integration**: end-to-end runs on each example invoking Yosys where
-  available and the mock backend otherwise.
-- **regression**: historical-bug reproductions.
-- **stress**: parameterized large designs / many clocks / many scenarios.
+Run `python scripts/regression/run_regression.py` for the standard gate set.
+Run `python scripts/setup/verify_environment.py` for required Python-package
+and optional-tool classification, and `python scripts/eda/diagnose_eda.py
+--config project.yaml` for non-executing EDA/Liberty readiness evidence.
+
+Optional real EDA is deliberately separated in
+`tests/integration/test_optional_real_eda.py` and marked `optional_real_eda`.
+It is skipped unless `RCA_RUN_REAL_EDA=1` and its exact prerequisites are
+provided. AVAILABLE means only a version probe completed; it does not claim
+that a real flow, a license, or signoff is functional. Missing optional tools
+never make mock-only validation pass by pretending to run EDA.
+
+See `STEP24_VALIDATION.md` for commands, normalization policy, failure matrix,
+artifact-integrity rules, and limitations.
 
 ---
 
@@ -615,6 +696,9 @@ packages (empty `__init__.py`) to be populated with:
 |---|---|
 | `docs/references.md` | Reference URLs per Manual §152: Synopsys TCM and white paper, Cadence Conformal CCD, OpenSTA, OpenROAD, Surelog/UHDM, slang, Yosys, and the UCSD timing-exceptions paper. |
 | `docs/decisions/ADR-001-universal-constraint-model.md` | Architecture Decision Record: why the UCM exists (vendor-neutral source of truth; SDC as derived rendering; strong typing with provenance), alternatives rejected (direct SDC strings, vendor-specific models with translators), consequences. |
+| `docs/decisions/ADR-002-validation-engine.md` | Architecture Decision Record: strengthen the one existing validation model rather than adding a competing Step-13 model. |
+| `docs/decisions/ADR-003-symbiyosys-formal-adapter.md` | Architecture Decision Record: use explicit user-authored SymbiYosys jobs through existing formal/validation abstractions; never generate a proof property from an SDC selector. |
+| `docs/STEP32_CONSTRAINT_RELEASE.md` | Deterministic release governance over an explicit Step-31-reviewed canonical UCM, exact MCMM scope, reproducible supplied-evidence package, SHA-256 verification, lifecycle, and the strict non-EDA-signoff boundary. |
 
 Placeholders for future docs:
 
@@ -748,11 +832,17 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca infer [CONFIG]` | Run inference only; prints the proposed ConstraintSet without generating SDC. | `--show-assumptions` |
 | `rca generate [CONFIG]` | Emit SDC from the current UCM (skip inference if a snapshot is present). | `--backend`, `--scenario NAME` |
 | `rca validate [CONFIG]` | Run the validator against the current UCM/design and print issues. | `--strict` |
-| `rca compare [CONFIG] --a FILE.sdc --b FILE.sdc` | Semantically compare two SDC files via normalization + `semantic_compare`. Prints equivalence verdict and added/removed/modified sets. |  |
+| `rca compare [CONFIG] --a FILE.sdc --b FILE.sdc` | Semantically compare two SDC files through the hardened SDC importer, normalization + `semantic_compare`. Prints equivalence/UNKNOWN verdict, field- and scenario-context differences, and added/removed/modified sets; `--json` emits deterministic machine output. | `--json` |
+| `rca release CONFIG --ucm REVIEWED.json --review APPROVED-REVIEW.json` | Read-only Step-32 assessment or explicit `--decision RELEASE|REVOKE` over an existing Step-31 review. It never creates/mutates review/UCM, auto-releases, generates SDC, runs EDA/formal, or claims external signoff. `--package-dir` explicitly writes a reproducible package only for a released record. | `--policy FILE`, `--scenario ID`, `--all-active-scenarios`, `--sdc FILE`, `--artifact KIND=PATH`, `--release-record`, `--supersede`, `--json` |
+| `rca release-verify PACKAGE` | Stateless checks of existing package hashes, UCM/semantic/review/evidence identities, exact scope, consistency, and released/revoked status. Never executes tools, mutates, repairs, or regenerates content. | `--json` |
 | `rca coverage [CONFIG]` | Print only the coverage metrics (clock/in/out %). |  |
 | `rca explain [CONFIG] [CONSTRAINT_ID]` | Print natural-language explanation(s) of one or all constraints (evidence, assumptions, source). |  |
-| `rca run-sta [CONFIG]` | Synthesize with Yosys and/or run OpenSTA with current SDC; print timing report. | `--eda {yosys,opensta,mock}`, `--sdc FILE` |
-| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization. | `--backend`, `--iterations N`, `--eda-runs-per-iter N`, `--timeout SECS`, `--eda {mock,yosys,opensta}` |
+| `rca doctor [CONFIG]` | Bounded, non-executing real-EDA/formal prerequisite evidence. It checks version probes and configured collateral; it does not run synthesis, STA, or proofs. | `--backend yosys_opensta`, `--json` |
+| `rca run-sta [CONFIG]` | Run only the explicit `mock` or `yosys_opensta` flow with current SDC; a real request fails closed when preflight is not ready. | `--backend {yosys_opensta,mock}`, `--sdc FILE`, `--force`, `--allow-partial-sdc` |
+| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization. It atomically persists an authoritative execution ledger and normal manifest before recording advisory history. Candidate concurrency is configured only with `optimization.workers` (1–8; default 1). | `--backend`, `--dashboard` |
+| `rca history` | Query the local `<flow.output_dir>/qor.sqlite3` sidecar, explicitly import existing run artifacts, or read the authoritative optimizer ledger without SQLite. Never executes EDA, optimization, or cache reuse. | `--config`, `--output-dir`, `--run-id`, `--candidate --session`, `--scenario`, `--constraint-set`, `--best {setup_wns,area,power}`, `--area-source {real,proxy}`, `--import-legacy`, `--optimization-ledger`, `--json` |
+| `rca knowledge list` / `search QUERY` / `show ID` | List, text-search, or inspect offline built-in/strict JSON/history knowledge items. No source, UCM, cache, or SQLite mutation occurs. Relevance is deterministic lookup order, never correctness. | `--knowledge FILE.json` (repeatable), `--history-output-dir`, `--json`; `search` also takes `--limit` |
+| `rca knowledge suggest [CONFIG]` | Build an in-memory project UCM view and return only advisory semantic matches. With a config, writes separate `knowledge_suggestions.json`; it has no acceptance action and never rewrites intent. | `--knowledge FILE.json`, `--history-output-dir`, `--limit-per-constraint`, `--json` |
 | `rca inspect [CONFIG] {module,port,net,register,clock,path}` | Structured inspection sub-tables of the design model (e.g. `rca inspect project.yaml port` prints all ports). |  |
 | `rca report [CONFIG]` | Human-readable design report (clocks, resets, domains, missing info, validation, constraint list) — Rich formatted. |  |
 | `rca dashboard [CONFIG]` | Start the FastAPI web dashboard (uvicorn). | `--port 8765`, `--open-browser/--no-open-browser`, `--host 0.0.0.0` |
@@ -801,13 +891,17 @@ constraints:
   false_paths: []
   multicycle_paths: []
 
-eda:
-  backend: mock         # yosys | opensta | mock
-  liberty: null
-  sdc_backend: generic
+flow:
+  # `flow.backend` is retained project/SDC configuration context. Select the
+  # execution boundary explicitly with `rca run-sta --backend ...`.
+  backend: generic
+  liberty: null         # required for real yosys_opensta execution
+  output_dir: output
+  tool_timeout_seconds: 600
 
 optimization:
   enabled: false
+  workers: 1              # bounded complete-candidate evaluations; 1..8, 1 is serial
   max_iterations: 8
   eda_runs_per_iteration: 4
   objectives: [setup_slack, hold_slack, area, power]
@@ -823,6 +917,87 @@ output:
 ```
 
 All values are validated by Pydantic; unknown keys raise an error.
+
+### Optional SymbiYosys exception verification (Step 14)
+
+Formal verification is opt-in and preserves the conservative default. To run a
+reviewed, user-authored SymbiYosys proof job when validating a particular UCM
+exception, add a top-level `formal:` block:
+
+```yaml
+formal:
+  backend: symbiyosys                 # default: conservative
+  symbiyosys_executable: sby          # optional; RCA_SYMBIYOSYS/PATH otherwise
+  work_dir: output/formal
+  timeout_seconds: 300
+  proofs:
+    - constraint_id: FP0001           # exact UCM false-path constraint ID
+      exception_kind: false_path      # false_path | multicycle
+      sby_file: formal/async_fifo.sby # user-authored proof collateral
+      task: async_fifo_fp             # optional SBY task
+```
+
+The `.sby` file owns the RTL/formal source list, top module, assumptions,
+assertions, engines, and any mode/corner setup. RCA does **not** infer a
+property from an SDC path selector. It invokes `sby -f -d <derived-run-dir>
+<file> [task]` without a shell; only a `PASS` marker and exit status zero
+returns `VERIFIED`. `FAIL` returns `INVALID` with preserved counterexample
+artifact paths. Missing mapping/tool/file, timeout, `UNKNOWN`, or no status
+marker stay `UNRESOLVED`; ambiguous/error outcomes are blocking verification
+errors. Relative proof and work paths are resolved from the project YAML.
+
+`rca validate`, `rca report`, and `rca coverage` use this configuration through
+the existing validation engine. By default (`formal.backend: conservative`),
+no external proof process runs and the established `EXCEPTION_UNVERIFIED`
+behavior remains unchanged.
+
+### Configured power report ingestion (Step 20)
+
+The only supported power input is an explicitly configured
+OpenROAD/OpenSTA-style `report_power` group-summary text file. It is consumed
+by a completed real `yosys_opensta` flow; RCA does not add `report_power` to a
+Tcl script, estimate activity, or claim to run a power engine.
+
+```yaml
+flow:
+  power_reports:
+    - format: openroad_report_power
+      path: reports/func_slow.power.rpt
+      scenario_id: FUNC_SLOW
+      # producer defaults to openroad_opensta; producer_version is optional
+```
+
+The report must identify the group table with Internal, Switching, Leakage,
+and Total columns, use one unambiguous final `Total` row, and declare its unit
+explicitly as W/Watts, mW, uW/µW, nW, or pW. Values are normalized to watts.
+Total maps to `QoRResult.power` and `power_total`; dynamic maps to
+Internal + Switching only when both cells are present; leakage maps directly.
+A literal zero is valid available evidence. Detailed parser classifications are
+`UNKNOWN` for missing/ambiguous report content, `UNAVAILABLE` for absent files,
+`MALFORMED` for structural/numeric parse failures, `INVALID` for semantic
+failures, and `UNSUPPORTED` for other formats/units; none receives a fabricated
+numeric total. These are `PowerParseStatus` values stored in
+`raw_reports["power"]["parsing_status"]`. Canonical `QoRResult.power_status`
+remains the historical `PowerStatus` vocabulary only: `AVAILABLE`,
+`UNAVAILABLE`, and compatibility-only `ESTIMATED`; every non-available parser
+classification is canonical `UNAVAILABLE` with all canonical power fields
+`None`.
+
+For MCMM, every mapping requires an active `scenario_id`; global fallback and
+duplicate mappings are rejected. A scenario with no usable power report leaves
+the global power objective unknown rather than averaging other scenarios. The
+configured source path, SHA-256, format/parser version, original/normalized
+unit, producer/producer version, discovered tool version, scenario/mode/corner,
+and diagnostics appear under the existing
+`QoRResult.raw_reports["power"]`, summary output, and existing run manifest.
+Report content and identity are part of the existing flow cache key. Mock flow
+always remains explicitly mock and power-unavailable. `rca run-sta`,
+`rca optimize`, and `rca report` display report-derived power and provenance;
+`rca report` only shows already-recorded QoR and does not run a tool.
+
+The checked-in fixture is representative syntax for tests, not a tool run in
+this repository. See `STEP20_POWER_REPORT.md` for detailed status and
+validation policy.
 
 ---
 
@@ -895,6 +1070,11 @@ generator can render per-scenario SDC with the appropriate `set_operating_condit
 / derate commands (backend-dependent). The optimizer loops over active
 scenarios when evaluating a candidate, combining QoR with worst-case WNS.
 
+When Step-14 SymbiYosys verification is configured, an exception's UCM
+`scenario_ids` are retained in proof provenance. RCA does not infer a
+per-corner property from that membership: the user-authored `.sby` job/task
+must explicitly establish the intended mode/corner assumptions.
+
 ---
 
 ## 16. Optimization and the Pareto Loop
@@ -924,6 +1104,52 @@ All FIXED constraints (USER clocks, USER clock groups, FORMALLY_VERIFIED
 exceptions) are immutable across mutations — the optimizer will never
 touch them, honoring Manual §128.
 
+### Bounded simultaneous candidate evaluation
+
+`optimization.workers` is a strict integer from **1** through **8** and the
+only concurrency control; it defaults to **1**. There is intentionally no CLI
+worker override or automatic sizing. At `workers: 1`, optimization follows the
+direct established serial code path and creates no executor. At higher values,
+RCA uses a bounded standard-library `ThreadPoolExecutor` only for independent,
+complete candidate evaluations. Candidate generation/deduplication, IDs,
+lineage, and task ordinals are fixed before submission; the coordinator applies
+outcomes in planned task order, never completion order.
+
+An MCMM candidate remains one task whose scenarios execute serially in existing
+scenario order and aggregate completely before the result becomes visible. The
+coordinator alone updates optimizer state, budget, Pareto/rank state and
+advisory history. A task's physical output ID contains a fresh invocation token,
+task ordinal, candidate ID, and scenario component, but those locator details
+are excluded from cache identity. The filesystem manifest/hash cache remains
+the sole cache authority. Worker tasks write normal flow artifacts/manifests
+then defer SQLite indexing; the coordinator indexes completed evidence in task
+order. Executor construction/submission errors fail closed as an optimization
+concurrency error rather than falling back to serial; individual task failures
+remain isolated candidates.
+
+Planned admission never dispatches a complete task that exceeds
+`max_eda_runs`. After a wall-clock deadline, no later wave is admitted, while
+already-started work completes safely. This can make an elapsed-time limit
+observe completed in-flight work; it does not promise a performance gain. Run
+`python scripts/benchmark_candidate_concurrency.py --workers 1,2,4` for the
+small controlled fake-evaluator measurement harness. See
+`STEP22_CANDIDATE_CONCURRENCY.md` and ADR-005 for the full contract.
+
+### Optimizer execution ledger
+
+Every `Optimizer.run()` now attaches an `OptimizationExecutionLedger` to the
+existing `OptimizationResult`. It records deterministic task ordinals, candidate
+lineage, typed planned/admitted/submitted/running/completed/failed/skipped/
+cancelled/blocked lifecycle evidence, ordered coordinator application, observed
+cache/EDA/MCMM/run/artifact facts, and a typed execution stop classification.
+It does not alter candidate semantics, cache keys, MCMM behavior, or Step 22
+scheduler ordering. `rca optimize` atomically writes
+`optimizer_execution_ledger.json`, `optimizer_state.json`, and
+`optimizer_execution_manifest.json` before advisory SQLite indexing. Inspect it
+without SQLite using `rca history --optimization-ledger [--json] --output-dir
+<dir>`. See `STEP23_OPTIMIZATION_OBSERVABILITY.md` and ADR-006 for the full
+contract and real-EDA reproducibility limits.
+
 ---
 
 ## 17. Web Dashboard
@@ -949,39 +1175,109 @@ port 8765.
 
 ## 18. Docker
 
-The `Dockerfile` provides a reproducible image:
+The `Dockerfile` provides a reproducible local **RCA runtime** rather than
+claiming a complete signoff environment:
 
-- Base: `debian:trixie-slim`.
-- System packages: `python3`, `pip`, `yosys` (real synthesis available),
-  plus build deps (`cmake`, `ninja-build`, `clang`, `tcl-dev`, `swig`,
-  `bison`, `flex`, `git`) for optional OpenSTA compilation.
-- RCA installed via `pip3 install --no-cache-dir --break-system-packages -e .`.
-- A commented block shows how to build OpenSTA from source into
-  `/opt/OpenSTA` and symlink `sta` onto PATH.
+- Default target `runtime`: `debian:trixie-slim`, `python3`, `pip`, and the
+  Python/RCA dependencies declared in `pyproject.toml`.
+- Optional `open-source-yosys` target: adds Debian's open-source `yosys` only.
+  Build it deliberately with `docker build --target open-source-yosys -t
+  rca:yosys .`.
+- Neither target includes OpenSTA, a Liberty/PDK, activity data, proprietary
+  tools, or a runtime tool download. Mount/provision compatible open-source
+  tools and user-owned collateral explicitly for a real flow.
 - `WORKDIR /work`, `EXPOSE 8765`, `ENTRYPOINT ["rca"]`, `CMD ["--help"]`.
 
-Build & run:
+Build & inspect prerequisites:
 ```bash
 docker build -t rca .
-docker run --rm -v $PWD:/work -p 8765:8765 rca report project.yaml
-docker run --rm -v $PWD:/work -p 8765:8765 rca dashboard project.yaml --host 0.0.0.0
+docker run --rm -v "$PWD:/work" rca doctor /work/project.yaml --json
+docker build --target open-source-yosys -t rca:yosys .
+docker run --rm -v "$PWD:/work" -p 8765:8765 rca dashboard /work/project.yaml --host 0.0.0.0
 ```
+
+A successful container build or version probe is not a real-flow, PDK-quality,
+or signoff claim.
 
 ---
 
-## 19. Known Gaps and Roadmap
+## 18.1 Local QoR history repository (Step 21)
+
+SQLite is selected as a portable, dependency-free local sidecar; it does not
+provide distributed/cross-machine database semantics. The schema normalizes
+optimization sessions, session-scoped candidates and mutations, constraint-set
+identities, evaluations, canonical QoR measurements, power evidence, artifact
+references, MCMM aggregates/objectives/members, and an append-only migration
+ledger. Sparse diagnostics, report metadata, timing distributions, and manifest
+extra fields retain structured JSON where relational filtering is not useful.
+
+`record_flow_evaluation`, `record_optimizer_session`, and
+`record_mcmm_aggregate` use `BEGIN IMMEDIATE` transactions. Matching evidence
+fingerprints are no-ops; changed evidence for an existing stable ID is a clear
+conflict. `list_runs`, `best_qor`, candidate-lineage, MCMM, artifact,
+provenance, and replay-identity queries have fixed ordering and whitelisted
+fields. `get_replay_identity` validates retained artifact paths/hashes and
+reports absent evidence, but does not execute or promise a reproducible EDA
+rerun. `list_constraint_set_projections` is the Step-26 read-only metadata
+projection used only to locate separately retained canonical UCM snapshots; it
+neither serializes constraints into SQLite nor makes history authoritative. See
+`STEP21_QOR_DATABASE.md` for the complete contract.
+
+## 18.2 Constraint Release Baseline and Package (Step 32)
+
+`rca.release` is a frozen typed, deterministic release layer around one
+existing canonical UCM and explicit Step-31 review. It is not a second UCM,
+review engine, cache/history authority, SDC generator, or EDA-signoff system.
+A release identity binds canonical UCM content plus Step-9 semantic identity,
+review/readiness/validation/coverage/formal/lineage references, supplied
+configuration/design/timing identities, exact global/selected/all-active MCMM
+scope, and hashes of explicitly supplied artifacts.
+
+Assessment is read-only; a clean candidate remains unreleased until an explicit
+release action. Missing, stale, revoked, rejected/deferred/pending, ambiguous,
+unknown, unsupported, incomplete, or conflicting required evidence fails
+closed. Revocation and supersession create separate records instead of editing
+history. SDC is only copied when an existing file was explicitly supplied; it
+is never generated as a side effect of release.
+
+An explicitly requested package contains the descriptor, release record,
+canonical UCM snapshot, supplied evidence snapshots, scope/identity,
+dependencies, and SHA-256 artifact metadata. Stateless verification never runs
+EDA/formal and never repairs a package. A `VERIFIED` package means only that
+this retained RCA package is internally consistent; it is not external STA,
+physical, commercial, or ASIC signoff. See
+[`docs/STEP32_CONSTRAINT_RELEASE.md`](docs/STEP32_CONSTRAINT_RELEASE.md) for
+the API, CLI, policy, package, and verification contract.
+
+---
+
+## 19. Steps 33–46 governed lifecycle extension
+
+The Step-33 through Step-46 extension preserves one canonical UCM and the
+existing lifecycle owners. `rca handoff` consumes a verified release package;
+`rca run` is a read-only lifecycle projection; `rca replay-evidence` is a
+read-only identity/integrity assessment. Neither makes a review/release/tool
+transition. Optional dashboard projection artifacts are bounded to configured
+output and rendered as escaped data. See:
+
+- `docs/STEP33_CONSTRAINT_HANDOFF.md` through `docs/STEP46_PRODUCTION_AUDIT.md`
+- `examples/governed_workflow/` and `docs/STEP45_OFFLINE_E2E_DEMO.md`
+- `TEST_PLAN.md` for the final lifecycle/replay/UX test map.
+
+## 20. Known Gaps and Roadmap
 
 Implemented as alpha-grade:
-- OpenSTA/OpenROAD: the backend adapters exist and the CLI can invoke
-  `sta`, but real STA requires a Liberty cell library. In the sandbox
-  `pip openroad` is a 0.0.1 stub; full STA integration needs a source
-  build of OpenROAD (scripted in the Dockerfile, commented out).
+- Yosys/OpenSTA: real execution is guarded by typed preflight and requires
+  user-provisioned compatible executables plus a readable Liberty cell library.
+  The default container intentionally does not bundle OpenSTA or a PDK.
 - Commercial backends (Synopsys PrimeTime/DC, Cadence Tempus/Genus) emit
-  correct SDC headers and dialect notes but do not yet produce all the
-  tool-specific Tcl prologue/epilogue.
-- Formal verification of false paths / multicycle paths is an interface
-  (`FormalBackend`) with a conservative UNVERIFIED default; a SymbiYosys
-  adapter is planned.
+  established SDC dialect/rendering only. Commercial execution is unsupported;
+  RCA neither downloads/emulates those tools nor claims their results/signoff.
+- Formal verification of false paths / multicycle paths has an optional
+  Step-14 `SymbiYosysFormalBackend` for explicit user-authored `.sby` jobs;
+  the default remains conservative UNRESOLVED. RCA intentionally does not
+  generate formal properties or bundle SymbiYosys/SMT tools. Additional
+  commercial formal adapters remain future work.
 - Hierarchy elaboration (parameter binding, generate-block unrolling) is
   handled by pyslang already; parser-independent elaboration passes in
   `rca.elaboration` are reserved.
@@ -997,7 +1293,7 @@ unit tests passing.
 
 ---
 
-## 20. Troubleshooting / FAQ
+## 21. Troubleshooting / FAQ
 
 **Q: `pyslang` fails to import?**
 A: `pip install pyslang>=11.0` (binary wheels on PyPI for Linux/macOS
@@ -1006,8 +1302,10 @@ Python dev headers are present.
 
 **Q: `Yosys not found`?**
 A: Install via apt (`apt install yosys`) or from
-https://github.com/YosysHQ/yosys. Yosys is optional — RCA falls back to
-the mock backend when it is missing.
+https://github.com/YosysHQ/yosys, then run `rca doctor project.yaml`. Yosys is
+optional only because mock is an explicit separate choice: a requested real
+`yosys_opensta` flow is `BLOCKED` when Yosys is unavailable and never falls
+back to mock.
 
 **Q: OpenSTA gives "liberty not specified"?**
 A: Real gate-level STA requires a standard-cell Liberty (.lib) file for

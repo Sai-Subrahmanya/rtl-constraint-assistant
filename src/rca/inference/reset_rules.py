@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from ..design_model import Design
 from ..timing_model import TimingGraph
-from ..utils.enums import Confidence, InferenceResultStatus, RequirementLevel
+from ..utils.enums import Confidence, InferenceResultStatus
 from ._evidence import make_evidence
 from .rules import InferenceResult, ProposedConstraint
 

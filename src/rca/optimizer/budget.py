@@ -12,6 +12,7 @@ Deterministic stopping conditions:
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,6 +32,9 @@ class OptimizationBudget:
 
     # runtime state
     start_time: float = field(default_factory=time.time)
+    # Kept private to the optimizer boundary: a controlled optimizer clock must
+    # not mutate the process-wide clock used by CLI/logging infrastructure.
+    clock: Callable[[], float] = field(default=time.time, repr=False, compare=False)
     iterations: int = 0
     eda_runs: int = 0
     no_improve: int = 0
@@ -38,7 +42,7 @@ class OptimizationBudget:
     history: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
-    def from_config(cls, cfg) -> "OptimizationBudget":
+    def from_config(cls, cfg) -> OptimizationBudget:
         o = cfg.optimization
         return cls(
             max_iterations=o.max_iterations,
@@ -64,7 +68,7 @@ class OptimizationBudget:
         self.eda_runs += max(1, int(count))
 
     def elapsed(self) -> float:
-        return time.time() - self.start_time
+        return self.clock() - self.start_time
 
     def record(self, pareto_size: int, best_score: float,
                best_headroom_ns: float | None) -> None:

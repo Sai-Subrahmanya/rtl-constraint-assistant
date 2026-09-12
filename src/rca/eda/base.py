@@ -27,6 +27,40 @@ from ..utils.logging import get_logger
 
 log = get_logger("eda.base")
 
+_SENSITIVE_ARGUMENT_NAMES = {"password", "passphrase", "secret", "token", "api-key", "apikey"}
+
+
+def _redact_command_evidence(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Return an auditable argv with conventional sensitive option values masked.
+
+    RCA's built-in EDA calls contain executable/script/input paths only, but
+    this boundary is also safe for future explicit credential-like options.
+    The unmodified argv is passed to the subprocess; only persisted command
+    evidence and matching bounded output text are redacted.
+    """
+    redacted: list[str] = []
+    secrets: list[str] = []
+    redact_next = False
+    for argument in argv:
+        if redact_next:
+            secrets.append(argument)
+            redacted.append("<redacted>")
+            redact_next = False
+            continue
+        name, separator, value = argument.partition("=")
+        normalized = name.lstrip("-").replace("_", "-").lower()
+        if normalized in _SENSITIVE_ARGUMENT_NAMES:
+            if separator:
+                if value:
+                    secrets.append(value)
+                redacted.append(f"{name}=<redacted>")
+            else:
+                redacted.append(argument)
+                redact_next = True
+            continue
+        redacted.append(argument)
+    return redacted, secrets
+
 
 @dataclass
 class ToolInfo:
@@ -34,7 +68,6 @@ class ToolInfo:
     tool: str
     version: str
     executable: str = ""
-    host: str = field(default_factory=platform.node)
     platform: str = field(default_factory=platform.platform)
     available: bool = False
     capabilities: dict[str, bool] = field(default_factory=dict)
@@ -43,21 +76,26 @@ class ToolInfo:
     def to_dict(self) -> dict[str, Any]:
         return {
             "vendor": self.vendor, "tool": self.tool, "version": self.version,
-            "executable": self.executable, "host": self.host,
-            "platform": self.platform, "available": self.available,
+            "executable": self.executable, "platform": self.platform,
+            "available": self.available,
             "capabilities": dict(self.capabilities), "error": self.error,
         }
 
 
 @dataclass
 class CommandRecord:
-    """Exact argv + metadata of one subprocess invocation, captured for
-    the run manifest (Step 10 §3, §16)."""
+    """Exact argv + bounded metadata of one subprocess invocation.
+
+    The runtime environment is deliberately *not* retained.  It may contain
+    credentials and is neither reproducibility evidence nor safe diagnostic
+    data.  ``execution_status`` uses the terminal Step-25 lifecycle vocabulary.
+    """
     argv: list[str]
     cwd: str
-    env: dict[str, str]
     timeout_seconds: int
     returncode: int | None = None
+    timed_out: bool = False
+    execution_status: str = ""
     stdout_tail: str = ""
     stderr_tail: str = ""
     duration_seconds: float | None = None
@@ -67,6 +105,8 @@ class CommandRecord:
             "argv": list(self.argv), "cwd": self.cwd,
             "timeout_seconds": self.timeout_seconds,
             "returncode": self.returncode,
+            "timed_out": self.timed_out,
+            "execution_status": self.execution_status,
             "stdout_tail": self.stdout_tail,
             "stderr_tail": self.stderr_tail,
             "duration_seconds": self.duration_seconds,
@@ -113,35 +153,87 @@ class ToolBackend(ABC):
     def _safe_run(self, argv: list[str], *, cwd: Path,
                   timeout: int = 60, env: dict[str, str] | None = None,
                   stdin: str | None = None) -> CommandRecord:
-        """Argument-list subprocess invocation; NO shell=True. Captures
-        rc, stdout, stderr, duration."""
+        """Run an argv-only subprocess and retain bounded, non-secret evidence.
+
+        A real tool is placed in a new POSIX process group.  On timeout RCA
+        terminates that group before returning, so a timed-out wrapper cannot
+        leave a child compiler/STA process behind.  No environment values are
+        serialized by :meth:`CommandRecord.to_dict`.
+        """
+        import signal
         import time
+
+        # Preserve tool-specific search/library variables supplied by the
+        # operator, but pin locale/time-zone dependent diagnostics so parsing
+        # and bounded provenance are reproducible where practical. The map is
+        # deliberately transient and never retained in CommandRecord.
         run_env = dict(os.environ)
         if env:
             run_env.update(env)
+        run_env.update({"LC_ALL": "C", "LANG": "C", "TZ": "UTC"})
         cwd.mkdir(parents=True, exist_ok=True)
-        t0 = time.time()
+        t0 = time.monotonic()
+        timed_out = False
         try:
-            proc = subprocess.run(
-                argv, cwd=str(cwd), env=run_env,
-                input=stdin, capture_output=True, text=True,
-                timeout=timeout, shell=False, check=False,
+            proc = subprocess.Popen(
+                argv, cwd=str(cwd), env=run_env, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                shell=False, start_new_session=(os.name == "posix"),
             )
-            rc = proc.returncode
-            out = proc.stdout
-            err = proc.stderr
-        except subprocess.TimeoutExpired as e:
-            rc = -1
-            out = (e.stdout or b"").decode("utf-8", errors="replace") if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or "")
-            err = f"timeout after {timeout}s"
-        except FileNotFoundError as e:
+            try:
+                out, err = proc.communicate(input=stdin, timeout=timeout)
+                rc = proc.returncode
+            except subprocess.TimeoutExpired as exc:
+                timed_out = True
+                # Communicate may hold partial bytes/text.  Terminate the
+                # complete process group where available, then drain pipes.
+                if os.name == "posix":
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                else:  # pragma: no cover - Windows process-group behaviour
+                    proc.kill()
+                try:
+                    out, err = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:  # pragma: no cover - rare uncooperative child
+                    if os.name == "posix":
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        proc.kill()
+                    out, err = proc.communicate()
+                partial_out = exc.stdout or ""
+                partial_err = exc.stderr or ""
+                if isinstance(partial_out, (bytes, bytearray)):
+                    partial_out = partial_out.decode("utf-8", errors="replace")
+                if isinstance(partial_err, (bytes, bytearray)):
+                    partial_err = partial_err.decode("utf-8", errors="replace")
+                out = str(out or partial_out or "")
+                err = f"timeout after {timeout}s\n{err or partial_err or ''}".rstrip()
+                rc = -1
+        except OSError as exc:
             rc = 127
             out = ""
-            err = str(e)
-        duration = time.time() - t0
+            err = str(exc)
+        duration = time.monotonic() - t0
+        execution_status = (
+            "execution_timed_out" if timed_out
+            else "execution_completed" if rc == 0
+            else "execution_failed"
+        )
+        recorded_argv, sensitive_values = _redact_command_evidence(list(argv))
+        # Keep bounded diagnostics useful without serializing a value supplied
+        # through a conventional credential-like command option.
+        for sensitive_value in sensitive_values:
+            if sensitive_value:
+                out = out.replace(sensitive_value, "<redacted>")
+                err = err.replace(sensitive_value, "<redacted>")
         return CommandRecord(
-            argv=list(argv), cwd=str(cwd), env=run_env,
-            timeout_seconds=timeout, returncode=rc,
+            argv=recorded_argv, cwd=str(cwd), timeout_seconds=timeout,
+            returncode=rc, timed_out=timed_out, execution_status=execution_status,
             stdout_tail=out[-2000:] if out else "",
             stderr_tail=err[-2000:] if err else "",
             duration_seconds=duration,

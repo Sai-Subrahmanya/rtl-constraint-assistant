@@ -2,7 +2,7 @@
 PY ?= python3
 PIP ?= pip3
 
-.PHONY: all install dev-install test lint clean example example-pipeline example-multiclock
+.PHONY: all install dev-install test test-golden test-integration test-stress regression verify-environment eda-diagnostic test-cov lint clean example example-pipeline example-multiclock
 
 all: install
 
@@ -14,6 +14,24 @@ dev-install:
 
 test:
 	$(PY) -m pytest tests/ -v
+
+test-golden:
+	$(PY) -m pytest tests/golden -q
+
+test-integration:
+	$(PY) -m pytest tests/integration -q
+
+test-stress:
+	$(PY) -m pytest tests/stress -q
+
+regression:
+	$(PY) scripts/regression/run_regression.py
+
+verify-environment:
+	$(PY) scripts/setup/verify_environment.py
+
+eda-diagnostic:
+	$(PY) scripts/eda/diagnose_eda.py
 
 test-cov:
 	$(PY) -m pytest tests/ --cov=rca --cov-report=term-missing

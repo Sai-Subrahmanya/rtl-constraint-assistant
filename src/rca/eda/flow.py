@@ -24,8 +24,6 @@ Correction-pass additions:
 from __future__ import annotations
 
 import json
-import os
-import platform
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,11 +31,19 @@ from typing import Any
 
 from ..artifacts import ArtifactManager, RunManifest
 from ..constraint_model import ConstraintSet
-from ..utils.enums import BackendKind, PowerStatus, RunStatus
-from ..utils.hashing import hash_file, hash_source_set, hash_text, stable_hash
+from ..qor.model import QoRResult
+from ..reports.power import (
+    POWER_REPORT_PARSER_VERSION,
+    PowerParseStatus,
+    parse_openroad_power_report,
+    unavailable_power_result,
+)
+from ..utils.enums import PowerStatus, RunStatus
+from ..utils.hashing import hash_file, hash_text, stable_hash
 from ..utils.logging import get_logger
 from .common.mock import MockEDA
 from .opensta.backend import OpenSTABackend, STAResult
+from .preflight import EDAPreflight, preflight_yosys_opensta
 from .yosys.backend import SynthResult, YosysBackend
 
 log = get_logger("eda.flow")
@@ -47,8 +53,9 @@ _PROJECT_LOCAL_TOOL_DIRS = ("tools", ".tools", "eda_tools", "bin")
 # Artifacts whose content we hash for integrity tracking.  Very large
 # logs can be skipped — policy documented in STEP10_REPORT.
 _HASHED_ARTIFACTS = {"sdc", "netlist", "synth_script", "synth_stats",
-                     "sta_tcl", "sta_checks", "sta_setup_rpt", "sta_hold_rpt",
-                     "qor"}
+                     "sta_tcl", "sta_checks", "sta_setup", "sta_hold",
+                     "sta_setup_wns", "sta_setup_tns", "sta_hold_wns", "sta_hold_tns",
+                     "power_report", "qor"}
 _LOG_ARTIFACTS = {"synth_log", "sta_log"}  # recorded but not integrity-hashed
 
 
@@ -109,6 +116,7 @@ def _extract_cfg(cfg: Any) -> dict[str, Any]:
         "stage": stage,
         "liberty": sorted(libs),
         "safe_mode": safe_mode,
+        "tool_timeout_seconds": int(getattr(flow, "tool_timeout_seconds", 600) or 600),
     }
 
 
@@ -117,7 +125,7 @@ def _rel(run_dir: Path, p: Path | str | None) -> str:
         return ""
     try:
         return str(Path(p).resolve().relative_to(run_dir.resolve()))
-    except Exception:
+    except (OSError, ValueError):
         return str(p)
 
 
@@ -136,13 +144,13 @@ def _hash_artifacts(run_dir: Path, artifacts: dict[str, Any]) -> dict[str, str]:
         if k in _HASHED_ARTIFACTS:
             try:
                 hashes[k] = hash_file(p)
-            except Exception:
+            except OSError:
                 hashes[k] = ""
         elif k in _LOG_ARTIFACTS:
             # Record existence + size only (logs can be large / vary by version)
             try:
                 hashes[k] = f"size={p.stat().st_size}"
-            except Exception:
+            except OSError:
                 hashes[k] = ""
     return hashes
 
@@ -152,6 +160,215 @@ def _resolve_rel(run_dir: Path, rel: str) -> Path:
     if p.is_absolute():
         return p
     return (run_dir / p).resolve()
+
+
+def _clear_stale_execution_outputs(paths: list[Path]) -> str:
+    """Remove prior current-run outputs before a new real-tool attempt.
+
+    A forced/reused run directory is permissible, but only after old netlist,
+    QoR, power, report, stats, and log files have been removed.  A failure to
+    do so blocks execution rather than allowing stale evidence to survive a
+    failed command.  All paths are caller-derived run-local output paths.
+    """
+    try:
+        for path in paths:
+            if not path.exists():
+                continue
+            if not path.is_file():
+                return f"expected fresh output path is not a file: {path}"
+            path.unlink()
+    except OSError as exc:
+        return f"cannot remove stale real-EDA output: {exc}"
+    return ""
+
+
+def _power_report_input(cfg: Any, scenario: str) -> dict[str, Any]:
+    """Return canonical identity for the report bound to ``scenario``.
+
+    Configuration validation enforces the MCMM mapping rules for normal
+    ``ProjectConfig`` instances.  This small defensive selector also avoids a
+    global fallback if a config-like test object bypasses Pydantic validation.
+    """
+    flow = getattr(cfg, "flow", None)
+    reports = list(getattr(flow, "power_reports", None) or [])
+    matches = [r for r in reports if getattr(r, "scenario_id", None) == scenario]
+    defaults = [r for r in reports if getattr(r, "scenario_id", None) is None]
+    selected = matches[0] if len(matches) == 1 else None
+    mcmm = getattr(cfg, "mcmm", None)
+    mcmm_enabled = bool(getattr(mcmm, "enabled", False))
+    if selected is None and not matches and not mcmm_enabled and len(defaults) == 1:
+        selected = defaults[0]
+    if selected is None:
+        return {
+            "configured": False,
+            "format": None,
+            "parser_version": POWER_REPORT_PARSER_VERSION,
+            "path": "",
+            "sha256": "",
+            "exists": False,
+            "scenario_id": scenario,
+            "producer": "",
+            "producer_version": None,
+        }
+    path = Path(str(getattr(selected, "path", "")))
+    digest = ""
+    exists = path.is_file()
+    if exists:
+        try:
+            digest = hash_file(path)
+        except OSError:
+            exists = False
+    return {
+        "configured": True,
+        "format": str(getattr(selected, "format", "")),
+        "parser_version": POWER_REPORT_PARSER_VERSION,
+        "path": str(path),
+        "sha256": digest,
+        "exists": exists,
+        # Preserve the configuration association, even when a single-scenario
+        # report omits it and ``scenario`` supplies the effective association.
+        "scenario_id": getattr(selected, "scenario_id", None) or scenario,
+        "producer": str(getattr(selected, "producer", "openroad_opensta")),
+        "producer_version": getattr(selected, "producer_version", None),
+    }
+
+
+def _stage_power_report(power_input: dict[str, Any], run_dir: Path) -> Path | None:
+    """Copy an existing configured report into the run artifact directory.
+
+    The source path and source SHA-256 stay in QoR provenance.  The staged copy
+    lets the existing run-relative manifest and integrity mechanism audit the
+    exact report consumed by this run without adding a second artifact system.
+    """
+    if not power_input.get("configured") or not power_input.get("exists"):
+        return None
+    source = Path(str(power_input["path"]))
+    if not source.is_file():
+        return None
+    target = run_dir / "configured_power_report.rpt"
+    try:
+        if source.resolve() != target.resolve():
+            shutil.copyfile(source, target)
+        return target
+    except OSError:
+        return None
+
+
+def _apply_power_report(qor: Any, power_input: dict[str, Any], *, scenario: str,
+                        mode: str | None = None, corner: str | None = None,
+                        producer_version: str | None = None) -> Any:
+    """Merge one parser-bound result into the existing canonical QoR object."""
+    # A configured producer version describes the report source; otherwise the
+    # discovered OpenSTA/OpenROAD invocation version is the best available
+    # producer evidence. Keep the latter separately in provenance below.
+    reported_version = power_input.get("producer_version") or producer_version
+    if not power_input.get("configured"):
+        parsed = unavailable_power_result(
+            scenario_id=scenario, mode=mode, corner=corner,
+            producer_version=reported_version,
+            diagnostic="No power report is configured for this scenario.",
+        )
+    elif power_input.get("format") != "openroad_report_power":
+        # Normal ProjectConfig validation rejects this before flow execution.
+        # Retain a defensive conservative result for config-like callers.
+        from ..reports.power import PowerReportParseResult
+        parsed = PowerReportParseResult(
+            status=PowerParseStatus.UNSUPPORTED.value,
+            source_path=str(power_input.get("path", "")),
+            source_sha256=str(power_input.get("sha256", "")),
+            scenario_id=scenario, mode=mode, corner=corner,
+            producer_version=reported_version,
+            diagnostics=[f"Unsupported configured power report format: {power_input.get('format')}"],
+        )
+    else:
+        parsed = parse_openroad_power_report(
+            str(power_input.get("path", "")),
+            scenario_id=scenario,
+            mode=mode,
+            corner=corner,
+            producer_version=reported_version,
+        )
+    # Canonical QoR power status deliberately preserves the historic three
+    # states. Detailed parser classification remains in raw_reports below.
+    qor.power_status = (PowerStatus.AVAILABLE.value if parsed.available
+                        else PowerStatus.UNAVAILABLE.value)
+    qor.power = parsed.total if parsed.available else None
+    qor.power_total = parsed.total if parsed.available else None
+    qor.power_dynamic = parsed.dynamic if parsed.available else None
+    qor.power_leakage = parsed.leakage if parsed.available else None
+    qor.raw_reports = dict(qor.raw_reports or {})
+    power_provenance = parsed.provenance()
+    power_provenance["configured_producer"] = power_input.get("producer", "")
+    power_provenance["configured_scenario_id"] = power_input.get("scenario_id", scenario)
+    power_provenance["tool_version"] = producer_version
+    qor.raw_reports["power"] = power_provenance
+    qor.diagnostics.extend(parsed.diagnostics)
+    return parsed
+
+
+def _index_qor_history(*, output_dir: Path, cset: ConstraintSet | None,
+                       qor: QoRResult | None, manifest: RunManifest,
+                       run_id: str, run_dir: Path, run_status: str,
+                       repository: Any | None = None) -> str | None:
+    """Best-effort historical indexing after authoritative flow persistence.
+
+    The manifest and run artifacts remain the source of truth.  This helper
+    intentionally never changes a QoR object, a run outcome, or cache state:
+    SQLite failures become a deterministic returned warning that callers can
+    surface and later reconcile with ``rca history --import-legacy``.
+    """
+    try:
+        from ..qor.repository import SQLiteQoRRepository
+
+        repo = repository or SQLiteQoRRepository.for_output_dir(output_dir)
+        repo.record_flow_evaluation(
+            qor, manifest, run_id=run_id, run_dir=run_dir, run_status=run_status,
+            constraint_set=cset,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001 - advisory persistence boundary.
+        message = f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
+        log.warning(message)
+        return message
+
+
+def deferred_history_evidence(*, output_dir: Path, cset: ConstraintSet | None,
+                              qor: QoRResult | None, manifest: RunManifest,
+                              run_id: str, run_dir: Path, run_status: str,
+                              repository: Any | None = None) -> dict[str, Any]:
+    """Package completed authoritative flow evidence for coordinator indexing.
+
+    This deliberately carries existing in-memory QoR/manifest objects only
+    within one process. It neither serializes a second artifact nor participates
+    in cache lookup. A parallel candidate worker returns this evidence after all
+    normal artifacts are complete; its optimizer coordinator indexes it in
+    planned task order.
+    """
+    return {
+        "output_dir": output_dir,
+        "cset": cset,
+        "qor": qor,
+        "manifest": manifest,
+        "run_id": run_id,
+        "run_dir": run_dir,
+        "run_status": run_status,
+        "repository": repository,
+    }
+
+
+def index_deferred_history_evidence(evidence: dict[str, Any]) -> str | None:
+    """Best-effort coordinator-side indexing of ``deferred_history_evidence``."""
+    try:
+        return _index_qor_history(
+            output_dir=Path(evidence["output_dir"]), cset=evidence.get("cset"),
+            qor=evidence.get("qor"), manifest=evidence["manifest"],
+            run_id=str(evidence["run_id"]), run_dir=Path(evidence["run_dir"]),
+            run_status=str(evidence["run_status"]), repository=evidence.get("repository"),
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory persistence boundary.
+        message = f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
+        log.warning(message)
+        return message
 
 
 def run_flow(cfg: Any,
@@ -168,10 +385,13 @@ def run_flow(cfg: Any,
              candidate_id: str = "baseline",
              scenario: str = "default",
              corner: str = "default",
+             mode: str = "default",
              allow_partial_sdc: bool = False,
              yosys_bin: str | None = None,
              sta_bin: str | None = None,
              force: bool = False,
+             qor_repository: Any | None = None,
+             defer_history_indexing: bool = False,
              ) -> dict[str, Any]:
     project_root = Path(cfg._config_path).parent if hasattr(cfg, "_config_path") else Path(".")
     output_dir = output_dir or Path(getattr(getattr(cfg, "flow", None), "output_dir", "output"))
@@ -182,6 +402,11 @@ def run_flow(cfg: Any,
     diagnostics: list[str] = []
 
     cfg_bits = _extract_cfg(cfg)
+    # Resolve and hash the evidence before cache lookup.  It is an input to
+    # this experiment, not an output-derived metric and never a synthesized
+    # estimate.  Mock flow deliberately does not consume it.
+    power_input = _power_report_input(cfg, scenario)
+    power_artifact: Path | None = None
     # Caller-provided defines/includes/parameters override config defaults
     if defines:
         cfg_bits["defines"] = _coerce_defines(defines)
@@ -201,7 +426,10 @@ def run_flow(cfg: Any,
     sdc_path = run_dir / "generated.sdc"
     sdc_path.write_text(sdc_text, encoding="utf-8")
 
-    rtl_hashes = hash_source_set(sources)
+    # Missing inputs are represented with an empty digest until preflight
+    # returns the deterministic collateral failure; never raise before an
+    # auditable failed/blocked manifest can be written.
+    rtl_hashes = {str(path): hash_file(path) if path.is_file() else "" for path in sources}
     # Hash the set of files inside include directories so that adding/
     # removing/modifying a header invalidates the cache.
     inc_hashes = {str(d): _hash_dir_if_exists(Path(d)) for d in cfg_bits["include_dirs"]}
@@ -217,7 +445,7 @@ def run_flow(cfg: Any,
         try:
             from ..optimizer import Candidate
             cand = Candidate(id=candidate_id, constraint_set=cset)
-        except Exception:
+        except Exception:  # noqa: BLE001 - mock candidate-adapter boundary.
             cand = None
         qor = tool.evaluate_candidate(cand, run_dir) if cand else tool.run_sta(
             run_dir / "netlist.v", sdc_path, libs, run_dir, top)
@@ -226,7 +454,16 @@ def run_flow(cfg: Any,
         qor.backend = "mock"; qor.is_mock = True
         qor.backend_version = "mock"; qor.flow_stage = "synthesis_sta"
         qor.scenario = scenario
+        qor.mode = mode
+        qor.corner = corner
+        qor.power = None
+        qor.power_total = None
+        qor.power_dynamic = None
+        qor.power_leakage = None
+        qor.power_status = PowerStatus.UNAVAILABLE.value
         qor.notes.append("MOCK result — not from real EDA tools.")
+        if power_input.get("configured"):
+            qor.notes.append("Configured power report ignored for mock flow; power remains unavailable.")
         from ..qor.model import Feasibility
         qor.feasibility = Feasibility.from_qor(qor).to_dict()
         # Write mock netlist stub for artifact integrity
@@ -239,18 +476,40 @@ def run_flow(cfg: Any,
         manifest = RunManifest(
             candidate_id=candidate_id, rtl_hash=rtl_hashes, sdc_hash=sdc_hash,
             config_hash="", tool="mock", tool_version="mock",
-            flow_stage="synthesis_sta", corner=scenario,
+            flow_stage="synthesis_sta", mode=mode, corner=corner,
             library=",".join(str(p) for p in libs),
             artifacts=rel_artifacts, artifact_hashes=artifact_hashes,
             tool_identity={"backend": "mock"},
             input_hashes={"rtl": rtl_hashes, "includes": inc_hashes},
-            extra={"cache_key": "mock", "diagnostics": diagnostics},
+            execution_mode="MOCK", execution_status=RunStatus.MOCK.value,
+            failure_classification="",
+            extra={"cache_key": "mock", "scenario": scenario, "diagnostics": diagnostics},
         )
         am.write_manifest_to(run_id, manifest)
+        # Unit-level mock flow remains filesystem-only unless a repository is
+        # explicitly supplied. For a parallel optimizer task, any requested
+        # repository write is instead returned to its coordinator.
+        evidence = None
+        persistence_warning = None
+        if defer_history_indexing:
+            evidence = deferred_history_evidence(
+                output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
+                run_id=run_id, run_dir=run_dir, run_status=RunStatus.MOCK.value,
+                repository=qor_repository,
+            )
+        elif qor_repository is not None:
+            persistence_warning = _index_qor_history(
+                output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
+                run_id=run_id, run_dir=run_dir, run_status=RunStatus.MOCK.value,
+                repository=qor_repository,
+            )
+        result_diagnostics = diagnostics + ([persistence_warning] if persistence_warning else [])
         return {"status": RunStatus.MOCK.value, "run_id": run_id,
                 "run_dir": str(run_dir), "manifest": manifest.to_dict(),
-                "qor": qor.summary(), "diagnostics": diagnostics,
-                "synth": None, "sta": None}
+                "qor": qor.summary(), "qor_result": qor, "diagnostics": result_diagnostics,
+                "persistence_warning": persistence_warning,
+                "_deferred_history_evidence": evidence,
+                "preflight": None, "synth": None, "sta": None}
 
     # ---------- REAL backends ----------
     yosys = YosysBackend(executable=yosys_bin, project_local_dirs=local_dirs)
@@ -260,7 +519,7 @@ def run_flow(cfg: Any,
 
     # Build scripts NOW (before cache check) so their identity is part of
     # the cache key — scripts are deterministic and cheap to write.
-    synth_script_text, synth_script_path, netlist_path = yosys._build_script(
+    synth_script_text, _synth_script_path, netlist_path = yosys._build_script(
         sources, top, libs, run_dir,
         defines=defines_map, include_dirs=[str(p) for p in include_dirs_paths],
         parameters=params_map,
@@ -295,7 +554,6 @@ def run_flow(cfg: Any,
                   "available": yinfo.available},
         "opensta": {"executable": opensta.executable, "version": oinfo.version,
                     "available": oinfo.available},
-        "host": platform.node(), "platform": platform.platform(),
     }
 
     cfg_for_hash = {
@@ -304,19 +562,21 @@ def run_flow(cfg: Any,
         "parameters": dict(sorted(params_map.items())),
         "backend": backend, "stage": cfg_bits["stage"],
         "safe_mode": cfg_bits["safe_mode"],
-        "corner": corner, "scenario": scenario,
+        "corner": corner, "mode": mode, "scenario": scenario,
+        "power_report": power_input,
         "allow_partial_sdc": allow_partial_sdc,
         "sdc_generation_status": sdc_generation_status,
     }
     cfg_hash = stable_hash(cfg_for_hash)
 
     cache_key_data = {
-        "version": 2,
+        "version": 3,
         "rtl": rtl_hashes,
         "includes": inc_hashes,
         "sdc": sdc_hash,
         "libs": lib_hashes,
         "cfg": cfg_for_hash,
+        "power_report": power_input,
         "tool": {
             "yosys_bin": yosys.executable, "yosys_ver": yinfo.version,
             "sta_bin": opensta.executable, "sta_ver": oinfo.version,
@@ -328,37 +588,81 @@ def run_flow(cfg: Any,
     }
     cache_key = stable_hash(cache_key_data)
 
-    # Check cache
+    # Check cache before a fresh execution preflight. A verified cache hit is
+    # existing manifest/hash evidence, not an implicit mock fallback or a new
+    # real-tool invocation.
     if not force:
         cached = _find_cached_run(am, cache_key, run_dir_parent=am.runs_dir)
         if cached is not None:
             log.info("Cache hit: %s", cached["run_id"])
             return {**cached, "status": RunStatus.CACHE_HIT.value}
 
-    if not yinfo.available:
-        diagnostics.append(f"Yosys unavailable: {yinfo.error}")
-    if not oinfo.available:
-        diagnostics.append(f"OpenSTA unavailable: {oinfo.error}")
-    if not yinfo.available or not oinfo.available:
-        return _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash,
-                        lib_hashes, diagnostics, run_dir, reason="; ".join(diagnostics),
-                        tool_identity=tool_identity, cache_key=cache_key,
-                        inc_hashes=inc_hashes)
+    environment_config_hash = stable_hash({
+        "flow_identity": cfg_for_hash,
+        "tool_timeout_seconds": cfg_bits["tool_timeout_seconds"],
+    })
+    preflight = preflight_yosys_opensta(
+        backend=backend, top=top, sources=sources, liberty=libs, sdc_path=sdc_path,
+        output_dir=run_dir,
+        expected_outputs=[netlist_path, *sta_report_map.values(),
+                          run_dir / "synthesis_stats.json", run_dir / "qor.json",
+                          run_dir / "configured_power_report.rpt"],
+        yosys_info=yinfo, opensta_info=oinfo, liberty_hashes=lib_hashes,
+        config_hash=environment_config_hash, include_dirs=include_dirs_paths,
+    )
+    if not preflight.ready:
+        diagnostics.extend(
+            f"PREFLIGHT {check.component}: {check.status.value}: {check.detail}"
+            for check in preflight.checks if check.required and not check.ready
+        )
+        return _blocked(
+            am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashes,
+            diagnostics, run_dir, reason=preflight.failure_classification,
+            tool_identity=tool_identity, cache_key=cache_key, inc_hashes=inc_hashes,
+            cset=cset, qor_repository=qor_repository,
+            defer_history_indexing=defer_history_indexing, preflight=preflight,
+            environment_fingerprint=preflight.environment_fingerprint,
+            failure_classification=preflight.failure_classification,
+            execution_backend=backend,
+        )
+    # Freshness is established before either real executable is allowed to
+    # start.  This covers forced/reused run directories as well as a later
+    # non-zero, timeout, missing-output, or malformed-output result.
+    stale_error = _clear_stale_execution_outputs([
+        netlist_path, *sta_report_map.values(), run_dir / "synthesis_stats.json",
+        run_dir / "qor.json", run_dir / "configured_power_report.rpt",
+        run_dir / "yosys.log", run_dir / "sta.log",
+    ])
+    if stale_error:
+        diagnostics.append(f"PREFLIGHT expected_outputs: configuration_invalid: {stale_error}")
+        return _blocked(
+            am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashes,
+            diagnostics, run_dir, reason="configuration_invalid", tool_identity=tool_identity,
+            status=RunStatus.BLOCKED.value, cache_key=cache_key, inc_hashes=inc_hashes,
+            cset=cset, qor_repository=qor_repository,
+            defer_history_indexing=defer_history_indexing, preflight=preflight,
+            environment_fingerprint=preflight.environment_fingerprint,
+            failure_classification="configuration_invalid",
+        )
 
     extra_synth = {"defines": defines_map,
                    "include_dirs": [str(p) for p in include_dirs_paths],
-                   "parameters": params_map, "timeout": 600}
+                   "parameters": params_map, "timeout": cfg_bits["tool_timeout_seconds"]}
     try:
         synth_res: SynthResult = yosys.synthesize(
             sources, top, libs, run_dir, extra_args=extra_synth)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - external synthesis boundary.
         diagnostics.append(f"yosys raised {type(e).__name__}: {e}")
         return _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash,
                         lib_hashes, diagnostics, run_dir,
                         reason=f"Yosys raised {type(e).__name__}: {e}",
                         tool_identity=tool_identity,
                         status=RunStatus.SYNTHESIS_FAILED.value,
-                        cache_key=cache_key, inc_hashes=inc_hashes)
+                        cache_key=cache_key, inc_hashes=inc_hashes, cset=cset,
+                        qor_repository=qor_repository,
+                        defer_history_indexing=defer_history_indexing, preflight=preflight,
+                        environment_fingerprint=preflight.environment_fingerprint,
+                        failure_classification="execution_failed")
     if not synth_res.success:
         diagnostics.append(synth_res.error)
         return _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash,
@@ -366,7 +670,10 @@ def run_flow(cfg: Any,
                         tool_identity=tool_identity,
                         status=RunStatus.SYNTHESIS_FAILED.value,
                         cache_key=cache_key, inc_hashes=inc_hashes,
-                        synth_res=synth_res)
+                        synth_res=synth_res, cset=cset, qor_repository=qor_repository,
+                        defer_history_indexing=defer_history_indexing, preflight=preflight,
+                        environment_fingerprint=preflight.environment_fingerprint,
+                        failure_classification=synth_res.failure_classification or "execution_failed")
     netlist = synth_res.netlist
     netlist_hash = hash_file(netlist)
 
@@ -385,7 +692,8 @@ def run_flow(cfg: Any,
     else:
         sta_res: STAResult = opensta.run_sta(
             netlist, sdc_path, libs, run_dir, top, corner=corner,
-            extra_args={"timeout": 600, "allow_partial_sdc": allow_partial_sdc,
+            extra_args={"timeout": cfg_bits["tool_timeout_seconds"],
+                        "allow_partial_sdc": allow_partial_sdc,
                         "sdc_status": sdc_generation_status},
             prebuilt_script=(sta_tcl_text, sta_tcl_path, sta_report_map))
         sta_result = sta_res.to_dict()
@@ -404,6 +712,8 @@ def run_flow(cfg: Any,
         qor.backend_version = f"yosys:{yinfo.version}|opensta:{oinfo.version}"
         qor.flow_stage = "synthesis_sta"
         qor.scenario = scenario
+        qor.mode = mode
+        qor.corner = corner
         qor.is_mock = False
         if synth_res.stats.get("cell_count") is not None:
             qor.cell_count = synth_res.stats["cell_count"]
@@ -416,9 +726,13 @@ def run_flow(cfg: Any,
         qor.runtime_seconds = (
             (synth_res.command.duration_seconds if synth_res.command else 0)
             + (sta_res.command.duration_seconds if sta_res.command else 0))
-        qor.power_status = PowerStatus.UNAVAILABLE.value
-        qor.power = None
         qor.diagnostics = list(diagnostics)
+        # Report ingestion is deliberately post-STA: it consumes only the
+        # configured evidence for this real scenario and leaves synthesis/STA
+        # commands unchanged.  A staged copy is tracked by the normal manifest.
+        power_artifact = _stage_power_report(power_input, run_dir)
+        _apply_power_report(qor, power_input, scenario=scenario, mode=mode, corner=corner,
+                            producer_version=oinfo.version)
 
     # ---------- write artifacts / manifest ----------
     synth_stats_path = run_dir / "synthesis_stats.json"
@@ -441,43 +755,78 @@ def run_flow(cfg: Any,
         artifacts["sta_log"] = sta_result.get("log")
     for name, p in (sta_result.get("reports") or {}).items():
         artifacts[f"sta_{name}"] = p
+    if power_artifact is not None:
+        artifacts["power_report"] = power_artifact
     if qor_path:
         artifacts["qor"] = qor_path
-    artifacts = {k: v for k, v in artifacts.items() if v}
+    # A manifest references only current files. Expected-but-missing outputs
+    # remain in the typed preflight/STA diagnostics, never as dangling evidence.
+    artifacts = {k: v for k, v in artifacts.items() if v and Path(v).is_file()}
     rel_artifacts = _artifacts_to_rel(run_dir, artifacts)
     artifact_hashes = _hash_artifacts(run_dir, artifacts)
 
-    post_sta_cache_key_data = dict(cache_key_data)  # kept for diagnostics only
     # NOTE: netlist_hash is an OUTPUT hash; it MUST NOT be mixed into the
     # experiment cache key. The cache key represents experiment IDENTITY
     # (inputs/configuration) only. Netlist integrity is verified via
     # artifact_hashes on lookup.
     input_hashes = {"rtl": rtl_hashes, "includes": inc_hashes,
                     "libs": lib_hashes, "sdc": sdc_hash,
-                    "synth_script": synth_script_hash}
+                    "synth_script": synth_script_hash,
+                    "power_report": power_input}
+    failure_classification = ""
+    if status not in {RunStatus.SUCCESS.value, RunStatus.TIMING_FAIL.value}:
+        failure_classification = str(sta_result.get("failure_classification") or "execution_failed")
     manifest = RunManifest(
         candidate_id=candidate_id, rtl_hash=rtl_hashes, sdc_hash=sdc_hash,
         config_hash=cfg_hash, tool="yosys_opensta",
         tool_version=f"yosys:{yinfo.version}|opensta:{oinfo.version}",
-        flow_stage="synthesis_sta", corner=scenario,
+        flow_stage="synthesis_sta", mode=mode, corner=corner,
         library=",".join(str(p) for p in libs),
         artifacts=rel_artifacts, artifact_hashes=artifact_hashes,
         tool_identity=tool_identity, input_hashes=input_hashes,
+        execution_mode="REAL", execution_status=status,
+        failure_classification=failure_classification,
+        environment_fingerprint=preflight.environment_fingerprint,
         extra={"cache_key": cache_key,
+               "scenario": scenario,
                "cache_key_data": cache_key_data,
                "netlist_hash": netlist_hash,
                "commands": {
                    "yosys": synth_res.command.to_dict() if synth_res.command else None,
                    "opensta": sta_result.get("command"),
                },
+               "preflight": preflight.to_dict(),
                "diagnostics": diagnostics + sta_diag},
     )
     am.write_manifest_to(run_id, manifest)
+    # Index only after the normal run artifacts and manifest are complete.
+    # Database failure is advisory and cannot alter the actual EDA outcome.
+    # A candidate worker never writes normal optimizer history: it returns the
+    # same completed evidence for deterministic coordinator-side indexing.
+    evidence = None
+    if defer_history_indexing:
+        evidence = deferred_history_evidence(
+            output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
+            run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
+        )
+        persistence_warning = None
+    else:
+        persistence_warning = _index_qor_history(
+            output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
+            run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
+        )
+    result_diagnostics = diagnostics + sta_diag
+    if persistence_warning:
+        result_diagnostics.append(persistence_warning)
     return {
         "status": status, "run_id": run_id, "run_dir": str(run_dir),
         "manifest": manifest.to_dict(),
         "qor": qor.summary() if qor is not None else None,
-        "diagnostics": diagnostics + sta_diag,
+        "qor_result": qor,
+        "diagnostics": result_diagnostics,
+        "persistence_warning": persistence_warning,
+        "_deferred_history_evidence": evidence,
+        "preflight": preflight.to_dict(),
         "synth": synth_res.to_dict(), "sta": sta_result,
         "cache_key": cache_key,
     }
@@ -490,41 +839,93 @@ def _hash_dir_if_exists(d: Path) -> str:
     try:
         from ..utils.hashing import hash_directory
         return hash_directory(d, pattern="*")
-    except Exception:
+    except (ImportError, OSError):
         return ""
 
 
 def _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashes,
              diagnostics, run_dir, reason, tool_identity=None,
              status=RunStatus.BLOCKED.value, cache_key=None,
-             inc_hashes=None, synth_res=None):
-    artifacts: dict[str, Any] = {}
+             inc_hashes=None, synth_res=None, sta_res: STAResult | None = None,
+             cset: ConstraintSet | None = None, qor_repository: Any | None = None,
+             defer_history_indexing: bool = False,
+             preflight: EDAPreflight | None = None,
+             environment_fingerprint: str = "",
+             failure_classification: str = "configuration_invalid",
+             execution_backend: str = "yosys_opensta"):
+    # Retain only current, run-local evidence.  In particular, we do not list
+    # a historical QoR/power file after a failed new invocation.
+    artifacts: dict[str, Any] = {"sdc": run_dir / "generated.sdc"}
     if synth_res is not None:
-        artifacts = {
+        artifacts.update({
             "synth_script": getattr(synth_res, "script_path", None),
             "synth_log": getattr(synth_res, "log_path", None),
-        }
+            "synth_stats": getattr(synth_res, "stats_path", None),
+        })
+    if sta_res is not None:
+        artifacts.update({
+            "sta_tcl": sta_res.tcl_path,
+            "sta_log": sta_res.log_path,
+        })
+        artifacts.update({f"sta_{name}": path for name, path in sta_res.report_paths.items()})
+    artifacts = {key: path for key, path in artifacts.items() if path and Path(path).is_file()}
     rel_artifacts = _artifacts_to_rel(run_dir, artifacts)
     artifact_hashes = _hash_artifacts(run_dir, artifacts)
+    commands = {
+        "yosys": synth_res.command.to_dict() if synth_res and synth_res.command else None,
+        "opensta": sta_res.command.to_dict() if sta_res and sta_res.command else None,
+    }
+    yosys_version = (tool_identity or {}).get("yosys", {}).get("version", "")
+    opensta_version = (tool_identity or {}).get("opensta", {}).get("version", "")
     manifest = RunManifest(
         candidate_id=candidate_id, rtl_hash=rtl_hashes, sdc_hash=sdc_hash,
-        config_hash=cfg_hash, tool="yosys_opensta", flow_stage="synthesis_sta",
-        library=",".join(lib_hashes.keys()),
+        config_hash=cfg_hash, tool=execution_backend,
+        tool_version=f"yosys:{yosys_version}|opensta:{opensta_version}",
+        flow_stage="synthesis_sta", library=",".join(lib_hashes.keys()),
         artifacts=rel_artifacts, artifact_hashes=artifact_hashes,
         tool_identity=tool_identity or {},
         input_hashes={"rtl": rtl_hashes, "includes": inc_hashes or {},
                       "libs": lib_hashes, "sdc": sdc_hash},
-        extra={"diagnostics": diagnostics, "cache_key": cache_key or ""},
+        execution_mode="REAL", execution_status=status,
+        failure_classification=failure_classification,
+        environment_fingerprint=environment_fingerprint,
+        extra={"diagnostics": diagnostics, "cache_key": cache_key or "",
+               "commands": commands,
+               "preflight": preflight.to_dict() if preflight else None},
     )
     try:
         am.write_manifest_to(run_id, manifest)
-    except Exception:
-        pass
+    except OSError as exc:
+        # Preserve the original EDA/preflight outcome; manifest storage failure
+        # is an additional diagnostic, not a reason to fabricate a result.
+        diagnostics.append(f"RUN_MANIFEST_WRITE_WARNING: {type(exc).__name__}: {exc}")
+        log.warning("Failed to persist blocked run manifest %s: %s", run_id, exc)
+    # A blocked/failed manifest is still historical evidence. Index it only
+    # after the manifest write attempt; a parallel worker returns it for the
+    # coordinator rather than touching SQLite.
+    evidence = None
+    if defer_history_indexing:
+        evidence = deferred_history_evidence(
+            output_dir=am.output_dir, cset=cset, qor=None, manifest=manifest,
+            run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
+        )
+        persistence_warning = None
+    else:
+        persistence_warning = _index_qor_history(
+            output_dir=am.output_dir, cset=cset, qor=None, manifest=manifest,
+            run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
+        )
+    result_diagnostics = diagnostics + [reason]
+    if persistence_warning:
+        result_diagnostics.append(persistence_warning)
     return {"status": status, "run_id": run_id, "run_dir": str(run_dir),
-            "manifest": manifest.to_dict(), "qor": None,
-            "diagnostics": diagnostics + [reason],
+            "manifest": manifest.to_dict(), "qor": None, "qor_result": None,
+            "diagnostics": result_diagnostics,
+            "persistence_warning": persistence_warning,
+            "_deferred_history_evidence": evidence,
+            "preflight": preflight.to_dict() if preflight else None,
             "synth": synth_res.to_dict() if synth_res else None,
-            "sta": None, "blocked_reason": reason}
+            "sta": sta_res.to_dict() if sta_res else None, "blocked_reason": reason}
 
 
 def _find_cached_run(am: ArtifactManager, cache_key: str,
@@ -541,7 +942,8 @@ def _find_cached_run(am: ArtifactManager, cache_key: str,
             continue
         try:
             m = json.loads(mpath.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("Ignoring unreadable cache manifest %s: %s", mpath, exc)
             continue
         extra = m.get("extra", {}) or {}
         if extra.get("cache_key") != cache_key:
@@ -561,17 +963,20 @@ def _find_cached_run(am: ArtifactManager, cache_key: str,
                 want = recorded_hashes[k]
                 if want and want != hash_file(p):
                     hash_mismatch.append(k)
-        # Tool identity must also match
-        tool_id = m.get("tool_identity", {}) or {}
-        # (Cache key already encodes bin+ver; skip extra check.)
+        # Tool executable/version identity is already encoded in the cache key.
         if missing or hash_mismatch:
             log.warning("cache entry %s invalid (missing=%s, hash_mismatch=%s)",
                         d.name, missing, hash_mismatch)
             continue
         # Required artifacts for a *usable* cache hit (i.e. a completed run
-        # whose results can be reused). BLOCKED/FAILED manifests are recorded
-        # with cache_key for diagnostics but lack qor and/or netlist, so they
-        # naturally fail this check and are not reused as hits.
+        # whose results can be reused). New manifests also carry an explicit
+        # execution state: a tool/preflight failure is never a hit, even if a
+        # caller left a stale QoR file in the run directory. Empty state is
+        # accepted only for pre-Step-25 manifests that have no failure record.
+        execution_status = str(m.get("execution_status") or "")
+        reusable_statuses = {RunStatus.SUCCESS.value, RunStatus.TIMING_FAIL.value}
+        if execution_status and execution_status not in reusable_statuses:
+            continue
         required = {"sdc", "netlist", "qor"}
         if not required.issubset(rel_artifacts.keys()):
             continue
@@ -580,26 +985,13 @@ def _find_cached_run(am: ArtifactManager, cache_key: str,
         if qpath.is_file():
             try:
                 qor = json.loads(qpath.read_text(encoding="utf-8"))
-            except Exception:
+            except (OSError, json.JSONDecodeError) as exc:
+                log.warning("Ignoring unreadable cache QoR %s: %s", qpath, exc)
                 continue
-        diag = list((extra.get("diagnostics") or []))
+        diag = list(extra.get("diagnostics") or [])
         diag.append(f"CACHE_HIT from {d.name}")
+        qor_result = QoRResult.from_summary(qor) if isinstance(qor, dict) else None
         return {"run_id": d.name, "run_dir": str(d), "manifest": m, "qor": qor,
-                "diagnostics": diag, "cache_key": cache_key,
+                "qor_result": qor_result, "diagnostics": diag, "cache_key": cache_key,
                 "status": RunStatus.CACHE_HIT.value}
     return None
-
-
-def _write_manifest_to(self, run_id: str, manifest: RunManifest) -> Path:
-    run_dir = self.runs_dir / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    # Rewrite artifacts to run-relative (portable) paths if caller passed absolutes.
-    p = run_dir / "run_manifest.json"
-    # Use the manifest's artifacts as-is (we already relativized).
-    p.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True, default=str),
-                 encoding="utf-8")
-    (run_dir / "manifest.json").write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
-    return p
-
-
-ArtifactManager.write_manifest_to = _write_manifest_to

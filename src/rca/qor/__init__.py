@@ -9,6 +9,10 @@ from .objectives import (
     scalar_score, select_final,
 )
 from .pareto import is_dominating, pareto_filter, score_candidate
+from .repository import (
+    QoRRepositoryError, RecordConflictError, SCHEMA_VERSION,
+    SQLITE_APPLICATION_ID, SQLiteQoRRepository, SchemaVersionError,
+)
 
 __all__ = [
     "QoRResult",
@@ -20,4 +24,6 @@ __all__ = [
     "classify_feasibility", "compare_objectives", "compute_margin",
     "explanation_for", "objective_vector", "pareto_front",
     "scalar_score", "select_final",
+    "SQLiteQoRRepository", "QoRRepositoryError", "RecordConflictError",
+    "SchemaVersionError", "SCHEMA_VERSION", "SQLITE_APPLICATION_ID",
 ]

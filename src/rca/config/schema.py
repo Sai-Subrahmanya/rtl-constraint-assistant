@@ -209,6 +209,33 @@ PROJECT_SCHEMA: dict = {
                     ],
                 },
                 "output_dir": {"type": "string", "default": "output"},
+                "tool_timeout_seconds": {
+                    "type": "integer", "minimum": 1, "default": 600,
+                    "description": "Per external Yosys/OpenSTA invocation timeout in seconds.",
+                },
+                "power_reports": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["format", "path"],
+                        "properties": {
+                            "format": {
+                                "type": "string",
+                                "enum": ["openroad_report_power"],
+                            },
+                            "path": {"type": "string", "minLength": 1},
+                            "scenario_id": {"type": "string", "minLength": 1},
+                            "producer": {
+                                "type": "string",
+                                "enum": ["openroad_opensta"],
+                                "default": "openroad_opensta",
+                            },
+                            "producer_version": {"type": "string"},
+                        },
+                    },
+                    "default": [],
+                },
             },
             "default": {},
         },
@@ -217,6 +244,12 @@ PROJECT_SCHEMA: dict = {
             "additionalProperties": False,
             "properties": {
                 "enabled": {"type": "boolean", "default": False},
+                "workers": {
+                    "type": "integer", "minimum": 1, "maximum": 8, "default": 1,
+                    "description": (
+                        "Bounded concurrent complete-candidate evaluations; 1 is serial."
+                    ),
+                },
                 "max_iterations": {"type": "integer", "minimum": 1, "default": 20},
                 "max_eda_runs": {"type": "integer", "minimum": 1, "default": 20},
                 "max_runtime_minutes": {"type": "integer", "minimum": 1, "default": 120},
@@ -299,6 +332,58 @@ PROJECT_SCHEMA: dict = {
                 "active_scenario_ids": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "default": [],
+                },
+            },
+            "default": {},
+        },
+        "workflow": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "ucm_snapshot": {"type": "string"},
+                "knowledge_sources": {"type": "array", "items": {"type": "string"}, "default": []},
+                "inference_policy": {"type": "object", "default": {}},
+                "application_policy": {"type": "object", "default": {}},
+                "validation_policy": {"type": "object", "default": {}},
+                "coverage_policy": {"type": "object", "default": {}},
+                "readiness_policy": {"type": "object", "default": {}},
+                "review_policy": {"type": "object", "default": {}},
+                "release_policy": {"type": "object", "default": {}},
+                "handoff_policy": {"type": "object", "default": {}},
+                "release_package_dir": {"type": "string"},
+                "handoff_target": {"type": "string", "enum": ["GENERIC", "OPENSTA_OPENROAD", "SYNOPSYS", "CADENCE", "FUTURE_VENDOR"], "default": "GENERIC"}
+            },
+            "default": {}
+        },
+        "formal": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "backend": {
+                    "type": "string",
+                    "enum": ["conservative", "symbiyosys"],
+                    "default": "conservative",
+                },
+                "symbiyosys_executable": {"type": "string"},
+                "work_dir": {"type": "string", "default": "output/formal"},
+                "timeout_seconds": {"type": "integer", "minimum": 1, "default": 300},
+                "proofs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["constraint_id", "exception_kind", "sby_file"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "constraint_id": {"type": "string", "minLength": 1},
+                            "exception_kind": {
+                                "type": "string",
+                                "enum": ["false_path", "multicycle"],
+                            },
+                            "sby_file": {"type": "string", "minLength": 1},
+                            "task": {"type": "string", "minLength": 1},
+                        },
+                    },
                     "default": [],
                 },
             },

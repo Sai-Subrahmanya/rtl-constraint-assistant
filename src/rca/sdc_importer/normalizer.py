@@ -299,15 +299,19 @@ class SdcImporter:
     def _opaque_passthrough(self, cmd: SdcCommand, cset: ConstraintSet) -> str:
         """Record an unsupported/unknown command as an opaque provenance
         entry attached to a comment-only record, so source text is not lost."""
-        # Reuse SET_CASE_ANALYSIS as an "opaque" slot is inappropriate —
-        # instead create a comment-only record via MISSING? No: attach to
-        # a Constraint with a special value entry so it round-trips.
-        # Since UCM doesn't have a "generic SDC" type, we use a comment
-        # field on a SET_CASE_ANALYSIS with value None and flag unsupported.
+        # Preserve a known UCM concept when one exists.  In particular,
+        # set_load must never be presented as set_case_analysis merely because
+        # its detailed semantics are not modeled by this importer.  Commands
+        # with no UCM type retain the established opaque fallback below.
+        constraint_type = (
+            ConstraintType.SET_LOAD
+            if cmd.command == ConstraintType.SET_LOAD.value
+            else ConstraintType.SET_CASE_ANALYSIS
+        )
         cid = cset._next_id("IMP")
         c = Constraint(
             id=cid,
-            type=ConstraintType.SET_CASE_ANALYSIS,
+            type=constraint_type,
             values={"_passthrough_command": cmd.command,
                     "_original": cmd.original_text,
                     "_passthrough": True},

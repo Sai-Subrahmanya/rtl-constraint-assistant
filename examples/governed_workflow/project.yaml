@@ -1,0 +1,32 @@
+schema_version: "1.0"
+project:
+  name: governed_workflow_demo
+  top: counter
+  description: Offline lifecycle demonstration with an explicit mock EDA boundary.
+sources:
+  files: [rtl/counter.sv]
+  include_dirs: []
+  defines: []
+constraints:
+  user:
+    clocks:
+      - name: clk
+        period: 10ns
+        fixed: true
+    io:
+      inputs:
+        en: {delay: 2ns, clock: clk}
+      outputs:
+        q: {delay: 2ns, clock: clk}
+  existing_sdc: []
+analysis: {language: systemverilog, safe_mode: balanced}
+flow: {backend: generic, stage: pre_layout_sta, output_dir: output}
+optimization:
+  enabled: true
+  max_iterations: 2
+  max_eda_runs: 2
+  max_runtime_minutes: 1
+  convergence_patience: 1
+  priorities: {timing: high, area: medium, power: medium, timing_margin_utilization: medium, runtime: low}
+workflow:
+  handoff_target: GENERIC

@@ -1,0 +1,14 @@
+# Representative OpenROAD/OpenSTA-style report_power fixture for RCA tests.
+# This is deterministic representative test data based on the documented
+# group-summary syntax. It was NOT produced by a live tool execution in this
+# repository and must not be presented as a measured design result.
+report_power
+=========================================================================
+Group                  Internal  Switching    Leakage      Total
+                          Power      Power      Power      Power (Watts)
+-------------------------------------------------------------------------
+Sequential             4.49e-04   6.01e-05   3.13e-06   5.12e-04  38.6%
+Combinational          4.08e-04   3.96e-04   9.84e-06   8.14e-04  61.4%
+Macro                  0.00e+00   0.00e+00   0.00e+00   0.00e+00   0.0%
+-------------------------------------------------------------------------
+Total                  8.57e-04   4.56e-04   1.30e-05   1.33e-03 100.0%

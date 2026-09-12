@@ -38,7 +38,7 @@ def _parse_delay_seconds(v: Any) -> float | None:
         return float(v)
     try:
         return float(parse_time_string(str(v)))
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -160,7 +160,7 @@ def _handle_port(res, rid, kind, obj, user_delay, user_clock, possible_clocks,
             values={"clock": clk},
             confidence=Confidence.HIGH, status="CONFIRMED",
             source_kind=SourceKind.USER.value, evidence=[ev],
-            rationale=f"User delay; clock resolved structurally.",
+            rationale="User delay; clock resolved structurally.",
             merge_key=(kind, obj),
         ))
         return
@@ -215,7 +215,7 @@ def _handle_port(res, rid, kind, obj, user_delay, user_clock, possible_clocks,
                 object=obj, severity="ERROR",
                 requirement_level=RequirementLevel.REQUIRED,
                 message=f"Clock association required for {kind.split('_')[1]} '{obj}'",
-                rationale=f"Delay given but no clock association is known.",
+                rationale="Delay given but no clock association is known.",
                 evidence=[{"kind": "user", "description": f"delay={user_delay} but clock unspecified"}],
                 suggested_inputs=[{"field": "clock"}],
                 blocking=True, rule_id=rid,

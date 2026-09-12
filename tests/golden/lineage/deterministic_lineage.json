@@ -1,0 +1,1632 @@
+{
+  "inferred_accepted_constraint": {
+    "advisory_candidates": [
+      {
+        "application_id": null,
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": null,
+        "current_canonical": false,
+        "details": {
+          "canonical_state": "LINKED_TO_CURRENT_UCM",
+          "decision": "ACCEPTABLE",
+          "inference_status": "INFERRED",
+          "knowledge_references": [
+            {
+              "applicability": "APPLICABLE",
+              "knowledge_item_id": "K-TEST",
+              "match_kind": "semantic_exact",
+              "suggestion_id": "KS-TEST",
+              "trust_level": "VALIDATED"
+            }
+          ],
+          "missing_information": [],
+          "rule_ids": [
+            "CLK-001"
+          ],
+          "source_objects": [
+            "clk",
+            "m.clk"
+          ]
+        },
+        "evidence_ids": [],
+        "id": "LNE-ef70ed603e4ec571dfe4",
+        "kind": "CREATED",
+        "message": "Observed advisory inference candidate; it is not canonical UCM intent by itself.",
+        "scenario_id": null,
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "stale": false,
+        "subject_id": "IC-98d1af2c3b89f960d120",
+        "subject_kind": "inference_candidate"
+      }
+    ],
+    "application_attempts": [
+      {
+        "application_id": "APP-f91a68941a663d0b2fc9",
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": null,
+        "current_canonical": true,
+        "details": {
+          "already_present_ids": [],
+          "application_evidence_ids": [
+            "APP-ACCEPT-ef1b5ebdc46f7dd1",
+            "APP-VALIDATION-dfa03e2f00fcb113",
+            "INF-ACCEPT-0f575ead8e4af065"
+          ],
+          "application_status": "APPLIED",
+          "applied_constraint_ids": [
+            "CLK__clk"
+          ],
+          "decision": "ACCEPT",
+          "external_receipt": false,
+          "ucm_after_snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+          "ucm_mutated": true,
+          "validation_issue_ids": [],
+          "validation_status": "PASS_WITH_WARNINGS"
+        },
+        "evidence_ids": [
+          "APP-ACCEPT-ef1b5ebdc46f7dd1",
+          "APP-VALIDATION-dfa03e2f00fcb113",
+          "INF-ACCEPT-0f575ead8e4af065"
+        ],
+        "id": "LNE-4b522ddb08a83662b4e4",
+        "kind": "ACCEPTED",
+        "message": "Application outcome retained as APPLIED; no lifecycle state was inferred.",
+        "scenario_id": null,
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "stale": false,
+        "subject_id": "APP-f91a68941a663d0b2fc9",
+        "subject_kind": "application"
+      },
+      {
+        "application_id": "APP-f91a68941a663d0b2fc9",
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": null,
+        "current_canonical": true,
+        "details": {
+          "already_present_ids": [],
+          "application_evidence_ids": [
+            "APP-ACCEPT-ef1b5ebdc46f7dd1",
+            "APP-VALIDATION-dfa03e2f00fcb113",
+            "INF-ACCEPT-0f575ead8e4af065"
+          ],
+          "application_status": "APPLIED",
+          "applied_constraint_ids": [
+            "CLK__clk"
+          ],
+          "decision": "ACCEPT",
+          "external_receipt": false,
+          "ucm_after_snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+          "ucm_mutated": true,
+          "validation_issue_ids": [],
+          "validation_status": "PASS_WITH_WARNINGS"
+        },
+        "evidence_ids": [
+          "APP-ACCEPT-ef1b5ebdc46f7dd1",
+          "APP-VALIDATION-dfa03e2f00fcb113",
+          "INF-ACCEPT-0f575ead8e4af065"
+        ],
+        "id": "LNE-b30674c388e0ab997317",
+        "kind": "APPLICATION_ATTEMPTED",
+        "message": "Observed explicit application attempt with status APPLIED.",
+        "scenario_id": null,
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "stale": false,
+        "subject_id": "APP-f91a68941a663d0b2fc9",
+        "subject_kind": "application"
+      }
+    ],
+    "change_set": null,
+    "constraints": [
+      {
+        "application_id": "APP-f91a68941a663d0b2fc9",
+        "assumption_ids": [],
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": "CLK__clk",
+        "constraint_type": "create_clock",
+        "current_canonical": true,
+        "dependency_ids": [],
+        "events": [
+          {
+            "application_id": "APP-f91a68941a663d0b2fc9",
+            "candidate_id": "IC-98d1af2c3b89f960d120",
+            "constraint_id": "CLK__clk",
+            "current_canonical": true,
+            "details": {
+              "already_present_ids": [],
+              "application_status": "APPLIED",
+              "applied_constraint_ids": [
+                "CLK__clk"
+              ],
+              "decision": "ACCEPT",
+              "external_receipt": false,
+              "ucm_mutated": true
+            },
+            "evidence_ids": [
+              "APP-ACCEPT-ef1b5ebdc46f7dd1",
+              "APP-VALIDATION-dfa03e2f00fcb113",
+              "INF-ACCEPT-0f575ead8e4af065"
+            ],
+            "id": "LNE-9907034fba69697917b8",
+            "kind": "ACCEPTED",
+            "message": "Explicit controlled application linkage is retained; UCM presence was verified.",
+            "scenario_id": null,
+            "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+            "stale": false,
+            "subject_id": "APP-f91a68941a663d0b2fc9:CLK__clk",
+            "subject_kind": "constraint_application"
+          },
+          {
+            "application_id": "APP-f91a68941a663d0b2fc9",
+            "candidate_id": "IC-98d1af2c3b89f960d120",
+            "constraint_id": "CLK__clk",
+            "current_canonical": true,
+            "details": {
+              "already_present_ids": [],
+              "application_status": "APPLIED",
+              "applied_constraint_ids": [
+                "CLK__clk"
+              ],
+              "decision": "ACCEPT",
+              "external_receipt": false,
+              "ucm_mutated": true
+            },
+            "evidence_ids": [
+              "APP-ACCEPT-ef1b5ebdc46f7dd1",
+              "APP-VALIDATION-dfa03e2f00fcb113",
+              "INF-ACCEPT-0f575ead8e4af065"
+            ],
+            "id": "LNE-87cb49df7bbe1a58f995",
+            "kind": "APPLICATION_ATTEMPTED",
+            "message": "Application APP-f91a68941a663d0b2fc9 references this current canonical constraint.",
+            "scenario_id": null,
+            "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+            "stale": false,
+            "subject_id": "APP-f91a68941a663d0b2fc9:CLK__clk",
+            "subject_kind": "constraint_application"
+          },
+          {
+            "application_id": "APP-f91a68941a663d0b2fc9",
+            "candidate_id": "IC-98d1af2c3b89f960d120",
+            "constraint_id": "CLK__clk",
+            "current_canonical": true,
+            "details": {
+              "already_present_ids": [],
+              "application_status": "APPLIED",
+              "applied_constraint_ids": [
+                "CLK__clk"
+              ],
+              "decision": "ACCEPT",
+              "external_receipt": false,
+              "ucm_mutated": true
+            },
+            "evidence_ids": [
+              "APP-ACCEPT-ef1b5ebdc46f7dd1",
+              "APP-VALIDATION-dfa03e2f00fcb113",
+              "INF-ACCEPT-0f575ead8e4af065"
+            ],
+            "id": "LNE-ce8dd42e57c39cc85822",
+            "kind": "CREATED",
+            "message": "Current canonical constraint is linked to an explicit applied receipt.",
+            "scenario_id": null,
+            "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+            "stale": false,
+            "subject_id": "APP-f91a68941a663d0b2fc9:CLK__clk",
+            "subject_kind": "constraint_application"
+          }
+        ],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.inference.application",
+            "description": "Explicit controlled application of advisory inference candidate into canonical UCM.",
+            "detail": {
+              "application_state": "EXPLICIT_ACCEPTED",
+              "assumptions": [],
+              "candidate_id": "IC-98d1af2c3b89f960d120",
+              "candidate_semantic_identity": "9f30b98e807dfc03f7f0e86eff3a8b3d26e2f6e66097c65b64625ff3d654d34d",
+              "decision": {
+                "candidate_id": "IC-98d1af2c3b89f960d120",
+                "kind": "ACCEPT",
+                "rationale": ""
+              },
+              "knowledge_references": [
+                {
+                  "applicability": "APPLICABLE",
+                  "knowledge_item_id": "K-TEST",
+                  "match_kind": "semantic_exact",
+                  "suggestion_id": "KS-TEST",
+                  "trust_level": "VALIDATED"
+                }
+              ],
+              "rule_ids": [
+                "CLK-001"
+              ],
+              "scenario_ids": [],
+              "source_objects": [
+                "clk",
+                "m.clk"
+              ],
+              "source_snapshot_identity": {
+                "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                "engine": "step27-candidate-v1",
+                "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+              },
+              "template_id_map": {
+                "CLK__clk": "CLK__clk"
+              },
+              "validation_status": "PASS_WITH_WARNINGS"
+            },
+            "id": "APP-ACCEPT-ef1b5ebdc46f7dd1",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "INTENT-APPLICATION",
+            "source_objects": []
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.inference.application",
+            "description": "Existing RCA validation completed on isolated controlled-application UCM projection.",
+            "detail": {
+              "candidate_id": "IC-98d1af2c3b89f960d120",
+              "candidate_semantic_identity": "9f30b98e807dfc03f7f0e86eff3a8b3d26e2f6e66097c65b64625ff3d654d34d",
+              "validation_checks": [
+                "start",
+                "references",
+                "clocks",
+                "generated_clocks",
+                "io_timing",
+                "clock_groups",
+                "path_selectors",
+                "conflicts",
+                "overlaps",
+                "exceptions",
+                "scenarios",
+                "completeness",
+                "backend:generic"
+              ],
+              "validation_issue_count": 4,
+              "validation_status": "PASS_WITH_WARNINGS"
+            },
+            "id": "APP-VALIDATION-dfa03e2f00fcb113",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "INTENT-APPLICATION-VALIDATION",
+            "source_objects": []
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.inference.application",
+            "description": "Explicit advisory inference acceptance into canonical UCM.",
+            "detail": {
+              "acceptance_state": "EXPLICIT_ACCEPTED",
+              "candidate_id": "IC-98d1af2c3b89f960d120",
+              "candidate_warnings": [],
+              "knowledge_references": [
+                {
+                  "applicability": "APPLICABLE",
+                  "knowledge_item_id": "K-TEST",
+                  "match_kind": "semantic_exact",
+                  "suggestion_id": "KS-TEST",
+                  "trust_level": "VALIDATED"
+                }
+              ],
+              "source_snapshot_identity": {
+                "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                "engine": "step27-candidate-v1",
+                "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+              }
+            },
+            "id": "INF-ACCEPT-0f575ead8e4af065",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "INFERENCE-ACCEPT",
+            "source_objects": []
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "created_by": "CLK-001",
+            "description": "drives 1 register(s)",
+            "detail": {},
+            "id": "ev_7e288f88dcd5",
+            "kind": "drives_register",
+            "location": null,
+            "rule_id": "CLK-001",
+            "source_objects": [
+              "clk"
+            ]
+          },
+          {
+            "confidence": "HIGH",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "created_by": "CLK-001",
+            "description": "Clock 'clk' drives 1 register(s) via posedge sensitivity.",
+            "detail": {},
+            "id": "ev_85f8a8510649",
+            "kind": "structural",
+            "location": null,
+            "rule_id": "CLK-001",
+            "source_objects": [
+              "clk"
+            ]
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "created_by": "CLK-001",
+            "description": "top-level port: m.clk",
+            "detail": {},
+            "id": "ev_c1bcb5d61ac8",
+            "kind": "top_level_port",
+            "location": null,
+            "rule_id": "CLK-001",
+            "source_objects": [
+              "clk"
+            ]
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "created_by": "CLK-001",
+            "description": "used on posedge sensitivity in 1 process(es)",
+            "detail": {},
+            "id": "ev_e95c9e3c506f",
+            "kind": "edge_sensitive",
+            "location": null,
+            "rule_id": "CLK-001",
+            "source_objects": [
+              "clk"
+            ]
+          }
+        ],
+        "formal_events": [],
+        "knowledge_conflicts": [
+          {
+            "knowledge_item_id": "K-CONFLICT",
+            "message": "Knowledge disagreement retained.",
+            "subject": "IC-98d1af2c3b89f960d120"
+          }
+        ],
+        "knowledge_references": [
+          {
+            "advisory": true,
+            "applicability": "APPLICABLE",
+            "knowledge_item_id": "K-TEST",
+            "match_kind": "semantic_exact",
+            "suggestion_id": "KS-TEST",
+            "trust_level": "VALIDATED"
+          }
+        ],
+        "linkage_gaps": [],
+        "origin_source": "INFERRED",
+        "provenance": {
+          "affected_paths": [],
+          "assumption_ids": [],
+          "confidence": "MEDIUM",
+          "created_at": "2000-01-01T00:00:00+00:00",
+          "created_by": "CLK-001",
+          "dependency_ids": [],
+          "downstream_ids": [],
+          "evidence": [
+            {
+              "confidence": "MEDIUM",
+              "created_at": "1970-01-01T00:00:00+00:00",
+              "created_by": "rca.inference.application",
+              "description": "Explicit controlled application of advisory inference candidate into canonical UCM.",
+              "detail": {
+                "application_state": "EXPLICIT_ACCEPTED",
+                "assumptions": [],
+                "candidate_id": "IC-98d1af2c3b89f960d120",
+                "candidate_semantic_identity": "9f30b98e807dfc03f7f0e86eff3a8b3d26e2f6e66097c65b64625ff3d654d34d",
+                "decision": {
+                  "candidate_id": "IC-98d1af2c3b89f960d120",
+                  "kind": "ACCEPT",
+                  "rationale": ""
+                },
+                "knowledge_references": [
+                  {
+                    "applicability": "APPLICABLE",
+                    "knowledge_item_id": "K-TEST",
+                    "match_kind": "semantic_exact",
+                    "suggestion_id": "KS-TEST",
+                    "trust_level": "VALIDATED"
+                  }
+                ],
+                "rule_ids": [
+                  "CLK-001"
+                ],
+                "scenario_ids": [],
+                "source_objects": [
+                  "clk",
+                  "m.clk"
+                ],
+                "source_snapshot_identity": {
+                  "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                  "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                  "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                  "engine": "step27-candidate-v1",
+                  "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+                },
+                "template_id_map": {
+                  "CLK__clk": "CLK__clk"
+                },
+                "validation_status": "PASS_WITH_WARNINGS"
+              },
+              "id": "APP-ACCEPT-ef1b5ebdc46f7dd1",
+              "kind": "rule",
+              "location": null,
+              "rule_id": "INTENT-APPLICATION",
+              "source_objects": []
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "1970-01-01T00:00:00+00:00",
+              "created_by": "rca.inference.application",
+              "description": "Existing RCA validation completed on isolated controlled-application UCM projection.",
+              "detail": {
+                "candidate_id": "IC-98d1af2c3b89f960d120",
+                "candidate_semantic_identity": "9f30b98e807dfc03f7f0e86eff3a8b3d26e2f6e66097c65b64625ff3d654d34d",
+                "validation_checks": [
+                  "start",
+                  "references",
+                  "clocks",
+                  "generated_clocks",
+                  "io_timing",
+                  "clock_groups",
+                  "path_selectors",
+                  "conflicts",
+                  "overlaps",
+                  "exceptions",
+                  "scenarios",
+                  "completeness",
+                  "backend:generic"
+                ],
+                "validation_issue_count": 4,
+                "validation_status": "PASS_WITH_WARNINGS"
+              },
+              "id": "APP-VALIDATION-dfa03e2f00fcb113",
+              "kind": "rule",
+              "location": null,
+              "rule_id": "INTENT-APPLICATION-VALIDATION",
+              "source_objects": []
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "1970-01-01T00:00:00+00:00",
+              "created_by": "rca.inference.application",
+              "description": "Explicit advisory inference acceptance into canonical UCM.",
+              "detail": {
+                "acceptance_state": "EXPLICIT_ACCEPTED",
+                "candidate_id": "IC-98d1af2c3b89f960d120",
+                "candidate_warnings": [],
+                "knowledge_references": [
+                  {
+                    "applicability": "APPLICABLE",
+                    "knowledge_item_id": "K-TEST",
+                    "match_kind": "semantic_exact",
+                    "suggestion_id": "KS-TEST",
+                    "trust_level": "VALIDATED"
+                  }
+                ],
+                "source_snapshot_identity": {
+                  "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                  "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                  "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                  "engine": "step27-candidate-v1",
+                  "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+                }
+              },
+              "id": "INF-ACCEPT-0f575ead8e4af065",
+              "kind": "rule",
+              "location": null,
+              "rule_id": "INFERENCE-ACCEPT",
+              "source_objects": []
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "2000-01-01T00:00:00+00:00",
+              "created_by": "CLK-001",
+              "description": "drives 1 register(s)",
+              "detail": {},
+              "id": "ev_7e288f88dcd5",
+              "kind": "drives_register",
+              "location": null,
+              "rule_id": "CLK-001",
+              "source_objects": [
+                "clk"
+              ]
+            },
+            {
+              "confidence": "HIGH",
+              "created_at": "2000-01-01T00:00:00+00:00",
+              "created_by": "CLK-001",
+              "description": "Clock 'clk' drives 1 register(s) via posedge sensitivity.",
+              "detail": {},
+              "id": "ev_85f8a8510649",
+              "kind": "structural",
+              "location": null,
+              "rule_id": "CLK-001",
+              "source_objects": [
+                "clk"
+              ]
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "2000-01-01T00:00:00+00:00",
+              "created_by": "CLK-001",
+              "description": "top-level port: m.clk",
+              "detail": {},
+              "id": "ev_c1bcb5d61ac8",
+              "kind": "top_level_port",
+              "location": null,
+              "rule_id": "CLK-001",
+              "source_objects": [
+                "clk"
+              ]
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "2000-01-01T00:00:00+00:00",
+              "created_by": "CLK-001",
+              "description": "used on posedge sensitivity in 1 process(es)",
+              "detail": {},
+              "id": "ev_e95c9e3c506f",
+              "kind": "edge_sensitive",
+              "location": null,
+              "rule_id": "CLK-001",
+              "source_objects": [
+                "clk"
+              ]
+            }
+          ],
+          "explanation": "Structural clock role with known period (TOOL).",
+          "import_meta": null,
+          "rule_id": "CLK-001",
+          "scenario_ids": [],
+          "source_kind": "INFERENCE"
+        },
+        "scenario_scope": {
+          "applicable_scenario_ids": [],
+          "scenario_ids": [],
+          "scope_kind": "GLOBAL",
+          "unknown_scenario_ids": []
+        },
+        "semantic_identity": "b7872d05b16cca12b5292f23cdba6d100067cc1fb19affd56713b32d3ad7c700",
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "source": "EXPLICITLY_ACCEPTED",
+        "source_kind": "INFERENCE",
+        "validation_events": []
+      }
+    ],
+    "global_validation_events": [],
+    "kind": "rca_constraint_lineage",
+    "readiness": null,
+    "schema_version": 1,
+    "snapshot": {
+      "constraint_ids": [
+        "CLK__clk"
+      ],
+      "name": "m",
+      "scenario_ids": [],
+      "schema_version": 1,
+      "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589"
+    }
+  },
+  "mcmm_scope_and_unknown_semantics": {
+    "scenario_scope": {
+      "applicable_scenario_ids": [
+        "FAST"
+      ],
+      "scenario_ids": [
+        "FAST"
+      ],
+      "scope_kind": "SCENARIO_SPECIFIC",
+      "unknown_scenario_ids": []
+    },
+    "unknown_constraint_ids": [
+      "LOAD"
+    ]
+  },
+  "semantic_ucm_diff_mixed_added_modified_scenario": {
+    "after": {
+      "constraint_ids": [
+        "CLK0001",
+        "CLK0002"
+      ],
+      "name": "golden-diff",
+      "scenario_ids": [
+        "FAST",
+        "SLOW"
+      ],
+      "schema_version": 1,
+      "snapshot_identity": "57e3172e970ccbe8203fe2ec82c0600490e99f55676d3741729dcac10e3acdab"
+    },
+    "before": {
+      "constraint_ids": [
+        "CLK0001"
+      ],
+      "name": "golden-diff",
+      "scenario_ids": [
+        "FAST"
+      ],
+      "schema_version": 1,
+      "snapshot_identity": "27cad413effe1efb42364e672063ea0c5e27b76887cb70cb57037240320af2e7"
+    },
+    "changes": [
+      {
+        "after_constraint_id": "CLK0001",
+        "after_scenario_scope": {
+          "applicable_scenario_ids": [
+            "FAST",
+            "SLOW"
+          ],
+          "scenario_ids": [],
+          "scope_kind": "GLOBAL",
+          "unknown_scenario_ids": []
+        },
+        "after_semantic_identity": "50ff6f87c7db7be59e772e0522a248bf39ebc82cff6691f50267fc4447ba014c",
+        "before_constraint_id": null,
+        "before_scenario_scope": null,
+        "before_semantic_identity": null,
+        "constraint_type": "create_clock",
+        "details": {
+          "after_snapshot_identity": "57e3172e970ccbe8203fe2ec82c0600490e99f55676d3741729dcac10e3acdab",
+          "before_snapshot_identity": "27cad413effe1efb42364e672063ea0c5e27b76887cb70cb57037240320af2e7",
+          "comparison_level": "SEMANTIC_DIFFERENT",
+          "notes": [
+            "present in B but not in A (no unambiguous A counterpart)"
+          ],
+          "semantic_key_digest": "da040dca0db9c37bb9f3e2987f40979cfc4f5826bbd4e462e984115408e84a29",
+          "semantic_pair_status": "ONLY_IN_RIGHT"
+        },
+        "evidence": [],
+        "id": "LNC-e31bdb425748e0f5a685",
+        "kind": "ADDED",
+        "semantic_field_changes": [],
+        "source_after": "USER_PROVIDED",
+        "source_before": null,
+        "subject_kind": "constraint"
+      },
+      {
+        "after_constraint_id": "CLK0002",
+        "after_scenario_scope": {
+          "applicable_scenario_ids": [
+            "FAST",
+            "SLOW"
+          ],
+          "scenario_ids": [],
+          "scope_kind": "GLOBAL",
+          "unknown_scenario_ids": []
+        },
+        "after_semantic_identity": "d3a78ba6e5fb2bfbd7a2a946b27c72345df33dfa08b83c5972d67483da7a2d9d",
+        "before_constraint_id": null,
+        "before_scenario_scope": null,
+        "before_semantic_identity": null,
+        "constraint_type": "create_clock",
+        "details": {
+          "after_snapshot_identity": "57e3172e970ccbe8203fe2ec82c0600490e99f55676d3741729dcac10e3acdab",
+          "before_snapshot_identity": "27cad413effe1efb42364e672063ea0c5e27b76887cb70cb57037240320af2e7",
+          "comparison_level": "SEMANTIC_DIFFERENT",
+          "notes": [
+            "present in B but not in A (no unambiguous A counterpart)"
+          ],
+          "semantic_key_digest": "d9144cb9d80ddfe5fc70d324ffa979ae88869ae996abb86fe16290a6dcc11d82",
+          "semantic_pair_status": "ONLY_IN_RIGHT"
+        },
+        "evidence": [],
+        "id": "LNC-8e4e77adc4ea01ebed3d",
+        "kind": "ADDED",
+        "semantic_field_changes": [],
+        "source_after": "USER_PROVIDED",
+        "source_before": null,
+        "subject_kind": "constraint"
+      },
+      {
+        "after_constraint_id": null,
+        "after_scenario_scope": null,
+        "after_semantic_identity": null,
+        "before_constraint_id": "CLK0001",
+        "before_scenario_scope": {
+          "applicable_scenario_ids": [
+            "FAST"
+          ],
+          "scenario_ids": [],
+          "scope_kind": "GLOBAL",
+          "unknown_scenario_ids": []
+        },
+        "before_semantic_identity": "1f69fcdb6d2e23367417d5e1ba8ed2bd2330c695a63d393ba8e7b2a209fe6564",
+        "constraint_type": "create_clock",
+        "details": {
+          "after_snapshot_identity": "57e3172e970ccbe8203fe2ec82c0600490e99f55676d3741729dcac10e3acdab",
+          "before_snapshot_identity": "27cad413effe1efb42364e672063ea0c5e27b76887cb70cb57037240320af2e7",
+          "comparison_level": "SEMANTIC_DIFFERENT",
+          "notes": [
+            "present in A but not in B (no unambiguous B counterpart)"
+          ],
+          "semantic_key_digest": "7221bee765e4120b4461a0b2cef7b0d98c793f3a31eb77ac61dd678820532ed5",
+          "semantic_pair_status": "ONLY_IN_LEFT"
+        },
+        "evidence": [],
+        "id": "LNC-fda27f59c674c00f18c4",
+        "kind": "REMOVED",
+        "semantic_field_changes": [],
+        "source_after": null,
+        "source_before": "USER_PROVIDED",
+        "subject_kind": "constraint"
+      },
+      {
+        "after_constraint_id": null,
+        "after_scenario_scope": null,
+        "after_semantic_identity": null,
+        "before_constraint_id": null,
+        "before_scenario_scope": null,
+        "before_semantic_identity": null,
+        "constraint_type": null,
+        "details": {
+          "explanation": "Active scenario is present only in B.",
+          "field": "active_scenario",
+          "scenario_id": "SLOW",
+          "status": "ONLY_IN_RIGHT",
+          "value_a": null,
+          "value_b": {
+            "corner": "slow",
+            "environment": {},
+            "libraries": [],
+            "mode": "functional",
+            "parasitics": null
+          }
+        },
+        "evidence": [],
+        "id": "LNC-bde2870c18769ca78edb",
+        "kind": "ADDED",
+        "semantic_field_changes": [],
+        "source_after": null,
+        "source_before": null,
+        "subject_kind": "scenario"
+      }
+    ],
+    "comparison": {
+      "comparison_level": "SEMANTIC_DIFFERENT",
+      "counts": {
+        "different": 0,
+        "duplicates_left": 0,
+        "duplicates_right": 0,
+        "equivalent": 0,
+        "only_in_left": 1,
+        "only_in_right": 2,
+        "scenario_differences": 1,
+        "unknown": 0
+      },
+      "diagnostics": [],
+      "different_constraints": [],
+      "duplicates_left": [],
+      "duplicates_right": [],
+      "equivalent_constraints": [],
+      "normalization_notes": [
+        "Timing quantities normalized to SI seconds; unordered collections sorted; ordered -through stages preserved; provenance ignored for semantic identity.",
+        "Conservative UNKNOWN returned when options are unsupported, targets unresolved, or import marked PARTIAL/UNRESOLVED.",
+        "Pairing: exact signature first, unambiguous identity second; ambiguous remainders are reported as ONLY_IN_LEFT / ONLY_IN_RIGHT, not force-paired.",
+        "MCMM scope normalized against each complete active scenario matrix; empty scenario_ids means all active scenarios."
+      ],
+      "only_in_left": [
+        {
+          "a_id": "CLK0001",
+          "a_provenance": {
+            "created_by": "rca",
+            "source_kind": "USER"
+          },
+          "a_source_kind": "USER",
+          "b_id": null,
+          "b_provenance": null,
+          "b_source_kind": "",
+          "constraint_type": "create_clock",
+          "fields": [],
+          "level": "SEMANTIC_DIFFERENT",
+          "notes": [
+            "present in A but not in B (no unambiguous B counterpart)"
+          ],
+          "provenance_equal": null,
+          "scenarios": [
+            "FAST"
+          ],
+          "semantic_key_digest": "7221bee765e4120b4461a0b2cef7b0d98c793f3a31eb77ac61dd678820532ed5",
+          "status": "ONLY_IN_LEFT"
+        }
+      ],
+      "only_in_right": [
+        {
+          "a_id": null,
+          "a_provenance": null,
+          "a_source_kind": "",
+          "b_id": "CLK0002",
+          "b_provenance": {
+            "created_by": "rca",
+            "source_kind": "USER"
+          },
+          "b_source_kind": "USER",
+          "constraint_type": "create_clock",
+          "fields": [],
+          "level": "SEMANTIC_DIFFERENT",
+          "notes": [
+            "present in B but not in A (no unambiguous A counterpart)"
+          ],
+          "provenance_equal": null,
+          "scenarios": [
+            "FAST",
+            "SLOW"
+          ],
+          "semantic_key_digest": "d9144cb9d80ddfe5fc70d324ffa979ae88869ae996abb86fe16290a6dcc11d82",
+          "status": "ONLY_IN_RIGHT"
+        },
+        {
+          "a_id": null,
+          "a_provenance": null,
+          "a_source_kind": "",
+          "b_id": "CLK0001",
+          "b_provenance": {
+            "created_by": "rca",
+            "source_kind": "USER"
+          },
+          "b_source_kind": "USER",
+          "constraint_type": "create_clock",
+          "fields": [],
+          "level": "SEMANTIC_DIFFERENT",
+          "notes": [
+            "present in B but not in A (no unambiguous A counterpart)"
+          ],
+          "provenance_equal": null,
+          "scenarios": [
+            "FAST",
+            "SLOW"
+          ],
+          "semantic_key_digest": "da040dca0db9c37bb9f3e2987f40979cfc4f5826bbd4e462e984115408e84a29",
+          "status": "ONLY_IN_RIGHT"
+        }
+      ],
+      "overall_status": "DIFFERENT",
+      "scenario_differences": [
+        {
+          "explanation": "Active scenario is present only in B.",
+          "field": "active_scenario",
+          "scenario_id": "SLOW",
+          "status": "ONLY_IN_RIGHT",
+          "value_a": null,
+          "value_b": {
+            "corner": "slow",
+            "environment": {},
+            "libraries": [],
+            "mode": "functional",
+            "parasitics": null
+          }
+        }
+      ],
+      "unknown_constraints": []
+    },
+    "readiness_events": []
+  },
+  "source_classifications": {
+    "CLK0001": {
+      "import_file": null,
+      "linkage_gaps": [
+        "No retained canonical/candidate Evidence record is available."
+      ],
+      "origin_source": "USER_PROVIDED",
+      "rule_id": null,
+      "source": "USER_PROVIDED"
+    },
+    "IMP-1": {
+      "import_file": "prior.sdc",
+      "linkage_gaps": [
+        "No retained canonical/candidate Evidence record is available."
+      ],
+      "origin_source": "IMPORTED",
+      "rule_id": null,
+      "source": "IMPORTED"
+    },
+    "INF-1": {
+      "import_file": null,
+      "linkage_gaps": [
+        "No explicit controlled application record links this inferred canonical constraint."
+      ],
+      "origin_source": "INFERRED",
+      "rule_id": "CLK-001",
+      "source": "INFERRED"
+    },
+    "KNOW-1": {
+      "import_file": null,
+      "linkage_gaps": [
+        "No explicit controlled application record links this inferred canonical constraint."
+      ],
+      "origin_source": "INFERRED",
+      "rule_id": null,
+      "source": "KNOWLEDGE_REFERENCED"
+    },
+    "SYS-1": {
+      "import_file": null,
+      "linkage_gaps": [
+        "No retained canonical/candidate Evidence record is available."
+      ],
+      "origin_source": "SYSTEM_OBSERVED",
+      "rule_id": null,
+      "source": "SYSTEM_OBSERVED"
+    },
+    "UNK-1": {
+      "import_file": null,
+      "linkage_gaps": [
+        "Canonical source kind/provenance is unavailable or legacy-unknown.",
+        "No retained canonical/candidate Evidence record is available."
+      ],
+      "origin_source": "UNKNOWN",
+      "rule_id": null,
+      "source": "UNKNOWN"
+    }
+  },
+  "stale_evidence": {
+    "advisory_candidates": [
+      {
+        "application_id": null,
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": null,
+        "current_canonical": false,
+        "details": {
+          "canonical_state": "LINKED_TO_CURRENT_UCM",
+          "decision": "ACCEPTABLE",
+          "inference_status": "INFERRED",
+          "knowledge_references": [],
+          "missing_information": [],
+          "rule_ids": [
+            "CLK-001"
+          ],
+          "source_objects": [
+            "clk",
+            "m.clk"
+          ]
+        },
+        "evidence_ids": [],
+        "id": "LNE-1d7f3481f7bc72011ae3",
+        "kind": "BECAME_STALE",
+        "message": "Advisory candidate source snapshot differs from supplied current evidence.",
+        "scenario_id": null,
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "stale": true,
+        "subject_id": "IC-98d1af2c3b89f960d120",
+        "subject_kind": "inference_candidate"
+      },
+      {
+        "application_id": null,
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": null,
+        "current_canonical": false,
+        "details": {
+          "canonical_state": "LINKED_TO_CURRENT_UCM",
+          "decision": "ACCEPTABLE",
+          "inference_status": "INFERRED",
+          "knowledge_references": [],
+          "missing_information": [],
+          "rule_ids": [
+            "CLK-001"
+          ],
+          "source_objects": [
+            "clk",
+            "m.clk"
+          ]
+        },
+        "evidence_ids": [],
+        "id": "LNE-b0064b9a4c3e4e8de77f",
+        "kind": "CREATED",
+        "message": "Observed advisory inference candidate; it is not canonical UCM intent by itself.",
+        "scenario_id": null,
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "stale": true,
+        "subject_id": "IC-98d1af2c3b89f960d120",
+        "subject_kind": "inference_candidate"
+      }
+    ],
+    "application_attempts": [
+      {
+        "application_id": "APP-f91a68941a663d0b2fc9",
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": null,
+        "current_canonical": true,
+        "details": {
+          "already_present_ids": [],
+          "application_evidence_ids": [
+            "APP-ACCEPT-ef1b5ebdc46f7dd1",
+            "APP-VALIDATION-dfa03e2f00fcb113",
+            "INF-ACCEPT-0f575ead8e4af065"
+          ],
+          "application_status": "APPLIED",
+          "applied_constraint_ids": [
+            "CLK__clk"
+          ],
+          "decision": "ACCEPT",
+          "external_receipt": false,
+          "ucm_after_snapshot_identity": "stale",
+          "ucm_mutated": true,
+          "validation_issue_ids": [],
+          "validation_status": "PASS_WITH_WARNINGS"
+        },
+        "evidence_ids": [
+          "APP-ACCEPT-ef1b5ebdc46f7dd1",
+          "APP-VALIDATION-dfa03e2f00fcb113",
+          "INF-ACCEPT-0f575ead8e4af065"
+        ],
+        "id": "LNE-3cead97658e3efb38e7a",
+        "kind": "ACCEPTED",
+        "message": "Application outcome retained as APPLIED; no lifecycle state was inferred.",
+        "scenario_id": null,
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "stale": true,
+        "subject_id": "APP-f91a68941a663d0b2fc9",
+        "subject_kind": "application"
+      },
+      {
+        "application_id": "APP-f91a68941a663d0b2fc9",
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": null,
+        "current_canonical": true,
+        "details": {
+          "already_present_ids": [],
+          "application_evidence_ids": [
+            "APP-ACCEPT-ef1b5ebdc46f7dd1",
+            "APP-VALIDATION-dfa03e2f00fcb113",
+            "INF-ACCEPT-0f575ead8e4af065"
+          ],
+          "application_status": "APPLIED",
+          "applied_constraint_ids": [
+            "CLK__clk"
+          ],
+          "decision": "ACCEPT",
+          "external_receipt": false,
+          "ucm_after_snapshot_identity": "stale",
+          "ucm_mutated": true,
+          "validation_issue_ids": [],
+          "validation_status": "PASS_WITH_WARNINGS"
+        },
+        "evidence_ids": [
+          "APP-ACCEPT-ef1b5ebdc46f7dd1",
+          "APP-VALIDATION-dfa03e2f00fcb113",
+          "INF-ACCEPT-0f575ead8e4af065"
+        ],
+        "id": "LNE-7e9968d5258868dc9874",
+        "kind": "APPLICATION_ATTEMPTED",
+        "message": "Observed explicit application attempt with status APPLIED.",
+        "scenario_id": null,
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "stale": true,
+        "subject_id": "APP-f91a68941a663d0b2fc9",
+        "subject_kind": "application"
+      },
+      {
+        "application_id": "APP-f91a68941a663d0b2fc9",
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": null,
+        "current_canonical": true,
+        "details": {
+          "already_present_ids": [],
+          "application_evidence_ids": [
+            "APP-ACCEPT-ef1b5ebdc46f7dd1",
+            "APP-VALIDATION-dfa03e2f00fcb113",
+            "INF-ACCEPT-0f575ead8e4af065"
+          ],
+          "application_status": "APPLIED",
+          "applied_constraint_ids": [
+            "CLK__clk"
+          ],
+          "decision": "ACCEPT",
+          "external_receipt": false,
+          "ucm_after_snapshot_identity": "stale",
+          "ucm_mutated": true,
+          "validation_issue_ids": [],
+          "validation_status": "PASS_WITH_WARNINGS"
+        },
+        "evidence_ids": [
+          "APP-ACCEPT-ef1b5ebdc46f7dd1",
+          "APP-VALIDATION-dfa03e2f00fcb113",
+          "INF-ACCEPT-0f575ead8e4af065"
+        ],
+        "id": "LNE-00b49c33621423f8b99a",
+        "kind": "BECAME_STALE",
+        "message": "Application evidence is stale against the supplied current snapshot/input identity.",
+        "scenario_id": null,
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "stale": true,
+        "subject_id": "APP-f91a68941a663d0b2fc9",
+        "subject_kind": "application"
+      }
+    ],
+    "change_set": null,
+    "constraints": [
+      {
+        "application_id": "APP-f91a68941a663d0b2fc9",
+        "assumption_ids": [],
+        "candidate_id": "IC-98d1af2c3b89f960d120",
+        "constraint_id": "CLK__clk",
+        "constraint_type": "create_clock",
+        "current_canonical": true,
+        "dependency_ids": [],
+        "events": [
+          {
+            "application_id": "APP-f91a68941a663d0b2fc9",
+            "candidate_id": "IC-98d1af2c3b89f960d120",
+            "constraint_id": "CLK__clk",
+            "current_canonical": true,
+            "details": {
+              "already_present_ids": [],
+              "application_status": "APPLIED",
+              "applied_constraint_ids": [
+                "CLK__clk"
+              ],
+              "decision": "ACCEPT",
+              "external_receipt": false,
+              "ucm_mutated": true
+            },
+            "evidence_ids": [
+              "APP-ACCEPT-ef1b5ebdc46f7dd1",
+              "APP-VALIDATION-dfa03e2f00fcb113",
+              "INF-ACCEPT-0f575ead8e4af065"
+            ],
+            "id": "LNE-ebe5e6ebb746953c8f9b",
+            "kind": "ACCEPTED",
+            "message": "Explicit controlled application linkage is retained; UCM presence was verified.",
+            "scenario_id": null,
+            "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+            "stale": true,
+            "subject_id": "APP-f91a68941a663d0b2fc9:CLK__clk",
+            "subject_kind": "constraint_application"
+          },
+          {
+            "application_id": "APP-f91a68941a663d0b2fc9",
+            "candidate_id": "IC-98d1af2c3b89f960d120",
+            "constraint_id": "CLK__clk",
+            "current_canonical": true,
+            "details": {
+              "already_present_ids": [],
+              "application_status": "APPLIED",
+              "applied_constraint_ids": [
+                "CLK__clk"
+              ],
+              "decision": "ACCEPT",
+              "external_receipt": false,
+              "ucm_mutated": true
+            },
+            "evidence_ids": [
+              "APP-ACCEPT-ef1b5ebdc46f7dd1",
+              "APP-VALIDATION-dfa03e2f00fcb113",
+              "INF-ACCEPT-0f575ead8e4af065"
+            ],
+            "id": "LNE-8fc9a565185a6adbf668",
+            "kind": "APPLICATION_ATTEMPTED",
+            "message": "Application APP-f91a68941a663d0b2fc9 references this current canonical constraint.",
+            "scenario_id": null,
+            "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+            "stale": true,
+            "subject_id": "APP-f91a68941a663d0b2fc9:CLK__clk",
+            "subject_kind": "constraint_application"
+          },
+          {
+            "application_id": "APP-f91a68941a663d0b2fc9",
+            "candidate_id": "IC-98d1af2c3b89f960d120",
+            "constraint_id": "CLK__clk",
+            "current_canonical": true,
+            "details": {
+              "application_status": "APPLIED",
+              "source_snapshot_identity": {
+                "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                "engine": "step27-candidate-v1",
+                "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+              },
+              "ucm_after_snapshot_identity": "stale"
+            },
+            "evidence_ids": [],
+            "id": "LNE-3d9fdefc1f196bfa940e",
+            "kind": "BECAME_STALE",
+            "message": "Application evidence is stale; the current UCM constraint remains separately verified.",
+            "scenario_id": null,
+            "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+            "stale": true,
+            "subject_id": "APP-f91a68941a663d0b2fc9:CLK__clk",
+            "subject_kind": "constraint_application"
+          },
+          {
+            "application_id": null,
+            "candidate_id": "IC-98d1af2c3b89f960d120",
+            "constraint_id": "CLK__clk",
+            "current_canonical": true,
+            "details": {
+              "source_snapshot_identity": {
+                "config": "stale",
+                "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                "engine": "step27-candidate-v1",
+                "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+              }
+            },
+            "evidence_ids": [],
+            "id": "LNE-a331cb267200f410ca4d",
+            "kind": "BECAME_STALE",
+            "message": "Linked advisory candidate evidence is stale against current supplied input evidence.",
+            "scenario_id": null,
+            "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+            "stale": true,
+            "subject_id": "IC-98d1af2c3b89f960d120",
+            "subject_kind": "inference_candidate"
+          }
+        ],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.inference.application",
+            "description": "Explicit controlled application of advisory inference candidate into canonical UCM.",
+            "detail": {
+              "application_state": "EXPLICIT_ACCEPTED",
+              "assumptions": [],
+              "candidate_id": "IC-98d1af2c3b89f960d120",
+              "candidate_semantic_identity": "9f30b98e807dfc03f7f0e86eff3a8b3d26e2f6e66097c65b64625ff3d654d34d",
+              "decision": {
+                "candidate_id": "IC-98d1af2c3b89f960d120",
+                "kind": "ACCEPT",
+                "rationale": ""
+              },
+              "knowledge_references": [],
+              "rule_ids": [
+                "CLK-001"
+              ],
+              "scenario_ids": [],
+              "source_objects": [
+                "clk",
+                "m.clk"
+              ],
+              "source_snapshot_identity": {
+                "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                "engine": "step27-candidate-v1",
+                "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+              },
+              "template_id_map": {
+                "CLK__clk": "CLK__clk"
+              },
+              "validation_status": "PASS_WITH_WARNINGS"
+            },
+            "id": "APP-ACCEPT-ef1b5ebdc46f7dd1",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "INTENT-APPLICATION",
+            "source_objects": []
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.inference.application",
+            "description": "Existing RCA validation completed on isolated controlled-application UCM projection.",
+            "detail": {
+              "candidate_id": "IC-98d1af2c3b89f960d120",
+              "candidate_semantic_identity": "9f30b98e807dfc03f7f0e86eff3a8b3d26e2f6e66097c65b64625ff3d654d34d",
+              "validation_checks": [
+                "start",
+                "references",
+                "clocks",
+                "generated_clocks",
+                "io_timing",
+                "clock_groups",
+                "path_selectors",
+                "conflicts",
+                "overlaps",
+                "exceptions",
+                "scenarios",
+                "completeness",
+                "backend:generic"
+              ],
+              "validation_issue_count": 4,
+              "validation_status": "PASS_WITH_WARNINGS"
+            },
+            "id": "APP-VALIDATION-dfa03e2f00fcb113",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "INTENT-APPLICATION-VALIDATION",
+            "source_objects": []
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.inference.application",
+            "description": "Explicit advisory inference acceptance into canonical UCM.",
+            "detail": {
+              "acceptance_state": "EXPLICIT_ACCEPTED",
+              "candidate_id": "IC-98d1af2c3b89f960d120",
+              "candidate_warnings": [],
+              "knowledge_references": [],
+              "source_snapshot_identity": {
+                "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                "engine": "step27-candidate-v1",
+                "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+              }
+            },
+            "id": "INF-ACCEPT-0f575ead8e4af065",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "INFERENCE-ACCEPT",
+            "source_objects": []
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "created_by": "CLK-001",
+            "description": "drives 1 register(s)",
+            "detail": {},
+            "id": "ev_7e288f88dcd5",
+            "kind": "drives_register",
+            "location": null,
+            "rule_id": "CLK-001",
+            "source_objects": [
+              "clk"
+            ]
+          },
+          {
+            "confidence": "HIGH",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "created_by": "CLK-001",
+            "description": "Clock 'clk' drives 1 register(s) via posedge sensitivity.",
+            "detail": {},
+            "id": "ev_85f8a8510649",
+            "kind": "structural",
+            "location": null,
+            "rule_id": "CLK-001",
+            "source_objects": [
+              "clk"
+            ]
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "created_by": "CLK-001",
+            "description": "top-level port: m.clk",
+            "detail": {},
+            "id": "ev_c1bcb5d61ac8",
+            "kind": "top_level_port",
+            "location": null,
+            "rule_id": "CLK-001",
+            "source_objects": [
+              "clk"
+            ]
+          },
+          {
+            "confidence": "MEDIUM",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "created_by": "CLK-001",
+            "description": "used on posedge sensitivity in 1 process(es)",
+            "detail": {},
+            "id": "ev_e95c9e3c506f",
+            "kind": "edge_sensitive",
+            "location": null,
+            "rule_id": "CLK-001",
+            "source_objects": [
+              "clk"
+            ]
+          }
+        ],
+        "formal_events": [],
+        "knowledge_conflicts": [],
+        "knowledge_references": [],
+        "linkage_gaps": [],
+        "origin_source": "INFERRED",
+        "provenance": {
+          "affected_paths": [],
+          "assumption_ids": [],
+          "confidence": "MEDIUM",
+          "created_at": "2000-01-01T00:00:00+00:00",
+          "created_by": "CLK-001",
+          "dependency_ids": [],
+          "downstream_ids": [],
+          "evidence": [
+            {
+              "confidence": "MEDIUM",
+              "created_at": "1970-01-01T00:00:00+00:00",
+              "created_by": "rca.inference.application",
+              "description": "Explicit controlled application of advisory inference candidate into canonical UCM.",
+              "detail": {
+                "application_state": "EXPLICIT_ACCEPTED",
+                "assumptions": [],
+                "candidate_id": "IC-98d1af2c3b89f960d120",
+                "candidate_semantic_identity": "9f30b98e807dfc03f7f0e86eff3a8b3d26e2f6e66097c65b64625ff3d654d34d",
+                "decision": {
+                  "candidate_id": "IC-98d1af2c3b89f960d120",
+                  "kind": "ACCEPT",
+                  "rationale": ""
+                },
+                "knowledge_references": [],
+                "rule_ids": [
+                  "CLK-001"
+                ],
+                "scenario_ids": [],
+                "source_objects": [
+                  "clk",
+                  "m.clk"
+                ],
+                "source_snapshot_identity": {
+                  "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                  "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                  "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                  "engine": "step27-candidate-v1",
+                  "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+                },
+                "template_id_map": {
+                  "CLK__clk": "CLK__clk"
+                },
+                "validation_status": "PASS_WITH_WARNINGS"
+              },
+              "id": "APP-ACCEPT-ef1b5ebdc46f7dd1",
+              "kind": "rule",
+              "location": null,
+              "rule_id": "INTENT-APPLICATION",
+              "source_objects": []
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "1970-01-01T00:00:00+00:00",
+              "created_by": "rca.inference.application",
+              "description": "Existing RCA validation completed on isolated controlled-application UCM projection.",
+              "detail": {
+                "candidate_id": "IC-98d1af2c3b89f960d120",
+                "candidate_semantic_identity": "9f30b98e807dfc03f7f0e86eff3a8b3d26e2f6e66097c65b64625ff3d654d34d",
+                "validation_checks": [
+                  "start",
+                  "references",
+                  "clocks",
+                  "generated_clocks",
+                  "io_timing",
+                  "clock_groups",
+                  "path_selectors",
+                  "conflicts",
+                  "overlaps",
+                  "exceptions",
+                  "scenarios",
+                  "completeness",
+                  "backend:generic"
+                ],
+                "validation_issue_count": 4,
+                "validation_status": "PASS_WITH_WARNINGS"
+              },
+              "id": "APP-VALIDATION-dfa03e2f00fcb113",
+              "kind": "rule",
+              "location": null,
+              "rule_id": "INTENT-APPLICATION-VALIDATION",
+              "source_objects": []
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "1970-01-01T00:00:00+00:00",
+              "created_by": "rca.inference.application",
+              "description": "Explicit advisory inference acceptance into canonical UCM.",
+              "detail": {
+                "acceptance_state": "EXPLICIT_ACCEPTED",
+                "candidate_id": "IC-98d1af2c3b89f960d120",
+                "candidate_warnings": [],
+                "knowledge_references": [],
+                "source_snapshot_identity": {
+                  "config": "7cada965b1f28a4cf580e3481c188b3f0ffdaa330f6372a3e5b3f8521173a4ca",
+                  "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+                  "design": "9ed3c0b08c2591c22579c886d9be6f6afd1152e347d2b813309ddf07be79d508",
+                  "engine": "step27-candidate-v1",
+                  "timing_graph": "36d3f3f741b4f367046e28a465692ddbec5b8585cc4fa0939d683a5f24388ef2"
+                }
+              },
+              "id": "INF-ACCEPT-0f575ead8e4af065",
+              "kind": "rule",
+              "location": null,
+              "rule_id": "INFERENCE-ACCEPT",
+              "source_objects": []
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "2000-01-01T00:00:00+00:00",
+              "created_by": "CLK-001",
+              "description": "drives 1 register(s)",
+              "detail": {},
+              "id": "ev_7e288f88dcd5",
+              "kind": "drives_register",
+              "location": null,
+              "rule_id": "CLK-001",
+              "source_objects": [
+                "clk"
+              ]
+            },
+            {
+              "confidence": "HIGH",
+              "created_at": "2000-01-01T00:00:00+00:00",
+              "created_by": "CLK-001",
+              "description": "Clock 'clk' drives 1 register(s) via posedge sensitivity.",
+              "detail": {},
+              "id": "ev_85f8a8510649",
+              "kind": "structural",
+              "location": null,
+              "rule_id": "CLK-001",
+              "source_objects": [
+                "clk"
+              ]
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "2000-01-01T00:00:00+00:00",
+              "created_by": "CLK-001",
+              "description": "top-level port: m.clk",
+              "detail": {},
+              "id": "ev_c1bcb5d61ac8",
+              "kind": "top_level_port",
+              "location": null,
+              "rule_id": "CLK-001",
+              "source_objects": [
+                "clk"
+              ]
+            },
+            {
+              "confidence": "MEDIUM",
+              "created_at": "2000-01-01T00:00:00+00:00",
+              "created_by": "CLK-001",
+              "description": "used on posedge sensitivity in 1 process(es)",
+              "detail": {},
+              "id": "ev_e95c9e3c506f",
+              "kind": "edge_sensitive",
+              "location": null,
+              "rule_id": "CLK-001",
+              "source_objects": [
+                "clk"
+              ]
+            }
+          ],
+          "explanation": "Structural clock role with known period (TOOL).",
+          "import_meta": null,
+          "rule_id": "CLK-001",
+          "scenario_ids": [],
+          "source_kind": "INFERENCE"
+        },
+        "scenario_scope": {
+          "applicable_scenario_ids": [],
+          "scenario_ids": [],
+          "scope_kind": "GLOBAL",
+          "unknown_scenario_ids": []
+        },
+        "semantic_identity": "b7872d05b16cca12b5292f23cdba6d100067cc1fb19affd56713b32d3ad7c700",
+        "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589",
+        "source": "EXPLICITLY_ACCEPTED",
+        "source_kind": "INFERENCE",
+        "validation_events": []
+      }
+    ],
+    "global_validation_events": [],
+    "kind": "rca_constraint_lineage",
+    "readiness": null,
+    "schema_version": 1,
+    "snapshot": {
+      "constraint_ids": [
+        "CLK__clk"
+      ],
+      "name": "m",
+      "scenario_ids": [],
+      "schema_version": 1,
+      "snapshot_identity": "9eb388e9872ffc773aa2705c26981a5d792d5ba2490eead90d3ed9abf8812589"
+    }
+  },
+  "validation_and_formal_evidence": {
+    "formal_statuses": [
+      "verified"
+    ],
+    "source": "USER_PROVIDED",
+    "validation_event_kinds": [
+      "VALIDATED"
+    ]
+  }
+}

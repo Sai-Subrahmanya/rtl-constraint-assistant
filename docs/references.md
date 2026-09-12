@@ -26,3 +26,5 @@ research resources:
 
 9. *Toward Effective Utilization of Timing Exceptions in Design Optimization* — motivates the exception-effectiveness subsystem (§48): more exceptions ≠ better QoR.
    https://vlsicad.ucsd.edu/Publications/Conferences/268/c268.pdf
+10. **SymbiYosys (SBY)** — open-source formal-verification front end used by the optional Step-14 adapter. RCA consumes explicit user-authored `.sby` jobs and their PASS/FAIL/UNKNOWN/ERROR outcomes; it does not generate proof properties.
+    https://symbiyosys.readthedocs.io/

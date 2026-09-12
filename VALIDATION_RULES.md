@@ -1,9 +1,10 @@
-# Validation Rules — RCA Constraint Validation Engine (Step 13)
+# Validation Rules — RCA Constraint Validation Engine (Steps 13–14)
 
 This document is the authoritative reference for the RCA constraint
 validation engine. It defines the structured result model, the
 severity/category/code taxonomy, and the per-layer validation rules that
-`rca validate` and `src/rca/validation/` implement.
+`rca validate` and `src/rca/validation/` implement, including the optional
+Step-14 SymbiYosys formal-exception adapter.
 
 The engine is *observational*: validation never mutates the
 `ConstraintSet`, `Design`, or `TimingGraph`. It reports findings on the
@@ -136,13 +137,24 @@ Completeness surfaces missing info (`COMPLETENESS_CLOCK_PERIOD`,
 
 `EXCEPTION_BROAD`, `EXCEPTION_NO_EFFECT`, `EXCEPTION_SUSPICIOUS`,
 `EXCEPTION_BAD_CYCLES`, `EXCEPTION_SETUP_HOLD_INCOHERENT`,
-`EXCEPTION_UNVERIFIED`.
+`EXCEPTION_UNVERIFIED`, `EXCEPTION_FORMAL_INVALID`, and
+`EXCEPTION_VERIFICATION_ERROR`.
 
 Reusing `src/rca/exceptions` (`verify_exceptions`), the engine records
 the formal-verification state. With no formal backend the
 `ConservativeFormalBackend` returns `UNRESOLVED`, so the exception is
-surfaced as `EXCEPTION_UNVERIFIED` (`resolution_status=UNRESOLVED`). An
-exception is **never** concluded safe merely because it improves timing.
+surfaced as non-blocking `EXCEPTION_UNVERIFIED`
+(`resolution_status=UNRESOLVED`). An exception is **never** concluded safe
+merely because it improves timing.
+
+With opt-in `formal.backend: symbiyosys`, the configured, user-authored `.sby`
+job is run through the same `FormalBackend` abstraction. Only an unambiguous
+`PASS` marker with exit code zero produces `VERIFIED`; an SBY `FAIL` is a
+blocking `EXCEPTION_FORMAL_INVALID` with counterexample provenance. An
+ambiguous/error backend outcome is blocking
+`EXCEPTION_VERIFICATION_ERROR`; missing mapping/tool/job, timeout, `UNKNOWN`,
+or no status marker remain `EXCEPTION_UNVERIFIED`. RCA never manufactures a
+formal assertion from an SDC selector.
 
 ### 3.7 Scenarios (`SCENARIO`)
 

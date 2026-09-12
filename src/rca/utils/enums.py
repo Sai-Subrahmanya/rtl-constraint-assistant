@@ -334,6 +334,9 @@ class ErrorCode(str, Enum):
     CONFLICT_EXCEPTION = "CONFLICT_EXCEPTION"
     # Step 13: exception safety.
     EXCEPTION_UNVERIFIED = "EXCEPTION_UNVERIFIED"
+    # Step 14: concrete formal-backend outcomes.
+    EXCEPTION_FORMAL_INVALID = "EXCEPTION_FORMAL_INVALID"
+    EXCEPTION_VERIFICATION_ERROR = "EXCEPTION_VERIFICATION_ERROR"
     # Step 13: completeness / missing-information.
     COMPLETENESS_CLOCK_PERIOD = "COMPLETENESS_CLOCK_PERIOD"
     COMPLETENESS_CLOCK_RELATIONSHIP = "COMPLETENESS_CLOCK_RELATIONSHIP"
@@ -627,9 +630,18 @@ class RunStatus(str, Enum):
 
 
 class PowerStatus(str, Enum):
+    """Canonical QoR power availability, retained for backward compatibility.
+
+    Detailed report-ingestion outcomes deliberately belong to the parser-bound
+    ``rca.reports.power.PowerParseStatus`` classification, which is retained in
+    ``QoRResult.raw_reports[\"power\"]``.  Canonical QoR therefore continues to
+    expose only available, unavailable, or existing caller-supplied estimated
+    power semantics.
+    """
+
     AVAILABLE = "AVAILABLE"
-    UNAVAILABLE = "UNAVAILABLE"   # open-source flow; no credible power data
-    ESTIMATED = "ESTIMATED"
+    UNAVAILABLE = "UNAVAILABLE"   # no usable reportable power evidence
+    ESTIMATED = "ESTIMATED"       # legacy compatibility; parser never assigns it
 
 
 class BackendKind(str, Enum):

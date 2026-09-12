@@ -16,6 +16,7 @@ from .semantic_compare import (
     DuplicateRecord,
     FieldDifference,
     PairResult,
+    ScenarioDifference,
     compare,
     compare_sdc_text,
 )
@@ -28,4 +29,5 @@ __all__ = [
     "compare", "compare_sdc_text",
     "ComparisonResult", "ComparisonLevel", "ConstraintPairStatus",
     "DiffEntry", "DuplicateRecord", "FieldDifference", "PairResult",
+    "ScenarioDifference",
 ]
