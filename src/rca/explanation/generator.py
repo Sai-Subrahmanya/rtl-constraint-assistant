@@ -13,6 +13,7 @@ from ..constraint_model import Constraint, ConstraintSet
 from ..inference.application import ConstraintApplicationResult
 from ..inference.rules import InferenceCandidate
 from ..optimizer import Candidate
+from ..readiness.models import ConstraintReadinessReport, ReadinessSeverity
 
 
 def explain_constraint(c: Constraint) -> str:
@@ -111,6 +112,47 @@ def explain_constraint_application(receipt: ConstraintApplicationResult) -> str:
     for evidence in receipt.application_evidence:
         lines.append(f"    evidence[{evidence.kind}/{evidence.rule_id}]: {evidence.description}")
     lines.append("  Origin: advisory inference; application does not relabel this as user-authored intent.")
+    return "\n".join(lines)
+
+
+def explain_constraint_readiness(report: ConstraintReadinessReport) -> str:
+    """Render a Step-29 readiness report without reinterpreting its evidence.
+
+    This is a human-facing projection of the typed report only. It creates no
+    UCM, validation, coverage, proof, artifact, or execution state.
+    """
+    lines = [
+        f"Constraint readiness: {report.status.value}",
+        f"  Requirements: {len(report.requirements)}",
+        f"  Blockers: {len(report.blockers)}",
+        f"  Warnings: {len(report.warnings)}",
+    ]
+    if report.scenario_results:
+        lines.append("  Active scenarios:")
+        for scenario in report.scenario_results:
+            lines.append(
+                f"    {scenario.scenario_id} ({scenario.mode}/{scenario.corner}): "
+                f"{scenario.status.value}"
+            )
+    if report.blockers:
+        lines.append("  Blockers:")
+        for blocker in report.blockers:
+            scope = f" [{blocker.scenario_id}]" if blocker.scenario_id else ""
+            lines.append(f"    {blocker.requirement_id}{scope}: {blocker.message}")
+    warnings = [item for item in report.findings if item.severity == ReadinessSeverity.WARNING]
+    if warnings:
+        lines.append("  Warnings:")
+        for finding in warnings:
+            scope = f" [{finding.scenario_id}]" if finding.scenario_id else ""
+            lines.append(f"    {finding.requirement_id}{scope}: {finding.message}")
+    if report.stale_evidence:
+        lines.append("  Stale evidence:")
+        for finding in report.stale_evidence:
+            lines.append(f"    {finding.message}")
+    if report.next_actions:
+        lines.append("  Next actions:")
+        lines.extend(f"    - {action}" for action in report.next_actions)
+    lines.append("  Boundary: report-only; no UCM, SDC, coverage, history, proof, or EDA state changed.")
     return "\n".join(lines)
 
 

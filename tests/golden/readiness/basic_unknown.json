@@ -1,0 +1,730 @@
+{
+  "blockers": [
+    {
+      "affected_object": null,
+      "category": "SOURCE_DESIGN",
+      "evidence": [
+        {
+          "detail": "Unavailable.",
+          "reference_id": null,
+          "scenario_id": null,
+          "snapshot_identity": null,
+          "source": "design_model",
+          "stale": false,
+          "state": "MISSING"
+        }
+      ],
+      "id": "RDF-463c2d6b88ce93146dea",
+      "message": "Design elaboration evidence is unavailable.",
+      "requirement_id": "DESIGN_ELABORATED",
+      "scenario_id": null,
+      "status": "BLOCKED",
+      "suggested_action": "Run the existing analyze workflow and provide its elaborated design model."
+    },
+    {
+      "affected_object": null,
+      "category": "SOURCE_DESIGN",
+      "evidence": [
+        {
+          "detail": "Unavailable.",
+          "reference_id": null,
+          "scenario_id": null,
+          "snapshot_identity": null,
+          "source": "timing_graph",
+          "stale": false,
+          "state": "MISSING"
+        }
+      ],
+      "id": "RDF-ebedb9e9707a46b80279",
+      "message": "Timing-graph evidence is unavailable.",
+      "requirement_id": "TIMING_GRAPH_AVAILABLE",
+      "scenario_id": null,
+      "status": "BLOCKED",
+      "suggested_action": "Run the existing timing analysis workflow; readiness does not build a replacement graph."
+    }
+  ],
+  "coverage_summary": {
+    "cdc_path_coverage_pct": "UNKNOWN",
+    "clock_relationship_coverage_pct": "UNKNOWN",
+    "clock_source_coverage_pct": "UNKNOWN",
+    "graph_available": false,
+    "input_timing_path_coverage_pct": "UNKNOWN",
+    "output_timing_path_coverage_pct": "UNKNOWN",
+    "reg_to_reg_coverage_pct": "UNKNOWN",
+    "totals": {
+      "cdc_paths": 0,
+      "clock_pairs": 0,
+      "clock_sources": 0,
+      "input_paths": 0,
+      "output_paths": 0,
+      "reg_reg_paths": 0
+    },
+    "uncovered": []
+  },
+  "evidence_summary": {
+    "advisory_candidate_count": 0,
+    "by_state": {
+      "AUTHORITATIVE": 2,
+      "MISSING": 2,
+      "OBSERVED": 1,
+      "UNKNOWN": 9,
+      "VALIDATED": 1
+    },
+    "constraint_count": 0,
+    "recognized_application_count": 0
+  },
+  "findings": [
+    {
+      "affected_object": null,
+      "category": "SOURCE_DESIGN",
+      "evidence": [
+        {
+          "detail": "Unavailable.",
+          "reference_id": null,
+          "scenario_id": null,
+          "snapshot_identity": null,
+          "source": "design_model",
+          "stale": false,
+          "state": "MISSING"
+        }
+      ],
+      "id": "RDF-463c2d6b88ce93146dea",
+      "message": "Design elaboration evidence is unavailable.",
+      "missing_information": [
+        "elaborated design"
+      ],
+      "provenance_references": [],
+      "requirement_id": "DESIGN_ELABORATED",
+      "scenario_id": null,
+      "severity": "BLOCKER",
+      "status": "BLOCKED",
+      "suggested_action": "Run the existing analyze workflow and provide its elaborated design model."
+    },
+    {
+      "affected_object": null,
+      "category": "SOURCE_DESIGN",
+      "evidence": [
+        {
+          "detail": "Unavailable.",
+          "reference_id": null,
+          "scenario_id": null,
+          "snapshot_identity": null,
+          "source": "timing_graph",
+          "stale": false,
+          "state": "MISSING"
+        }
+      ],
+      "id": "RDF-ebedb9e9707a46b80279",
+      "message": "Timing-graph evidence is unavailable.",
+      "missing_information": [
+        "timing graph"
+      ],
+      "provenance_references": [],
+      "requirement_id": "TIMING_GRAPH_AVAILABLE",
+      "scenario_id": null,
+      "severity": "BLOCKER",
+      "status": "BLOCKED",
+      "suggested_action": "Run the existing timing analysis workflow; readiness does not build a replacement graph."
+    },
+    {
+      "affected_object": null,
+      "category": "COVERAGE",
+      "evidence": [
+        {
+          "detail": "cdc_path_coverage_pct=UNKNOWN",
+          "reference_id": "cdc_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "clock_relationship_coverage_pct=UNKNOWN",
+          "reference_id": "clock_relationship_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "clock_source_coverage_pct=UNKNOWN",
+          "reference_id": "clock_source_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "input_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "input_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "output_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "output_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "reg_to_reg_coverage_pct=UNKNOWN",
+          "reference_id": "reg_to_reg_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "id": "RDF-a25e702fa610e8ee33d0",
+      "message": "Coverage is UNKNOWN; readiness did not reinterpret it as zero or complete.",
+      "missing_information": [],
+      "provenance_references": [],
+      "requirement_id": "COVERAGE_KNOWN",
+      "scenario_id": null,
+      "severity": "WARNING",
+      "status": "UNKNOWN",
+      "suggested_action": "Provide an elaborated design/timing graph so the existing coverage engine can report coverage."
+    },
+    {
+      "affected_object": null,
+      "category": "IO_TIMING",
+      "evidence": [
+        {
+          "detail": "input_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "input_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "output_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "output_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "id": "RDF-761b7e11040d5cb697e9",
+      "message": "I/O coverage is UNKNOWN and was not treated as complete.",
+      "missing_information": [],
+      "provenance_references": [],
+      "requirement_id": "IO_TIMING_RESOLVED",
+      "scenario_id": null,
+      "severity": "WARNING",
+      "status": "UNKNOWN",
+      "suggested_action": "Provide design/timing-graph evidence so existing coverage can be computed."
+    },
+    {
+      "affected_object": null,
+      "category": "CLOCK_INTENT",
+      "evidence": [
+        {
+          "detail": "clock_source_coverage_pct=UNKNOWN",
+          "reference_id": "clock_source_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "id": "RDF-3e20906fd92a15e00cf7",
+      "message": "Primary-clock coverage is UNKNOWN; it was not interpreted as zero or complete.",
+      "missing_information": [],
+      "provenance_references": [],
+      "requirement_id": "PRIMARY_CLOCK_INTENT_RESOLVED",
+      "scenario_id": null,
+      "severity": "WARNING",
+      "status": "UNKNOWN",
+      "suggested_action": "Provide an elaborated timing graph so existing coverage can be computed."
+    }
+  ],
+  "informational_findings": [],
+  "kind": "rca_constraint_readiness",
+  "next_actions": [
+    "Provide an elaborated design/timing graph so the existing coverage engine can report coverage.",
+    "Provide an elaborated timing graph so existing coverage can be computed.",
+    "Provide design/timing-graph evidence so existing coverage can be computed.",
+    "Run the existing analyze workflow and provide its elaborated design model.",
+    "Run the existing timing analysis workflow; readiness does not build a replacement graph."
+  ],
+  "provenance_references": [],
+  "requirements": [
+    {
+      "category": "SOURCE_DESIGN",
+      "evidence": [
+        {
+          "detail": "Current ConstraintSet supplied.",
+          "reference_id": null,
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "canonical_ucm",
+          "stale": false,
+          "state": "AUTHORITATIVE"
+        }
+      ],
+      "finding_ids": [],
+      "id": "CANONICAL_UCM_AVAILABLE",
+      "rationale": "Readiness consumed the caller-provided canonical ConstraintSet.",
+      "required": true,
+      "scenario_id": null,
+      "status": "READY",
+      "title": "Canonical UCM available"
+    },
+    {
+      "category": "CLOCK_INTENT",
+      "evidence": [],
+      "finding_ids": [],
+      "id": "CLOCK_PERIODS_RESOLVED",
+      "rationale": "The existing validator reports no missing or invalid primary-clock period.",
+      "required": true,
+      "scenario_id": null,
+      "status": "READY",
+      "title": "Clock periods resolved"
+    },
+    {
+      "category": "COVERAGE",
+      "evidence": [
+        {
+          "detail": "cdc_path_coverage_pct=UNKNOWN",
+          "reference_id": "cdc_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "clock_relationship_coverage_pct=UNKNOWN",
+          "reference_id": "clock_relationship_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "clock_source_coverage_pct=UNKNOWN",
+          "reference_id": "clock_source_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "input_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "input_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "output_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "output_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "reg_to_reg_coverage_pct=UNKNOWN",
+          "reference_id": "reg_to_reg_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "finding_ids": [
+        "RDF-a25e702fa610e8ee33d0"
+      ],
+      "id": "COVERAGE_KNOWN",
+      "rationale": "Existing coverage is UNKNOWN and was retained as UNKNOWN.",
+      "required": true,
+      "scenario_id": null,
+      "status": "UNKNOWN",
+      "title": "Coverage known"
+    },
+    {
+      "category": "SOURCE_DESIGN",
+      "evidence": [
+        {
+          "detail": "Unavailable.",
+          "reference_id": null,
+          "scenario_id": null,
+          "snapshot_identity": null,
+          "source": "design_model",
+          "stale": false,
+          "state": "MISSING"
+        }
+      ],
+      "finding_ids": [
+        "RDF-463c2d6b88ce93146dea"
+      ],
+      "id": "DESIGN_ELABORATED",
+      "rationale": "No elaborated Design model was supplied.",
+      "required": true,
+      "scenario_id": null,
+      "status": "BLOCKED",
+      "title": "Design elaborated"
+    },
+    {
+      "category": "EDA_READINESS",
+      "evidence": [
+        {
+          "detail": "Real EDA preflight is not required for this configured path.",
+          "reference_id": "generic",
+          "scenario_id": null,
+          "snapshot_identity": null,
+          "source": "eda.preflight",
+          "stale": false,
+          "state": "OBSERVED"
+        }
+      ],
+      "finding_ids": [],
+      "id": "EDA_PREFLIGHT_READY",
+      "rationale": "Configured backend 'generic' does not request a real EDA execution boundary.",
+      "required": false,
+      "scenario_id": null,
+      "status": "READY",
+      "title": "EDA preflight ready"
+    },
+    {
+      "category": "IO_TIMING",
+      "evidence": [
+        {
+          "detail": "input_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "input_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "output_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "output_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "finding_ids": [
+        "RDF-761b7e11040d5cb697e9"
+      ],
+      "id": "IO_TIMING_RESOLVED",
+      "rationale": "Existing completeness/coverage evidence contains unresolved I/O timing.",
+      "required": true,
+      "scenario_id": null,
+      "status": "UNKNOWN",
+      "title": "I/O timing resolved"
+    },
+    {
+      "category": "CLOCK_INTENT",
+      "evidence": [
+        {
+          "detail": "clock_source_coverage_pct=UNKNOWN",
+          "reference_id": "clock_source_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "finding_ids": [
+        "RDF-3e20906fd92a15e00cf7"
+      ],
+      "id": "PRIMARY_CLOCK_INTENT_RESOLVED",
+      "rationale": "Authoritative coverage is unavailable or UNKNOWN for clock sources.",
+      "required": true,
+      "scenario_id": null,
+      "status": "UNKNOWN",
+      "title": "Primary clock intent resolved"
+    },
+    {
+      "category": "EVIDENCE_PROVENANCE",
+      "evidence": [],
+      "finding_ids": [],
+      "id": "REQUIRED_EVIDENCE_PRESENT",
+      "rationale": "Canonical UCM provenance and required assumption evidence are present.",
+      "required": true,
+      "scenario_id": null,
+      "status": "READY",
+      "title": "Required provenance/evidence present"
+    },
+    {
+      "category": "EVIDENCE_PROVENANCE",
+      "evidence": [
+        {
+          "detail": "No supplied evidence snapshot is stale.",
+          "reference_id": null,
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "readiness.snapshot_comparison",
+          "stale": false,
+          "state": "AUTHORITATIVE"
+        }
+      ],
+      "finding_ids": [],
+      "id": "STALE_EVIDENCE_CLEAR",
+      "rationale": "Existing source/application/advisory evidence matches the supplied current snapshots.",
+      "required": true,
+      "scenario_id": null,
+      "status": "READY",
+      "title": "Evidence snapshots current"
+    },
+    {
+      "category": "SOURCE_DESIGN",
+      "evidence": [
+        {
+          "detail": "Unavailable.",
+          "reference_id": null,
+          "scenario_id": null,
+          "snapshot_identity": null,
+          "source": "timing_graph",
+          "stale": false,
+          "state": "MISSING"
+        }
+      ],
+      "finding_ids": [
+        "RDF-ebedb9e9707a46b80279"
+      ],
+      "id": "TIMING_GRAPH_AVAILABLE",
+      "rationale": "No timing graph was supplied; timing intent and coverage cannot be assessed.",
+      "required": true,
+      "scenario_id": null,
+      "status": "BLOCKED",
+      "title": "Timing graph available"
+    },
+    {
+      "category": "VALIDATION",
+      "evidence": [
+        {
+          "detail": "Existing validation status PASS.",
+          "reference_id": "PASS",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "validation",
+          "stale": false,
+          "state": "VALIDATED"
+        }
+      ],
+      "finding_ids": [],
+      "id": "VALIDATION_CLEAN",
+      "rationale": "Readiness uses the existing validation report without reproducing validation logic.",
+      "required": true,
+      "scenario_id": null,
+      "status": "READY",
+      "title": "Validation clean"
+    }
+  ],
+  "scenario_results": [],
+  "schema_version": 1,
+  "source_snapshot_identity": {
+    "config": "3f4506b915fd9b15016b3b69d967e3022faa348ce67f87f4cbd238622aaee5c6",
+    "constraint_set": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "design": "",
+    "scenario_matrix": "fdc67c680cefe0bfdf66b5e95cb34b044c93e9bd9f62ef9c70ad48600031e37e",
+    "timing_graph": ""
+  },
+  "stale_evidence": [],
+  "status": "BLOCKED",
+  "validation_summary": {
+    "blocking": 0,
+    "completeness_summary": {},
+    "conflict_summary": {
+      "conflict_codes": [],
+      "conflict_count": 0,
+      "overlap_codes": [],
+      "overlap_count": 0
+    },
+    "coverage": {
+      "cdc_path_coverage_pct": "UNKNOWN",
+      "clock_relationship_coverage_pct": "UNKNOWN",
+      "clock_source_coverage_pct": "UNKNOWN",
+      "graph_available": false,
+      "input_timing_path_coverage_pct": "UNKNOWN",
+      "output_timing_path_coverage_pct": "UNKNOWN",
+      "reg_to_reg_coverage_pct": "UNKNOWN",
+      "totals": {
+        "cdc_paths": 0,
+        "clock_pairs": 0,
+        "clock_sources": 0,
+        "input_paths": 0,
+        "output_paths": 0,
+        "reg_reg_paths": 0
+      },
+      "uncovered": []
+    },
+    "errors": 0,
+    "exception_summary": {
+      "exception_count": 0
+    },
+    "infos": 1,
+    "issue_count": 1,
+    "overlap_summary": {},
+    "reference_summary": {
+      "empty_target_count": 0,
+      "unknown": [],
+      "unknown_ref_count": 0
+    },
+    "scenario_summary": {
+      "active_scenarios": [],
+      "scenario_count": 0,
+      "scenarios": [],
+      "unknown_scenario_count": 0
+    },
+    "status": "PASS",
+    "warnings": 0
+  },
+  "warnings": [
+    {
+      "affected_object": null,
+      "category": "COVERAGE",
+      "evidence": [
+        {
+          "detail": "cdc_path_coverage_pct=UNKNOWN",
+          "reference_id": "cdc_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "clock_relationship_coverage_pct=UNKNOWN",
+          "reference_id": "clock_relationship_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "clock_source_coverage_pct=UNKNOWN",
+          "reference_id": "clock_source_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "input_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "input_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "output_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "output_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "reg_to_reg_coverage_pct=UNKNOWN",
+          "reference_id": "reg_to_reg_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "id": "RDF-a25e702fa610e8ee33d0",
+      "message": "Coverage is UNKNOWN; readiness did not reinterpret it as zero or complete.",
+      "missing_information": [],
+      "provenance_references": [],
+      "requirement_id": "COVERAGE_KNOWN",
+      "scenario_id": null,
+      "severity": "WARNING",
+      "status": "UNKNOWN",
+      "suggested_action": "Provide an elaborated design/timing graph so the existing coverage engine can report coverage."
+    },
+    {
+      "affected_object": null,
+      "category": "IO_TIMING",
+      "evidence": [
+        {
+          "detail": "input_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "input_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        },
+        {
+          "detail": "output_timing_path_coverage_pct=UNKNOWN",
+          "reference_id": "output_timing_path_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "id": "RDF-761b7e11040d5cb697e9",
+      "message": "I/O coverage is UNKNOWN and was not treated as complete.",
+      "missing_information": [],
+      "provenance_references": [],
+      "requirement_id": "IO_TIMING_RESOLVED",
+      "scenario_id": null,
+      "severity": "WARNING",
+      "status": "UNKNOWN",
+      "suggested_action": "Provide design/timing-graph evidence so existing coverage can be computed."
+    },
+    {
+      "affected_object": null,
+      "category": "CLOCK_INTENT",
+      "evidence": [
+        {
+          "detail": "clock_source_coverage_pct=UNKNOWN",
+          "reference_id": "clock_source_coverage_pct",
+          "scenario_id": null,
+          "snapshot_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "source": "coverage",
+          "stale": false,
+          "state": "UNKNOWN"
+        }
+      ],
+      "id": "RDF-3e20906fd92a15e00cf7",
+      "message": "Primary-clock coverage is UNKNOWN; it was not interpreted as zero or complete.",
+      "missing_information": [],
+      "provenance_references": [],
+      "requirement_id": "PRIMARY_CLOCK_INTENT_RESOLVED",
+      "scenario_id": null,
+      "severity": "WARNING",
+      "status": "UNKNOWN",
+      "suggested_action": "Provide an elaborated timing graph so existing coverage can be computed."
+    }
+  ]
+}

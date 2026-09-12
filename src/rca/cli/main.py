@@ -37,7 +37,7 @@ from ..eda import (
 )
 from ..equivalence import compare_sdc_text
 from ..exceptions import SymbiYosysFormalBackend, formal_backend_from_config
-from ..explanation import design_report, explain_constraint
+from ..explanation import design_report, explain_constraint, explain_constraint_readiness
 from ..inference import (
     ApplicationStatus,
     ConstraintApplication,
@@ -55,6 +55,7 @@ from ..optimizer import Optimizer
 from ..parser import SlangAdapter
 from ..provenance import AssumptionLedger
 from ..qor.repository import QoRRepositoryError, SQLiteQoRRepository
+from ..readiness import assess_constraint_readiness
 from ..sdc import SDCParser, get_backend
 from ..sdc_importer import SdcImporter
 from ..search import KnowledgeEngine, KnowledgeError, load_knowledge_file
@@ -744,6 +745,51 @@ def generate(config: str = typer.Argument(..., help="Path to project YAML"),
     # Exit non-zero on BLOCKED/ERROR so CI scripts don't mistake it for success.
     if status_str in ("BLOCKED", "ERROR"):
         raise typer.Exit(code=2)
+
+
+@app.command()
+def readiness(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    ucm: str = typer.Option(..., "--ucm", help="Current canonical UCM JSON snapshot (required)"),
+    scenario_ids: Annotated[list[str] | None, typer.Option(
+        "--scenario", help="Restrict report to an active MCMM scenario (repeatable)",
+    )] = None,
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic readiness JSON only"),
+):
+    """Assess constraint readiness without changing UCM or executing EDA.
+
+    A current canonical UCM snapshot is deliberately required. Advisory
+    inference is generated only in memory for suggested workflow context: it
+    is never materialized, accepted, saved, or used as a substitute for UCM.
+    This command writes no UCM/SDC/coverage/history/artifact/application state
+    and does not run synthesis, STA, or formal proof execution.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    cfg = _load(config)
+    cset = _load_canonical_ucm(ucm, cfg)
+    design, _ = _do_parse(cfg)
+    timing_graph = _do_timing(cfg, design)
+    inference_report = InferenceEngine().infer_candidates(
+        design, timing_graph, cfg, cset, AssumptionLedger(), knowledge=KnowledgeEngine(),
+    )
+    report = assess_constraint_readiness(
+        cfg, cset, design, timing_graph,
+        inference_report=inference_report,
+        scenario_ids=tuple(scenario_ids or ()),
+    )
+    if json_out:
+        typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
+        return
+    color = {
+        "READY": "green", "READY_WITH_WARNINGS": "yellow", "INCOMPLETE": "yellow",
+        "UNKNOWN": "magenta", "BLOCKED": "red", "UNSUPPORTED": "red",
+    }[report.status.value]
+    console.print(Panel(
+        f"[bold {color}]{report.status.value}[/bold {color}] — report only; canonical UCM unchanged",
+        title="Constraint readiness & closure",
+        border_style=color,
+    ))
+    console.print(explain_constraint_readiness(report))
 
 
 @app.command()

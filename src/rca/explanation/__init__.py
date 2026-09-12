@@ -3,6 +3,7 @@ from .generator import (
     explain_candidate,
     explain_constraint,
     explain_constraint_application,
+    explain_constraint_readiness,
     explain_inference_candidate,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "explain_candidate",
     "explain_constraint",
     "explain_constraint_application",
+    "explain_constraint_readiness",
     "explain_inference_candidate",
 ]
