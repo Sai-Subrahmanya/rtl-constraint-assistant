@@ -44,6 +44,17 @@ from ..explanation import (
     explain_constraint_readiness,
     explain_constraint_review,
 )
+from ..handoff import (
+    ConstraintHandoff,
+    HandoffError,
+    HandoffPolicy,
+    HandoffStatus,
+    HandoffTarget,
+    assess_constraint_handoff,
+    execute_constraint_handoff,
+    prepare_constraint_handoff,
+    verify_constraint_handoff,
+)
 from ..inference import (
     ApplicationStatus,
     ConstraintApplication,
@@ -261,6 +272,37 @@ def _load_release_record(path: str) -> Any:
         return record
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         console.print(f"[red]Cannot load release record: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+def _load_handoff_policy(path: str | None) -> HandoffPolicy:
+    """Load explicit handoff target policy; defaults remain conservative."""
+    try:
+        data: Any = {}
+        if path:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise TypeError("handoff policy must be a JSON object")
+        return HandoffPolicy.from_dict(data)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Cannot load handoff policy: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+def _load_handoff_record(path: str) -> ConstraintHandoff:
+    """Read a saved JSON handoff/assessment without repairing it."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise TypeError("handoff record must be a JSON object")
+        if isinstance(data.get("handoff"), dict):
+            data = data["handoff"]
+        result = ConstraintHandoff.from_dict(data)
+        if not result.id or not result.identity.package_id:
+            raise ValueError("handoff record is missing package identity")
+        return result
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Cannot load handoff record: {exc}[/red]")
         raise typer.Exit(code=2) from exc
 
 
@@ -1234,6 +1276,82 @@ def _release_cli_error(json_out: bool, message: str) -> None:
     else:
         console.print(f"[red]{message}[/red]")
     raise typer.Exit(code=2)
+
+
+@app.command()
+def handoff(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    release: str = typer.Option(..., "--release", help="Existing verified Step-32 release package directory"),
+    target: str = typer.Option("GENERIC", "--target", help="GENERIC|OPENSTA_OPENROAD|SYNOPSYS|CADENCE|FUTURE_VENDOR"),
+    policy: str | None = typer.Option(None, "--policy", help="Explicit HandoffPolicy JSON file"),
+    prepare: bool = typer.Option(False, "--prepare", help="Explicitly prepare immutable target handoff projection"),
+    execute: bool = typer.Option(False, "--execute", help="Request boundary-only execution status; never runs a hidden tool"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic handoff JSON only"),
+):
+    """Assess or explicitly prepare a release package for one downstream target.
+
+    This consumes the Step-32 package and its verifier. It never mutates a
+    release/UCM/package, regenerates SDC, drops MCMM scope, or claims external
+    EDA signoff. `--execute` is an honest unavailable boundary until the user
+    invokes an explicitly configured existing EDA flow with retained manifest.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    if execute and not prepare:
+        _release_cli_error(json_out, "--execute requires explicit --prepare.")
+    cfg = _load(config)
+    handoff_policy = _load_handoff_policy(policy)
+    try:
+        target_value = HandoffTarget(target.strip().upper())
+        if prepare:
+            record = prepare_constraint_handoff(release, target=target_value, policy=handoff_policy, config=cfg)
+            result = execute_constraint_handoff(record, execute=execute)
+            payload = result.to_dict()
+        else:
+            assessment = assess_constraint_handoff(release, target=target_value, policy=handoff_policy, config=cfg)
+            payload = assessment.to_dict()
+            result = None
+    except (HandoffError, ValueError) as exc:
+        _release_cli_error(json_out, str(exc))
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        if result is not None and result.status not in {HandoffStatus.HANDOFF_PREPARED, HandoffStatus.HANDOFF_EXECUTED}:
+            raise typer.Exit(code=2)
+        if result is None and not assessment.handoff_possible:
+            raise typer.Exit(code=2)
+        return
+    status = result.status if result is not None else assessment.handoff.status
+    color = "green" if status in {HandoffStatus.HANDOFF_READY, HandoffStatus.HANDOFF_PREPARED} else "red"
+    console.print(Panel(
+        f"[bold {color}]{status.value}[/bold {color}] — release package handoff only; not EDA signoff",
+        title="Constraint downstream handoff", border_style=color,
+    ))
+    console.print_json(json.dumps(payload, sort_keys=True, default=str))
+    if status not in {HandoffStatus.HANDOFF_READY, HandoffStatus.HANDOFF_PREPARED}:
+        raise typer.Exit(code=2)
+
+
+@app.command(name="handoff-verify")
+def handoff_verify(
+    handoff: str = typer.Argument(..., help="Saved handoff or handoff-assessment JSON"),
+    release: str | None = typer.Option(None, "--release", help="Optional explicit package directory override"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic handoff verification JSON only"),
+):
+    """Statelessly verify a handoff against its current release package."""
+    configure_logging(level="WARNING" if json_out else "INFO")
+    try:
+        assessment = verify_constraint_handoff(_load_handoff_record(handoff), release)
+    except (HandoffError, ValueError) as exc:
+        _release_cli_error(json_out, str(exc))
+    payload = assessment.to_dict()
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    else:
+        color = "green" if assessment.handoff_possible else "red"
+        console.print(Panel(f"[bold {color}]{assessment.handoff.status.value}[/bold {color}] — verification only",
+                            title="Constraint handoff verification", border_style=color))
+        console.print_json(json.dumps(payload, sort_keys=True, default=str))
+    if not assessment.handoff_possible:
+        raise typer.Exit(code=2)
 
 
 @app.command()
