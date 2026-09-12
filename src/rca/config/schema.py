@@ -337,6 +337,25 @@ PROJECT_SCHEMA: dict = {
             },
             "default": {},
         },
+        "workflow": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "ucm_snapshot": {"type": "string"},
+                "knowledge_sources": {"type": "array", "items": {"type": "string"}, "default": []},
+                "inference_policy": {"type": "object", "default": {}},
+                "application_policy": {"type": "object", "default": {}},
+                "validation_policy": {"type": "object", "default": {}},
+                "coverage_policy": {"type": "object", "default": {}},
+                "readiness_policy": {"type": "object", "default": {}},
+                "review_policy": {"type": "object", "default": {}},
+                "release_policy": {"type": "object", "default": {}},
+                "handoff_policy": {"type": "object", "default": {}},
+                "release_package_dir": {"type": "string"},
+                "handoff_target": {"type": "string", "enum": ["GENERIC", "OPENSTA_OPENROAD", "SYNOPSYS", "CADENCE", "FUTURE_VENDOR"], "default": "GENERIC"}
+            },
+            "default": {}
+        },
         "formal": {
             "type": "object",
             "additionalProperties": False,

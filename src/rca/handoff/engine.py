@@ -341,7 +341,9 @@ def _issue(severity: HandoffIssueSeverity, category: str, message: str,
 def _identity_value(value: Any | None) -> str:
     if value is None:
         return ""
-    if hasattr(value, "model_dump"):
+    if hasattr(value, "engineering_dict"):
+        value = value.engineering_dict()
+    elif hasattr(value, "model_dump"):
         value = value.model_dump()
     elif hasattr(value, "to_dict"):
         value = value.to_dict()

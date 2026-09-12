@@ -291,6 +291,41 @@ class FormalConfig(BaseModel):
         return self
 
 
+
+
+class WorkflowConfig(BaseModel):
+    """Optional declarative references for the complete governed workflow.
+
+    These are configuration inputs only. Policy dictionaries are converted by
+    their existing owning engines at the boundary; this class does not create a
+    second policy/governance system.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ucm_snapshot: str | None = None
+    knowledge_sources: list[str] = Field(default_factory=list)
+    inference_policy: dict[str, Any] = Field(default_factory=dict)
+    application_policy: dict[str, Any] = Field(default_factory=dict)
+    validation_policy: dict[str, Any] = Field(default_factory=dict)
+    coverage_policy: dict[str, Any] = Field(default_factory=dict)
+    readiness_policy: dict[str, Any] = Field(default_factory=dict)
+    review_policy: dict[str, Any] = Field(default_factory=dict)
+    release_policy: dict[str, Any] = Field(default_factory=dict)
+    handoff_policy: dict[str, Any] = Field(default_factory=dict)
+    release_package_dir: str | None = None
+    handoff_target: str = "GENERIC"
+
+    @field_validator("handoff_target")
+    @classmethod
+    def _handoff_target(cls, value: str) -> str:
+        value = value.strip().upper()
+        allowed = {"GENERIC", "OPENSTA_OPENROAD", "SYNOPSYS", "CADENCE", "FUTURE_VENDOR"}
+        if value not in allowed:
+            raise ValueError("workflow.handoff_target must be one of " + ", ".join(sorted(allowed)))
+        return value
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -307,6 +342,7 @@ class ProjectConfig(BaseModel):
     scenarios: list[ScenarioSpec] = Field(default_factory=list)
     mcmm: MCMMConfig = Field(default_factory=MCMMConfig)
     formal: FormalConfig = Field(default_factory=FormalConfig)
+    workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
 
     # Resolved (not from YAML directly)
     config_path: Path | None = Field(default=None, exclude=True)
@@ -417,6 +453,44 @@ class ProjectConfig(BaseModel):
             proof_path = Path(proof.sby_file)
             if not proof_path.is_absolute():
                 proof.sby_file = str((root / proof_path).resolve())
+        if self.workflow.ucm_snapshot and not Path(self.workflow.ucm_snapshot).is_absolute():
+            self.workflow.ucm_snapshot = str((root / self.workflow.ucm_snapshot).resolve())
+        self.workflow.knowledge_sources = [
+            str((root / item).resolve()) if not Path(item).is_absolute() else item
+            for item in self.workflow.knowledge_sources
+        ]
+        if self.workflow.release_package_dir and not Path(self.workflow.release_package_dir).is_absolute():
+            self.workflow.release_package_dir = str((root / self.workflow.release_package_dir).resolve())
+
+    def engineering_dict(self) -> dict[str, Any]:
+        """Portable deterministic config projection used by engineering IDs.
+
+        Runtime source/output paths resolved beneath the project root are made
+        project-relative; host-specific absolute locations never become release
+        or handoff identity merely because a config was loaded elsewhere.
+        """
+        value = self.model_dump(mode="json", exclude={"config_path", "project_root"}, exclude_none=True)
+        # `resolve_paths` represents no Liberty configuration as an empty list;
+        # normalize the pre-load model the same way for portable identity.
+        if isinstance(value.get("flow"), dict):
+            value["flow"].setdefault("liberty", [])
+        root = self.project_root.resolve() if self.project_root else None
+
+        def portable(item: Any) -> Any:
+            if isinstance(item, dict):
+                return {str(key): portable(val) for key, val in sorted(item.items())}
+            if isinstance(item, list):
+                return [portable(value) for value in item]
+            if isinstance(item, str) and root is not None:
+                try:
+                    path = Path(item)
+                    if path.is_absolute():
+                        return str(path.resolve().relative_to(root))
+                except (OSError, ValueError):
+                    pass
+            return item
+
+        return portable(value)
 
     def output_dir(self) -> Path:
         p = Path(self.flow.output_dir)
@@ -442,7 +516,8 @@ def load_config(path: str | Path) -> ProjectConfig:
     try:
         jsonschema.validate(raw, PROJECT_SCHEMA)
     except jsonschema.ValidationError as e:
-        raise ValueError(f"Invalid project config at {p}: {e.message}") from e
+        location = ".".join(str(item) for item in e.absolute_path) or "<root>"
+        raise ValueError(f"Invalid project config at {p} ({location}): {e.message}") from e
 
     cfg = ProjectConfig.model_validate(raw)
     cfg.config_path = p
@@ -480,5 +555,5 @@ def write_config(cfg: ProjectConfig, path: str | Path) -> None:
     # JSON mode converts Enum/path-like Pydantic values to portable YAML
     # primitives; ``rca init`` must generate a configuration that can be
     # parsed back without PyYAML representer errors.
-    data = cfg.model_dump(mode="json", exclude={"config_path", "project_root"})
+    data = cfg.model_dump(mode="json", exclude={"config_path", "project_root"}, exclude_none=True)
     p.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8")

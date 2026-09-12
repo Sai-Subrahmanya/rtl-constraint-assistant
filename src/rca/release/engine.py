@@ -1144,6 +1144,8 @@ def _identity_value(value: Any) -> Any:
 def _as_dict(value: Any) -> Any:
     if value is None:
         return None
+    if hasattr(value, "engineering_dict"):
+        return value.engineering_dict()
     if hasattr(value, "to_dict"):
         return value.to_dict()
     if hasattr(value, "as_dict"):

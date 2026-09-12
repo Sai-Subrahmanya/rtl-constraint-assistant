@@ -109,6 +109,7 @@ from ..utils.enums import SafeMode
 from ..utils.hashing import hash_file, stable_hash
 from ..validation import validate as run_validation
 from ..web import create_app
+from ..workflow import WorkflowInputs, build_complete_workflow, explain_complete_workflow
 
 app = typer.Typer(
     add_completion=False,
@@ -1276,6 +1277,68 @@ def _release_cli_error(json_out: bool, message: str) -> None:
     else:
         console.print(f"[red]{message}[/red]")
     raise typer.Exit(code=2)
+
+
+@app.command(name="run")
+def run_workflow(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM snapshot; defaults to workflow.ucm_snapshot"),
+    review: str | None = typer.Option(None, "--review", help="Optional existing Step-31 review JSON"),
+    release_package: str | None = typer.Option(None, "--release-package", help="Optional existing Step-32 package directory"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic workflow JSON only"),
+):
+    """Project the complete RCA workflow without bypassing any governance stage.
+
+    Existing analysis/inference/validation/readiness/lineage services are used
+    in memory. Candidates remain advisory, review/release remain explicit, and
+    absent approvals/packages result in REVIEW_REQUIRED/PENDING—not a hidden
+    lifecycle action. Optional EDA remains unavailable unless actual existing
+    manifest evidence is supplied through its own flow.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    cfg = _load(config)
+    ucm_path = ucm or cfg.workflow.ucm_snapshot
+    cset = _load_canonical_ucm(ucm_path, cfg)
+    design, _ = _do_parse(cfg)
+    timing_graph = _do_timing(cfg, design)
+    knowledge = KnowledgeEngine()
+    for source in cfg.workflow.knowledge_sources:
+        try:
+            knowledge.add_patterns(load_knowledge_file(source))
+        except KnowledgeError as exc:
+            _release_cli_error(json_out, f"Cannot load configured knowledge source: {exc}")
+    inference = InferenceEngine().infer_candidates(design, timing_graph, cfg, cset, AssumptionLedger(), knowledge=knowledge)
+    matrix = _mcmm_matrix(cfg, cset)
+    validation = run_validation(design, timing_graph, cset, backend="generic",
+                                active_scenarios=set(matrix.active_ids) if matrix.is_enabled else None)
+    readiness_report = assess_constraint_readiness(cfg, cset, design, timing_graph, validation=validation)
+    lineage_report = build_constraint_lineage(cset, config=cfg, design=design, timing_graph=timing_graph,
+                                              validation=validation, readiness=readiness_report)
+    review_assessment = None
+    if review:
+        review_assessment = assess_constraint_review(cset, review=_load_review_record(review), config=cfg, design=design,
+                                                     timing_graph=timing_graph, lineage=lineage_report,
+                                                     readiness=readiness_report, validation=validation)
+    package_verification = None
+    handoff_assessment = None
+    if release_package:
+        from ..release import verify_release_package
+
+        package_verification = verify_release_package(release_package)
+        handoff_assessment = assess_constraint_handoff(
+            release_package, target=cfg.workflow.handoff_target,
+            policy=HandoffPolicy.from_dict(cfg.workflow.handoff_policy), config=cfg,
+        )
+    report = build_complete_workflow(
+        cset,
+        inputs=WorkflowInputs(design=design, knowledge=knowledge, inference=inference, validation=validation,
+                              readiness=readiness_report, lineage=lineage_report, review=review_assessment,
+                              package_verification=package_verification, handoff=handoff_assessment),
+    )
+    if json_out:
+        typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
+        return
+    console.print(explain_complete_workflow(report))
 
 
 @app.command()
