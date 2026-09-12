@@ -63,6 +63,20 @@ from ..parser import SlangAdapter
 from ..provenance import AssumptionLedger
 from ..qor.repository import QoRRepositoryError, SQLiteQoRRepository
 from ..readiness import assess_constraint_readiness
+from ..release import (
+    ReleaseDecisionError,
+    ReleasePackageError,
+    assess_constraint_release,
+    create_release_candidate,
+    create_release_package,
+    release_constraint_set,
+    revoke_release,
+    supersede_release,
+    verify_release_package,
+)
+from ..release import (
+    ReleasePolicy as ConstraintReleasePolicy,
+)
 from ..review import (
     ConstraintReview,
     ReviewActor,
@@ -211,6 +225,42 @@ def _load_review_policy(path: str | None, allow_warnings: bool) -> ReviewPolicy:
         return policy
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         console.print(f"[red]Cannot load review policy: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+def _load_release_policy(path: str | None, allow_warnings: bool) -> ConstraintReleasePolicy:
+    """Load an explicit Step-32 policy without changing any existing authority."""
+    try:
+        data: Any = {}
+        if path:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise TypeError("release policy must be a JSON object")
+        data = dict(data)
+        if allow_warnings:
+            data["allow_release_with_warnings"] = True
+        return ConstraintReleasePolicy.from_dict(data)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Cannot load release policy: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+def _load_release_record(path: str) -> Any:
+    """Load an explicit release record/assessment without persisting or repairing it."""
+    from ..release import ConstraintRelease
+
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise TypeError("release record must be a JSON object")
+        if isinstance(payload.get("release"), dict):
+            payload = payload["release"]
+        record = ConstraintRelease.from_dict(payload)
+        if not record.id or not record.snapshot.ucm_content_identity:
+            raise ValueError("release record is missing its exact UCM identity")
+        return record
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Cannot load release record: {exc}[/red]")
         raise typer.Exit(code=2) from exc
 
 
@@ -1008,6 +1058,182 @@ def review(
         title="Constraint review & approval boundary", border_style=color,
     ))
     console.print(explain_constraint_review(assessment))
+
+
+@app.command()
+def release(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    ucm: str = typer.Option(..., "--ucm", help="Explicit reviewed canonical UCM JSON snapshot"),
+    review: str = typer.Option(..., "--review", help="Explicit approved Step-31 review JSON"),
+    decision: str | None = typer.Option(None, "--decision", help="Explicit RELEASE or REVOKE lifecycle action"),
+    releaser: str | None = typer.Option(None, "--releaser", help="Explicit release actor identity"),
+    releaser_role: str | None = typer.Option(None, "--releaser-role", help="Optional explicit release actor role"),
+    comment: str = typer.Option("", "--comment", help="Explicit release rationale/comment"),
+    scenario_ids: Annotated[list[str] | None, typer.Option(
+        "--scenario", help="Selected MCMM release scope (repeatable)",
+    )] = None,
+    all_active_scenarios: bool = typer.Option(False, "--all-active-scenarios",
+                                               help="Explicitly release all active MCMM scenarios"),
+    policy: str | None = typer.Option(None, "--policy", help="Explicit ReleasePolicy JSON file"),
+    allow_warnings: bool = typer.Option(False, "--allow-warnings",
+                                        help="Explicitly set policy.allow_release_with_warnings"),
+    prior_release: str | None = typer.Option(None, "--release-record",
+                                              help="Prior release JSON or release-assessment JSON"),
+    supersede: str | None = typer.Option(None, "--supersede", help="Prior release JSON to supersede"),
+    sdc: str | None = typer.Option(None, "--sdc", help="Existing explicitly supplied SDC; release never generates one"),
+    artifact: Annotated[list[str] | None, typer.Option(
+        "--artifact", help="Existing supplied KIND=PATH release artifact (repeatable)",
+    )] = None,
+    package_dir: str | None = typer.Option(None, "--package-dir", help="Explicit directory for a reproducible package"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic release JSON only"),
+):
+    """Assess or explicitly release one reviewed UCM; it is not EDA signoff.
+
+    The command loads (never creates or changes) the supplied Step-31 review,
+    derives only read-only current evidence via existing validation/readiness/
+    lineage infrastructure, and never changes canonical UCM, applies inferred
+    intent, runs EDA/formal, generates SDC, or updates SQLite/cache authority.
+    Without ``--decision RELEASE`` it is an assessment only. Packaging is also
+    explicit and only copies supplied evidence; RCA release remains distinct
+    from external STA, physical, commercial, or ASIC signoff.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    if prior_release and supersede:
+        _release_cli_error(json_out, "Use at most one of --release-record and --supersede.")
+    try:
+        artifacts = _parse_release_artifacts(artifact or [])
+    except ValueError as exc:
+        _release_cli_error(json_out, str(exc))
+    cfg = _load(config)
+    cset = _load_canonical_ucm(ucm, cfg)
+    review_record = _load_review_record(review)
+    stored_release = _load_release_record(prior_release) if prior_release else None
+    release_policy = _load_release_policy(policy, allow_warnings)
+    if stored_release is not None and policy is None and not allow_warnings:
+        # Reassessment consumes the release's immutable policy by default.
+        release_policy = stored_release.policy
+    design, _ = _do_parse(cfg)
+    timing_graph = _do_timing(cfg, design)
+    matrix = _mcmm_matrix(cfg, cset)
+    validation = run_validation(
+        design, timing_graph, cset, backend="generic",
+        active_scenarios=set(matrix.active_ids) if matrix.is_enabled else None,
+    )
+    readiness_report = assess_constraint_readiness(
+        cfg, cset, design, timing_graph, validation=validation,
+        scenario_ids=tuple(scenario_ids or ()),
+    )
+    lineage_report = build_constraint_lineage(
+        cset, config=cfg, design=design, timing_graph=timing_graph,
+        validation=validation, readiness=readiness_report,
+    )
+    # Reassessment is read-only and makes an old review visibly stale rather
+    # than silently treating it as current. It does not create/approve/revoke it.
+    review_assessment = assess_constraint_review(
+        cset, review=review_record, config=cfg, design=design, timing_graph=timing_graph,
+        lineage=lineage_report, readiness=readiness_report, validation=validation,
+    )
+    common = {
+        "config": cfg, "design": design, "timing_graph": timing_graph, "review": review_assessment,
+        "readiness": readiness_report, "validation": validation, "lineage": lineage_report,
+        "sdc_path": sdc, "additional_artifacts": artifacts,
+    }
+    if stored_release is not None:
+        record = stored_release
+        if record.policy != release_policy:
+            _release_cli_error(json_out, "--release-record must use its recorded policy; provide a matching policy if overriding defaults.")
+    elif supersede:
+        record = supersede_release(
+            _load_release_record(supersede), cset, policy=release_policy,
+            scenario_ids=tuple(scenario_ids or ()), all_active_scenarios=all_active_scenarios, **common,
+        )
+    else:
+        record = create_release_candidate(
+            cset, policy=release_policy, scenario_ids=tuple(scenario_ids or ()),
+            all_active_scenarios=all_active_scenarios, **common,
+        )
+    action = (decision or "").strip().upper()
+    actor = ReviewActor.from_value(releaser, role=releaser_role)
+    try:
+        if action == "RELEASE":
+            record = release_constraint_set(record, cset, policy=record.policy, actor=actor, comment=comment, **common)
+        elif action == "REVOKE":
+            record = revoke_release(record, cset, actor=actor, comment=comment, **common)
+        elif action:
+            raise ReleaseDecisionError(f"Unsupported explicit release decision: {decision!r}")
+        assessment = assess_constraint_release(cset, release=record, policy=record.policy, **common)
+        payload: dict[str, Any] = assessment.to_dict()
+        if package_dir is not None:
+            package = create_release_package(
+                record, cset, package_dir, config=cfg, design=design, timing_graph=timing_graph,
+                review=review_record, readiness=readiness_report, validation=validation, lineage=lineage_report,
+                sdc_path=sdc, additional_artifacts=artifacts,
+            )
+            payload["package"] = package.to_dict()
+    except (ReleaseDecisionError, ReleasePackageError) as exc:
+        _release_cli_error(json_out, str(exc))
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        return
+    color = {
+        "READY": "green", "RELEASED": "green", "RELEASED_WITH_WARNINGS": "yellow",
+        "CANDIDATE": "cyan", "BLOCKED": "red", "INVALID": "red", "STALE": "magenta",
+        "REVOKED": "red", "UNKNOWN": "magenta",
+    }[assessment.current_status.value]
+    console.print(Panel(
+        f"[bold {color}]{assessment.current_status.value}[/bold {color}] — RCA release only; "
+        "not external EDA, STA, physical, commercial, or ASIC signoff",
+        title="Constraint release baseline & package", border_style=color,
+    ))
+    console.print_json(json.dumps(payload, sort_keys=True, default=str))
+
+
+@app.command(name="release-verify")
+def release_verify(
+    package: str = typer.Argument(..., help="Existing RCA release package directory"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic verification JSON only"),
+):
+    """Statelessly verify an RCA release package; never repairs or runs tools."""
+    configure_logging(level="WARNING" if json_out else "INFO")
+    verification = verify_release_package(package)
+    payload = verification.to_dict()
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        if verification.status.value != "VERIFIED":
+            raise typer.Exit(code=2)
+        return
+    color = "green" if verification.status.value == "VERIFIED" else "red"
+    console.print(Panel(
+        f"[bold {color}]{verification.status.value}[/bold {color}] — integrity only; "
+        "no EDA/formal execution, mutation, or repair",
+        title="RCA release package verification", border_style=color,
+    ))
+    console.print_json(json.dumps(payload, sort_keys=True, default=str))
+    if verification.status.value != "VERIFIED":
+        raise typer.Exit(code=2)
+
+
+def _parse_release_artifacts(values: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise ValueError("Each --artifact must be explicit KIND=PATH.")
+        kind, path = value.split("=", 1)
+        kind = kind.strip()
+        path = path.strip()
+        if not kind or not path or kind in result:
+            raise ValueError("Each --artifact needs a unique non-empty KIND=PATH.")
+        result[kind] = path
+    return result
+
+
+def _release_cli_error(json_out: bool, message: str) -> None:
+    if json_out:
+        typer.echo(json.dumps({"status": "INVALID", "message": message, "ucm_mutated": False},
+                               indent=2, sort_keys=True))
+    else:
+        console.print(f"[red]{message}[/red]")
+    raise typer.Exit(code=2)
 
 
 @app.command()

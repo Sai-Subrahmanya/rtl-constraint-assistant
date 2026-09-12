@@ -38,6 +38,11 @@ outcomes and never treats structural analysis as a proof.
 
 ---
 
+> **Constraint release**: an explicit Step-32 RCA release consumes one
+> already-approved Step-31 review and exact canonical UCM evidence. It never
+> auto-releases, generates SDC, or claims external EDA/STA/physical/commercial
+> signoff. See [`docs/STEP32_CONSTRAINT_RELEASE.md`](docs/STEP32_CONSTRAINT_RELEASE.md).
+
 ## Quick start
 
 ```bash
@@ -73,40 +78,47 @@ rca lineage project.yaml --ucm reviewed-ucm.json --json
 # 7. Assess or explicitly approve the exact canonical UCM snapshot.
 #    Review approval is governance only, never EDA/STA/physical signoff.
 rca review project.yaml --ucm reviewed-ucm.json --json
-rca review project.yaml --ucm reviewed-ucm.json --decision APPROVE --reviewer "reviewer" --json
+rca review project.yaml --ucm reviewed-ucm.json --decision APPROVE --reviewer "reviewer" --json > approved-review.json
 
-# 8. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
+# 8. Release is a separate explicit governance action over the approved UCM.
+#    It consumes an existing Step-31 review and is NOT EDA/STA/physical signoff.
+rca release project.yaml --ucm reviewed-ucm.json --review approved-review.json --json
+rca release project.yaml --ucm reviewed-ucm.json --review approved-review.json \
+  --decision RELEASE --releaser "release-owner" --package-dir artifacts/release-r1 --json
+rca release-verify artifacts/release-r1 --json
+
+# 9. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
 rca generate project.yaml --backend generic
 rca generate project.yaml --backend opensta
 
-# 9. Validate generated constraints
+# 10. Validate generated constraints
 #    (also runs mapped SymbiYosys jobs when formal.backend: symbiyosys is configured)
 rca validate project.yaml
 
-# 10. Show coverage
+# 11. Show coverage
 rca coverage project.yaml
 
-# 11. Inspect real-EDA prerequisites without executing synthesis or STA
+# 12. Inspect real-EDA prerequisites without executing synthesis or STA
 rca doctor project.yaml --json
 
-# 12. Run Yosys + OpenSTA only when doctor reports the real boundary ready
+# 13. Run Yosys + OpenSTA only when doctor reports the real boundary ready
 #     and flow.liberty names your readable Liberty collateral.
 rca run-sta project.yaml --backend yosys_opensta
 
-# 13. Multi-objective optimization (mock EDA backend works without tools)
+# 14. Multi-objective optimization (mock EDA backend works without tools)
 rca optimize project.yaml --backend mock
 
-# 14. Query the local historical QoR repository (never executes EDA)
+# 15. Query the local historical QoR repository (never executes EDA)
 rca history --config project.yaml --best setup_wns
 
-# 15. Search offline vendor-neutral constraint knowledge (advisory only)
+# 16. Search offline vendor-neutral constraint knowledge (advisory only)
 rca knowledge search "false path" --json
 rca knowledge suggest project.yaml --json
 
-# 16. Full human-readable report
+# 17. Full human-readable report
 rca report project.yaml
 
-# 17. Launch the web dashboard
+# 18. Launch the web dashboard
 rca dashboard project.yaml
 ```
 
@@ -235,6 +247,8 @@ rtl-constraint-assistant/
 | `rca readiness CONFIG --ucm SNAPSHOT.json [--scenario ID] [--json]` | Deterministic, report-only closure assessment of a supplied canonical UCM. Aggregates existing validation, coverage, MCMM, provenance, advisory/application, and configuration-aware preflight evidence; never writes UCM/SDC/coverage/history/artifacts or executes EDA/proofs. |
 | `rca lineage CONFIG (--ucm SNAPSHOT.json \| --before A.json --after B.json) [--json]` | Deterministic read-only traceability projection for canonical constraints and explicit semantic snapshot comparison. Connects retained provenance, advice/application, validation/formal, readiness, knowledge, and MCMM evidence; never writes UCM/SDC/history/artifacts/SQLite or executes EDA/proofs. |
 | `rca review CONFIG --ucm SNAPSHOT.json [--decision APPROVE\|APPROVE_WITH_WARNINGS\|REJECT\|DEFER\|REVOKE] [--json]` | Deterministic governance review of an exact canonical snapshot. Assessment never auto-approves; explicit approval remains separate from external EDA signoff and never writes UCM/SDC/artifacts/history/SQLite or executes EDA/formal. |
+| `rca release CONFIG --ucm REVIEWED.json --review APPROVED-REVIEW.json [--decision RELEASE\|REVOKE] [--package-dir DIR] [--json]` | Deterministic release assessment or explicit RCA release over an exact reviewed UCM. It consumes rather than creates Step-31 review, preserves exact MCMM scope, never auto-releases or generates SDC, and remains distinct from external EDA/STA/physical/commercial signoff. A package is written only with explicit `--package-dir`. |
+| `rca release-verify PACKAGE [--json]` | Stateless release-package integrity verification of hashes, canonical/semantic UCM identity, review/evidence identity, exact scope, consistency, and revoked/stale state. Never runs EDA/formal, mutates, repairs, or regenerates package contents. |
 | `rca generate`     | Emit SDC (generic/opensta/synopsys/cadence backend). |
 | `rca validate`     | Validate generated or imported SDC; runs configured SymbiYosys exception proofs if opted in. |
 | `rca coverage`     | Per-category coverage report with uncovered objects. |

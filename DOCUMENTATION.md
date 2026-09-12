@@ -27,6 +27,7 @@
 16. [Optimization & Pareto Loop](#16-optimization-and-pareto)
 17. [Web Dashboard](#17-web-dashboard)
 18. [Docker](#18-docker)
+18.2. [Constraint Release Baseline and Package](#182-constraint-release-baseline-and-package)
 19. [Known Gaps and Roadmap](#19-known-gaps)
 20. [Troubleshooting / FAQ](#20-faq)
 
@@ -697,6 +698,7 @@ artifact-integrity rules, and limitations.
 | `docs/decisions/ADR-001-universal-constraint-model.md` | Architecture Decision Record: why the UCM exists (vendor-neutral source of truth; SDC as derived rendering; strong typing with provenance), alternatives rejected (direct SDC strings, vendor-specific models with translators), consequences. |
 | `docs/decisions/ADR-002-validation-engine.md` | Architecture Decision Record: strengthen the one existing validation model rather than adding a competing Step-13 model. |
 | `docs/decisions/ADR-003-symbiyosys-formal-adapter.md` | Architecture Decision Record: use explicit user-authored SymbiYosys jobs through existing formal/validation abstractions; never generate a proof property from an SDC selector. |
+| `docs/STEP32_CONSTRAINT_RELEASE.md` | Deterministic release governance over an explicit Step-31-reviewed canonical UCM, exact MCMM scope, reproducible supplied-evidence package, SHA-256 verification, lifecycle, and the strict non-EDA-signoff boundary. |
 
 Placeholders for future docs:
 
@@ -831,6 +833,8 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca generate [CONFIG]` | Emit SDC from the current UCM (skip inference if a snapshot is present). | `--backend`, `--scenario NAME` |
 | `rca validate [CONFIG]` | Run the validator against the current UCM/design and print issues. | `--strict` |
 | `rca compare [CONFIG] --a FILE.sdc --b FILE.sdc` | Semantically compare two SDC files through the hardened SDC importer, normalization + `semantic_compare`. Prints equivalence/UNKNOWN verdict, field- and scenario-context differences, and added/removed/modified sets; `--json` emits deterministic machine output. | `--json` |
+| `rca release CONFIG --ucm REVIEWED.json --review APPROVED-REVIEW.json` | Read-only Step-32 assessment or explicit `--decision RELEASE|REVOKE` over an existing Step-31 review. It never creates/mutates review/UCM, auto-releases, generates SDC, runs EDA/formal, or claims external signoff. `--package-dir` explicitly writes a reproducible package only for a released record. | `--policy FILE`, `--scenario ID`, `--all-active-scenarios`, `--sdc FILE`, `--artifact KIND=PATH`, `--release-record`, `--supersede`, `--json` |
+| `rca release-verify PACKAGE` | Stateless checks of existing package hashes, UCM/semantic/review/evidence identities, exact scope, consistency, and released/revoked status. Never executes tools, mutates, repairs, or regenerates content. | `--json` |
 | `rca coverage [CONFIG]` | Print only the coverage metrics (clock/in/out %). |  |
 | `rca explain [CONFIG] [CONSTRAINT_ID]` | Print natural-language explanation(s) of one or all constraints (evidence, assumptions, source). |  |
 | `rca doctor [CONFIG]` | Bounded, non-executing real-EDA/formal prerequisite evidence. It checks version probes and configured collateral; it does not run synthesis, STA, or proofs. | `--backend yosys_opensta`, `--json` |
@@ -1218,6 +1222,34 @@ rerun. `list_constraint_set_projections` is the Step-26 read-only metadata
 projection used only to locate separately retained canonical UCM snapshots; it
 neither serializes constraints into SQLite nor makes history authoritative. See
 `STEP21_QOR_DATABASE.md` for the complete contract.
+
+## 18.2 Constraint Release Baseline and Package (Step 32)
+
+`rca.release` is a frozen typed, deterministic release layer around one
+existing canonical UCM and explicit Step-31 review. It is not a second UCM,
+review engine, cache/history authority, SDC generator, or EDA-signoff system.
+A release identity binds canonical UCM content plus Step-9 semantic identity,
+review/readiness/validation/coverage/formal/lineage references, supplied
+configuration/design/timing identities, exact global/selected/all-active MCMM
+scope, and hashes of explicitly supplied artifacts.
+
+Assessment is read-only; a clean candidate remains unreleased until an explicit
+release action. Missing, stale, revoked, rejected/deferred/pending, ambiguous,
+unknown, unsupported, incomplete, or conflicting required evidence fails
+closed. Revocation and supersession create separate records instead of editing
+history. SDC is only copied when an existing file was explicitly supplied; it
+is never generated as a side effect of release.
+
+An explicitly requested package contains the descriptor, release record,
+canonical UCM snapshot, supplied evidence snapshots, scope/identity,
+dependencies, and SHA-256 artifact metadata. Stateless verification never runs
+EDA/formal and never repairs a package. A `VERIFIED` package means only that
+this retained RCA package is internally consistent; it is not external STA,
+physical, commercial, or ASIC signoff. See
+[`docs/STEP32_CONSTRAINT_RELEASE.md`](docs/STEP32_CONSTRAINT_RELEASE.md) for
+the API, CLI, policy, package, and verification contract.
+
+---
 
 ## 19. Known Gaps and Roadmap
 

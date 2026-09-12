@@ -1,0 +1,383 @@
+{
+  "01_clean_candidate": {
+    "blocker_categories": [],
+    "current_status": "READY",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "READY",
+    "release_possible": true,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "02_clean_explicit_release": {
+    "decision": "RELEASE",
+    "previous": true,
+    "status": "RELEASED"
+  },
+  "03_missing_review": {
+    "blocker_categories": [
+      "REVIEW"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "04_missing_readiness": {
+    "blocker_categories": [
+      "READINESS"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "05_missing_validation": {
+    "blocker_categories": [
+      "COVERAGE",
+      "VALIDATION"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "06_missing_lineage": {
+    "blocker_categories": [
+      "LINEAGE"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "07_warning_candidate": {
+    "blocker_categories": [],
+    "current_status": "CANDIDATE",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "CANDIDATE",
+    "release_possible": false,
+    "release_with_warnings_possible": true,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": [
+      "VALIDATION"
+    ]
+  },
+  "08_warning_explicit_release": {
+    "decision": "RELEASE",
+    "status": "RELEASED_WITH_WARNINGS"
+  },
+  "09_global_scope": {
+    "active_scenario_ids": [],
+    "released_scenario_ids": [],
+    "requested_scenario_ids": [],
+    "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "scope_kind": "GLOBAL",
+    "unknown_scenario_ids": []
+  },
+  "10_selected_scope": {
+    "active_scenario_ids": [
+      "FAST",
+      "SLOW"
+    ],
+    "released_scenario_ids": [
+      "FAST"
+    ],
+    "requested_scenario_ids": [
+      "FAST"
+    ],
+    "scenario_definition_identity": "ab66412b114dab97c5ae747640926a04a6266d62d274b0a995164a5d5f7deada",
+    "scope_kind": "SELECTED_SCENARIOS",
+    "unknown_scenario_ids": []
+  },
+  "11_all_active_scope": {
+    "active_scenario_ids": [
+      "FAST",
+      "SLOW"
+    ],
+    "released_scenario_ids": [
+      "FAST",
+      "SLOW"
+    ],
+    "requested_scenario_ids": [],
+    "scenario_definition_identity": "ab66412b114dab97c5ae747640926a04a6266d62d274b0a995164a5d5f7deada",
+    "scope_kind": "ALL_ACTIVE_SCENARIOS",
+    "unknown_scenario_ids": []
+  },
+  "12_unknown_scope": {
+    "blocker_categories": [
+      "MCMM_SCOPE"
+    ],
+    "current_status": "STALE",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "INVALID",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [
+        "FAST",
+        "SLOW"
+      ],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [
+        "UNKNOWN"
+      ],
+      "scenario_definition_identity": "ab66412b114dab97c5ae747640926a04a6266d62d274b0a995164a5d5f7deada",
+      "scope_kind": "SELECTED_SCENARIOS",
+      "unknown_scenario_ids": [
+        "UNKNOWN"
+      ]
+    },
+    "warning_categories": []
+  },
+  "13_conflicting_scope": {
+    "blocker_categories": [
+      "MCMM_SCOPE"
+    ],
+    "current_status": "STALE",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "INVALID",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [
+        "FAST",
+        "SLOW"
+      ],
+      "released_scenario_ids": [
+        "FAST",
+        "SLOW"
+      ],
+      "requested_scenario_ids": [
+        "FAST"
+      ],
+      "scenario_definition_identity": "ab66412b114dab97c5ae747640926a04a6266d62d274b0a995164a5d5f7deada",
+      "scope_kind": "ALL_ACTIVE_SCENARIOS",
+      "unknown_scenario_ids": [
+        "<all-active-with-selected-scenarios>"
+      ]
+    },
+    "warning_categories": []
+  },
+  "14_required_sdc_missing": {
+    "blocker_categories": [
+      "SDC"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "15_required_sdc_supplied": {
+    "authorities": [
+      "CANONICAL_UCM",
+      "CONFIGURATION",
+      "COVERAGE",
+      "DESIGN",
+      "LINEAGE",
+      "MCMM_SCOPE",
+      "READINESS",
+      "REVIEW",
+      "SDC",
+      "TIMING_GRAPH",
+      "VALIDATION"
+    ],
+    "status": "READY"
+  },
+  "16_required_artifact_missing": {
+    "blocker_categories": [
+      "ARTIFACT"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "17_required_artifact_supplied": {
+    "source_path_absent": true,
+    "status": "READY"
+  },
+  "18_required_formal_missing": {
+    "blocker_categories": [
+      "FORMAL"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "19_incomplete_coverage": {
+    "blocker_categories": [
+      "COVERAGE"
+    ],
+    "current_status": "BLOCKED",
+    "external_eda_signoff": "EXTERNAL_EDA_SIGNOFF_UNKNOWN",
+    "record_status": "BLOCKED",
+    "release_possible": false,
+    "release_with_warnings_possible": false,
+    "scope": {
+      "active_scenario_ids": [],
+      "released_scenario_ids": [],
+      "requested_scenario_ids": [],
+      "scenario_definition_identity": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "scope_kind": "GLOBAL",
+      "unknown_scenario_ids": []
+    },
+    "warning_categories": []
+  },
+  "20_unsupported_semantics": {
+    "semantic_identity": "UNKNOWN",
+    "status": "UNKNOWN"
+  },
+  "21_stale_ucm": {
+    "current_status": "STALE",
+    "reason_count": 2
+  },
+  "22_explicit_revocation": {
+    "history": [
+      "RELEASE",
+      "REVOKE"
+    ],
+    "status": "REVOKED"
+  },
+  "23_explicit_supersession": {
+    "status": "READY",
+    "supersedes": true
+  },
+  "24_package_manifest": {
+    "artifact_kinds": [
+      "coverage",
+      "lineage",
+      "readiness",
+      "release_record",
+      "review_record",
+      "ucm_snapshot",
+      "validation"
+    ],
+    "kind": "rca_constraint_release_package"
+  },
+  "25_package_verification": {
+    "count": 7,
+    "status": "VERIFIED"
+  },
+  "26_package_corruption": {
+    "blockers": [
+      "ARTIFACT",
+      "UCM"
+    ],
+    "status": "INVALID"
+  },
+  "27_round_trip": true,
+  "28_deterministic_record": true,
+  "29_identity_binding": {
+    "content": true,
+    "review": true,
+    "semantic": true
+  },
+  "30_policy_defaults": {
+    "allow_release_with_warnings": false,
+    "allow_review_with_warnings": false,
+    "allowed_unresolved_evidence_categories": [],
+    "require_all_active_scenarios": true,
+    "require_complete_coverage": true,
+    "require_configuration": true,
+    "require_design": true,
+    "require_formal_for_constraint_types": [],
+    "require_lineage": true,
+    "require_readiness": true,
+    "require_review": true,
+    "require_sdc": false,
+    "require_timing_graph": true,
+    "require_validation_evidence": true,
+    "required_artifact_kinds": [],
+    "required_readiness_statuses": [
+      "READY"
+    ]
+  },
+  "31_package_status_enum": true,
+  "32_no_eda_claim": "EXTERNAL_EDA_SIGNOFF_UNKNOWN"
+}

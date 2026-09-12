@@ -249,6 +249,34 @@ those are not a replacement for a provisioned real-tool run. See
 `STEP24_VALIDATION.md` for the current optional-real-EDA policy and failure
 matrix.
 
+
+## Step-32 constraint-release baseline and package scenarios
+
+Step 32 adds `tests/unit/test_constraint_release.py` (41 focused cases),
+`tests/integration/test_cli_constraint_release.py` (CLI assessment, explicit
+release/package, and invalid verification paths), and
+`tests/golden/test_constraint_release_golden.py` with 32 deterministic named
+release/package projections. These cases verify:
+
+1. frozen typed release/policy/snapshot/package records and stable JSON/IDs;
+2. explicit-only candidate, release, revoke, and supersede lifecycle behavior;
+3. approved, warning-approved, absent, pending, stale, revoked, and mismatched
+   Step-31 review handling without creating or changing review;
+4. fail-closed readiness, validation, coverage, lineage, formal-class, SDC,
+   supplied-artifact, unsupported semantic, and unresolved-evidence handling;
+5. exact global, selected, all-active, unknown, and conflicting MCMM scope;
+6. no automatic UCM application, SDC generation, EDA/formal execution, or
+   external-signoff claim;
+7. reproducible descriptor/UCM/evidence/artifact package contents, SHA-256
+   integrity, safe relative-path checks, corruption detection, and stateless
+   verification; and
+8. deterministic `rca release` / `rca release-verify` JSON, explicit action
+   rejection, and package E2E behavior.
+
+The release package test is not an external-tool test. A `VERIFIED` package
+means only that the retained RCA package is internally consistent and
+hash-valid; it does not imply STA, physical, commercial, or ASIC signoff.
+
 ## Environment notes
 
 The `pyslang` Verilog/SystemVerilog front-end is optional; tests that
