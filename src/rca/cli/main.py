@@ -132,6 +132,7 @@ app.add_typer(knowledge_app, name="knowledge")
 
 # ---- Helpers ----------------------------------------------------------------
 
+
 def _load(path: str | Path) -> ProjectConfig:
     cfg = load_config(Path(path))
     return cfg
@@ -145,12 +146,15 @@ def _do_parse(cfg: ProjectConfig):
     defines: dict[str, str] = {}
     for d in cfg.sources.defines:
         if "=" in d:
-            k, v = d.split("=", 1); defines[k.strip()] = v.strip()
+            k, v = d.split("=", 1)
+            defines[k.strip()] = v.strip()
         else:
             defines[d.strip()] = ""
     adapter = SlangAdapter()
-    params = {k: (str(v) if not isinstance(v, (int, float, bool, str)) else v)
-              for k, v in cfg.parameters.items()}
+    params = {
+        k: (str(v) if not isinstance(v, (int, float, bool, str)) else v)
+        for k, v in cfg.parameters.items()
+    }
     design = adapter.parse(
         files=sources,
         include_dirs=resolve_include_dirs(cfg),
@@ -167,6 +171,7 @@ def _do_timing(cfg: ProjectConfig, design: Design):
         info = {"name": uc.name, "fixed": uc.fixed}
         if uc.period:
             from ..utils.units import parse_time_string
+
             info["period_seconds"] = parse_time_string(uc.period)
         user_clocks.append(info)
     user_rels = []
@@ -331,6 +336,7 @@ def _formal_backend(cfg: ProjectConfig):
 
 # ---- MCMM helpers (Step 12 §13, §14) --------------------------------
 
+
 def _mcmm_matrix(cfg: ProjectConfig, cset: ConstraintSet):
     """Build the active scenario matrix from config + UCM (MCMM-aware)."""
     return build_scenario_matrix(cfg, cset)
@@ -338,18 +344,23 @@ def _mcmm_matrix(cfg: ProjectConfig, cset: ConstraintSet):
 
 def _print_scenario_matrix(console, matrix) -> None:
     from rich.table import Table
+
     s = matrix.summary()
     t = Table(title="Active scenario matrix (MCMM)")
-    t.add_column("ID"); t.add_column("Mode"); t.add_column("Corner")
-    t.add_column("Libraries"); t.add_column("Parasitics")
+    t.add_column("ID")
+    t.add_column("Mode")
+    t.add_column("Corner")
+    t.add_column("Libraries")
+    t.add_column("Parasitics")
     for sc in s.get("active_scenarios", []):
         libs = ", ".join(sc.get("libraries", [])) or "-"
-        t.add_row(sc["id"], sc["mode"], sc["corner"], libs,
-                  sc.get("parasitics") or "-")
+        t.add_row(sc["id"], sc["mode"], sc["corner"], libs, sc.get("parasitics") or "-")
     console.print(t)
-    console.print(f"[dim]MCMM {'enabled' if s.get('enabled') else 'disabled'} "
-                  f"| {s.get('scenario_count')} active "
-                  f"| single-scenario={s.get('single_scenario')}[/]")
+    console.print(
+        f"[dim]MCMM {'enabled' if s.get('enabled') else 'disabled'} "
+        f"| {s.get('scenario_count')} active "
+        f"| single-scenario={s.get('single_scenario')}[/]"
+    )
 
 
 def _maybe_print_matrix(cfg: ProjectConfig, cset: ConstraintSet, console) -> bool:
@@ -361,13 +372,19 @@ def _maybe_print_matrix(cfg: ProjectConfig, cset: ConstraintSet, console) -> boo
     return False
 
 
-def _mcmm_per_scenario_sdc(cset: ConstraintSet, backend, design_name: str,
-                           matrix, scenario_id: str) -> str:
+def _mcmm_per_scenario_sdc(
+    cset: ConstraintSet, backend, design_name: str, matrix, scenario_id: str
+) -> str:
     """Render the SDC restricted to a single MCMM scenario."""
     from ..utils.enums import SafeMode
-    res = backend.generate(cset, design_name=design_name,
-                           mode=SafeMode.BALANCED, with_provenance=True,
-                           scenario=scenario_id)
+
+    res = backend.generate(
+        cset,
+        design_name=design_name,
+        mode=SafeMode.BALANCED,
+        with_provenance=True,
+        scenario=scenario_id,
+    )
     return res.text
 
 
@@ -389,9 +406,15 @@ def _parallel_task_flow_id(work_dir: Path, candidate_id: str, scenario_id: str) 
     return f"run_{task_component}_{candidate_component}_{scenario_component}"
 
 
-def _persist_optimizer_execution_artifacts(am: ArtifactManager, cfg: ProjectConfig,
-                                           result, *, candidates_path: Path,
-                                           pareto_path: Path, final_sdc_path: Path | None) -> dict[str, str]:
+def _persist_optimizer_execution_artifacts(
+    am: ArtifactManager,
+    cfg: ProjectConfig,
+    result,
+    *,
+    candidates_path: Path,
+    pareto_path: Path,
+    final_sdc_path: Path | None,
+) -> dict[str, str]:
     """Write authoritative optimizer observability artifacts before SQLite advice.
 
     The ledger is a deterministic projection of the existing optimizer result,
@@ -422,6 +445,7 @@ def _persist_optimizer_execution_artifacts(am: ArtifactManager, cfg: ProjectConf
         baseline_hash = baseline.constraint_model_hash
         if not baseline_hash and baseline.constraint_set is not None:
             from ..constraint_model import stable_hash_cset
+
             baseline_hash = stable_hash_cset(baseline.constraint_set)
     manifest = RunManifest(
         candidate_id=result.final.id if result.final else "",
@@ -436,7 +460,8 @@ def _persist_optimizer_execution_artifacts(am: ArtifactManager, cfg: ProjectConf
             "kind": "optimizer_execution",
             "invocation_id": result.execution_ledger.invocation_id,
             "execution_stop_reason": result.execution_stop_reason.value
-            if result.execution_stop_reason else None,
+            if result.execution_stop_reason
+            else None,
             "legacy_stop_reason": result.stop_reason.value if result.stop_reason else None,
             "workers": result.execution_ledger.workers,
             "ledger_schema_version": result.execution_ledger.schema_version,
@@ -516,8 +541,9 @@ def _print_power_summary(console, q: dict, *, indent: str = "  ") -> None:
         # unknown, malformed, invalid, or unsupported configured evidence.
         provenance = q.get("power_provenance") or {}
         parse_status = provenance.get("parsing_status")
-        suffix = (f" (report parser: {parse_status})"
-                  if parse_status and parse_status != status else "")
+        suffix = (
+            f" (report parser: {parse_status})" if parse_status and parse_status != status else ""
+        )
         console.print(f"{indent}Power: {status}{suffix}")
     provenance = q.get("power_provenance") or {}
     if provenance:
@@ -551,34 +577,56 @@ def _latest_qor_summary(cfg: ProjectConfig) -> dict | None:
 def _print_mcmm_result(console, m: MCMMResult, matrix) -> None:
     """Print an MCMMResult with full per-scenario auditability (Step 12 §14)."""
     from rich.table import Table
+
     _print_scenario_matrix(console, matrix)
     console.print(Panel(f"[cyan]MCMM evaluation[/cyan] — candidate {m.candidate_id}"))
-    status_color = {"feasible": "green", "infeasible": "yellow",
-                    "blocked": "red", "invalid": "red"}.get(
-        m.global_status, "white")
+    status_color = {
+        "feasible": "green",
+        "infeasible": "yellow",
+        "blocked": "red",
+        "invalid": "red",
+    }.get(m.global_status, "white")
     console.print(f"  Global status: [{status_color}]{m.global_status}[/]")
     console.print(f"  Limiting scenarios: {', '.join(m.limiting_scenarios) or '-'}")
-    console.print(f"  EDA runs: {m.eda_runs}  Cache hits: {m.cache_hits}  "
-                  f"Cache misses: {m.cache_misses}")
+    console.print(
+        f"  EDA runs: {m.eda_runs}  Cache hits: {m.cache_hits}  Cache misses: {m.cache_misses}"
+    )
     t = Table(title="Per-scenario QoR")
-    for col in ("Scenario", "Mode", "Corner", "Status", "Setup WNS (ns)",
-                "Hold WNS (ns)", "Margin util", "Cache", "Run id"):
+    for col in (
+        "Scenario",
+        "Mode",
+        "Corner",
+        "Status",
+        "Setup WNS (ns)",
+        "Hold WNS (ns)",
+        "Margin util",
+        "Cache",
+        "Run id",
+    ):
         t.add_column(col)
     for sid in m.active_scenario_ids:
         sq = m.scenario_results.get(sid)
         if sq is None:
             continue
-        s_wns = f"{sq.qor.setup_wns*1e9:.3f}" if sq.qor and sq.qor.setup_wns is not None else "-"
-        h_wns = f"{sq.qor.hold_wns*1e9:.3f}" if sq.qor and sq.qor.hold_wns is not None else "-"
+        s_wns = f"{sq.qor.setup_wns * 1e9:.3f}" if sq.qor and sq.qor.setup_wns is not None else "-"
+        h_wns = f"{sq.qor.hold_wns * 1e9:.3f}" if sq.qor and sq.qor.hold_wns is not None else "-"
         util = f"{sq.margin_utilization:.2f}" if sq.margin_utilization is not None else "-"
-        t.add_row(sid, sq.mode, sq.corner, sq.status, s_wns, h_wns, util,
-                  sq.cache_status, sq.run_id or "-")
+        t.add_row(
+            sid,
+            sq.mode,
+            sq.corner,
+            sq.status,
+            s_wns,
+            h_wns,
+            util,
+            sq.cache_status,
+            sq.run_id or "-",
+        )
     console.print(t)
     for name, agg in m.objectives.items():
         limiting = ", ".join(agg.limiting) or "-"
         val = f"{agg.value:.6g}" if agg.value is not None else "UNKNOWN"
-        console.print(f"  Objective {name}: {val}  "
-                      f"(unknown={agg.unknown}, limiting={limiting})")
+        console.print(f"  Objective {name}: {val}  (unknown={agg.unknown}, limiting={limiting})")
     if m.provenance:
         console.print(f"  Provenance: {json.dumps(m.provenance, default=str)[:200]}")
     if m.diagnostics:
@@ -587,8 +635,9 @@ def _print_mcmm_result(console, m: MCMMResult, matrix) -> None:
             console.print(f"    - {d}")
 
 
-def _record_standalone_mcmm_history(cfg: ProjectConfig, cset: ConstraintSet,
-                                    mcmm_result: MCMMResult, candidate_id: str = "baseline") -> tuple[str | None, str | None]:
+def _record_standalone_mcmm_history(
+    cfg: ProjectConfig, cset: ConstraintSet, mcmm_result: MCMMResult, candidate_id: str = "baseline"
+) -> tuple[str | None, str | None]:
     """Index a completed ``run-sta`` MCMM aggregate without changing its artifacts.
 
     The repository needs a session-scoped candidate key even for a baseline
@@ -609,10 +658,14 @@ def _record_standalone_mcmm_history(cfg: ProjectConfig, cset: ConstraintSet,
         candidate.run_id = ";".join(mcmm_result.run_ids)
         candidate.margin_headroom_ns = mcmm_result.margin_headroom_ns
         candidate.margin_utilization = mcmm_result.margin_utilization
-        session = OptimizationResult(baseline=candidate, final=candidate, all_candidates=[candidate])
+        session = OptimizationResult(
+            baseline=candidate, final=candidate, all_candidates=[candidate]
+        )
         repo = SQLiteQoRRepository.for_output_dir(cfg.flow.output_dir)
         session_id = repo.record_optimizer_session(
-            session, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
+            session,
+            project_name=cfg.project.name,
+            output_dir=cfg.flow.output_dir,
         )
         return session_id, None
     except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
@@ -621,10 +674,13 @@ def _record_standalone_mcmm_history(cfg: ProjectConfig, cset: ConstraintSet,
 
 # ---- Commands ---------------------------------------------------------------
 
+
 @app.command()
-def init(path: str = typer.Argument(".", help="Project directory"),
-         name: str = typer.Option("new_project", help="Project name"),
-         top: str | None = typer.Option(None, help="Top module name")):
+def init(
+    path: str = typer.Argument(".", help="Project directory"),
+    name: str = typer.Option("new_project", help="Project name"),
+    top: str | None = typer.Option(None, help="Top module name"),
+):
     """Initialize a new RCA project in the given directory."""
     root = Path(path).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -635,7 +691,8 @@ def init(path: str = typer.Argument(".", help="Project directory"),
     cfg = default_config(name=name, top=top)
     write_config(cfg, cfg_path)
     # Create a basic RTL example
-    rtl_dir = root / "rtl"; rtl_dir.mkdir(exist_ok=True)
+    rtl_dir = root / "rtl"
+    rtl_dir.mkdir(exist_ok=True)
     example = rtl_dir / f"{top or 'top'}.sv"
     if not example.exists():
         example.write_text(_DEFAULT_RTL.format(top=top or "top"), encoding="utf-8")
@@ -646,8 +703,10 @@ def init(path: str = typer.Argument(".", help="Project directory"),
 
 
 @app.command()
-def analyze(config: str = typer.Argument(..., help="Path to project YAML"),
-            json_out: bool = typer.Option(False, "--json", help="Output JSON only")):
+def analyze(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    json_out: bool = typer.Option(False, "--json", help="Output JSON only"),
+):
     """Parse & elaborate RTL; report structural findings and missing info."""
     configure_logging(level="WARNING" if json_out else "INFO")
     cfg = _load(config)
@@ -659,12 +718,18 @@ def analyze(config: str = typer.Argument(..., help="Path to project YAML"),
     am.write_json("timing_graph.json", tg.summary())
     summary = design.summary()
     if json_out:
-        out = {"design": summary, "timing": tg.summary(),
-               "diagnostics": diag, "missing_information": missing}
+        out = {
+            "design": summary,
+            "timing": tg.summary(),
+            "diagnostics": diag,
+            "missing_information": missing,
+        }
         sys.stdout.write(json.dumps(out, indent=2, default=str))
         return
     console.print(Panel(f"[bold cyan]RCA Analysis[/bold cyan] — {cfg.project.name}"))
-    t = Table(title="Design"); t.add_column("Metric"); t.add_column("Value")
+    t = Table(title="Design")
+    t.add_column("Metric")
+    t.add_column("Value")
     for k, v in summary.items():
         if isinstance(v, list):
             v = ", ".join(map(str, v[:20])) or "-"
@@ -672,7 +737,9 @@ def analyze(config: str = typer.Argument(..., help="Path to project YAML"),
     console.print(t)
     if missing:
         mt = Table(title="Missing information (required to generate complete SDC)")
-        mt.add_column("Severity"); mt.add_column("Category"); mt.add_column("Message")
+        mt.add_column("Severity")
+        mt.add_column("Category")
+        mt.add_column("Message")
         for m in missing:
             mt.add_row(m.get("severity", "?"), m.get("category", "?"), m.get("message", ""))
         console.print(mt)
@@ -681,9 +748,11 @@ def analyze(config: str = typer.Argument(..., help="Path to project YAML"),
 
 
 @app.command()
-def infer(config: str = typer.Argument(..., help="Path to project YAML"),
-          ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM JSON snapshot"),
-          json_out: bool = typer.Option(False, "--json", help="Output deterministic advisory JSON only")):
+def infer(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM JSON snapshot"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic advisory JSON only"),
+):
     """Report non-mutating, evidence-backed constraint candidates.
 
     Unlike legacy materialization used by generate/validate compatibility
@@ -696,17 +765,26 @@ def infer(config: str = typer.Argument(..., help="Path to project YAML"),
     tg = _do_timing(cfg, design)
     baseline = _load_canonical_ucm(ucm, cfg)
     report = InferenceEngine().infer_candidates(
-        design, tg, cfg, baseline, AssumptionLedger(), knowledge=KnowledgeEngine(),
+        design,
+        tg,
+        cfg,
+        baseline,
+        AssumptionLedger(),
+        knowledge=KnowledgeEngine(),
     )
     if json_out:
         sys.stdout.write(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
         return
 
-    console.print(Panel(f"[cyan]Inference report (advisory; UCM unchanged)[/cyan] — {cfg.project.name}"))
+    console.print(
+        Panel(f"[cyan]Inference report (advisory; UCM unchanged)[/cyan] — {cfg.project.name}")
+    )
     facts = report.structural_facts
     if facts:
         ft = Table(title=f"Structural facts ({len(facts)})")
-        ft.add_column("Category"); ft.add_column("Object"); ft.add_column("Observation")
+        ft.add_column("Category")
+        ft.add_column("Object")
+        ft.add_column("Observation")
         for fact in facts:
             ft.add_row(fact["category"], fact["object"], fact["statement"])
         console.print(ft)
@@ -715,30 +793,50 @@ def infer(config: str = typer.Argument(..., help="Path to project YAML"),
     for col in ("ID", "Kind", "Status", "Decision", "Objects", "Why"):
         ct.add_column(col)
     for candidate in candidates:
-        ct.add_row(candidate.id, candidate.kind, candidate.status.value, candidate.decision.value,
-                   ", ".join(candidate.source_objects[:3]) or "-", candidate.rationale)
+        ct.add_row(
+            candidate.id,
+            candidate.kind,
+            candidate.status.value,
+            candidate.decision.value,
+            ", ".join(candidate.source_objects[:3]) or "-",
+            candidate.rationale,
+        )
     console.print(ct)
 
     required = report.required_information()
     if required:
         mt = Table(title="Missing information / confirmation required", show_lines=False)
-        mt.add_column("ID"); mt.add_column("Category"); mt.add_column("Object")
-        mt.add_column("Message"); mt.add_column("Blocking")
+        mt.add_column("ID")
+        mt.add_column("Category")
+        mt.add_column("Object")
+        mt.add_column("Message")
+        mt.add_column("Blocking")
         for i, missing in enumerate(required, 1):
-            mt.add_row(missing.get("id", f"REQ-{i:03d}"), missing.get("category", ""),
-                       missing.get("object", ""), missing.get("message", ""),
-                       "YES" if missing.get("blocking") else "no")
+            mt.add_row(
+                missing.get("id", f"REQ-{i:03d}"),
+                missing.get("category", ""),
+                missing.get("object", ""),
+                missing.get("message", ""),
+                "YES" if missing.get("blocking") else "no",
+            )
         console.print(mt)
-    rejected = [candidate for candidate in candidates
-                if candidate.status.value in {"AMBIGUOUS", "UNSUPPORTED", "CONFLICTING", "REJECTED"}]
+    rejected = [
+        candidate
+        for candidate in candidates
+        if candidate.status.value in {"AMBIGUOUS", "UNSUPPORTED", "CONFLICTING", "REJECTED"}
+    ]
     if rejected:
-        console.print(f"\n[yellow]Ambiguous, unsupported, or rejected advisory items: {len(rejected)}[/yellow]")
+        console.print(
+            f"\n[yellow]Ambiguous, unsupported, or rejected advisory items: {len(rejected)}[/yellow]"
+        )
     if report.warnings:
         console.print(f"\n[yellow]Warnings: {len(report.warnings)}[/yellow]")
         for warning in report.warnings[:20]:
             console.print(f"  - {warning.get('message', warning)}")
     if report.conflicts:
-        console.print(f"\n[magenta]Conflicts retained (nothing overwritten): {len(report.conflicts)}[/magenta]")
+        console.print(
+            f"\n[magenta]Conflicts retained (nothing overwritten): {len(report.conflicts)}[/magenta]"
+        )
         for conflict in report.conflicts[:10]:
             console.print(f"  - {conflict.get('message', conflict)}")
     _maybe_print_matrix(cfg, baseline, console)
@@ -747,13 +845,26 @@ def infer(config: str = typer.Argument(..., help="Path to project YAML"),
 @app.command()
 def apply(
     config: str = typer.Argument(..., help="Path to project YAML"),
-    candidate: str = typer.Option(..., "--candidate", help="Reviewed advisory candidate ID to resolve"),
-    decision: str = typer.Option(..., "--decision", help="Explicit ACCEPT|REJECT|DEFER|CONFIRM|ALREADY_SATISFIED"),
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Reviewed advisory candidate ID to resolve"
+    ),
+    decision: str = typer.Option(
+        ..., "--decision", help="Explicit ACCEPT|REJECT|DEFER|CONFIRM|ALREADY_SATISFIED"
+    ),
     ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM JSON snapshot"),
-    scenario_ids: Annotated[list[str] | None, typer.Option("--scenario", help="Explicit candidate scenario scope (repeatable)")] = None,
-    output: str | None = typer.Option(None, "--output", help="Canonical UCM snapshot written only after application"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Validate isolated application without mutating or writing UCM"),
-    json_out: bool = typer.Option(False, "--json", help="Output deterministic application receipt JSON only"),
+    scenario_ids: Annotated[
+        list[str] | None,
+        typer.Option("--scenario", help="Explicit candidate scenario scope (repeatable)"),
+    ] = None,
+    output: str | None = typer.Option(
+        None, "--output", help="Canonical UCM snapshot written only after application"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate isolated application without mutating or writing UCM"
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Output deterministic application receipt JSON only"
+    ),
 ):
     """Explicitly resolve one advisory candidate into canonical UCM intent.
 
@@ -768,7 +879,12 @@ def apply(
     tg = _do_timing(cfg, design)
     cset = _load_canonical_ucm(ucm, cfg)
     report = InferenceEngine().infer_candidates(
-        design, tg, cfg, cset, AssumptionLedger(), knowledge=KnowledgeEngine(),
+        design,
+        tg,
+        cfg,
+        cset,
+        AssumptionLedger(),
+        knowledge=KnowledgeEngine(),
     )
     selected = next((item for item in report.candidates if item.id == candidate), None)
     if selected is None:
@@ -776,12 +892,16 @@ def apply(
             "candidate_id": candidate,
             "status": "INVALID",
             "ucm_mutated": False,
-            "blocking_reasons": ["Candidate ID was not found in fresh deterministic inference output."],
+            "blocking_reasons": [
+                "Candidate ID was not found in fresh deterministic inference output."
+            ],
         }
         if json_out:
             typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         else:
-            console.print("[red]Candidate ID was not found in fresh deterministic inference output.[/red]")
+            console.print(
+                "[red]Candidate ID was not found in fresh deterministic inference output.[/red]"
+            )
         raise typer.Exit(code=2)
     try:
         decision_kind = IntentDecisionKind(decision.strip().upper())
@@ -819,11 +939,14 @@ def apply(
         ApplicationStatus.DEFERRED: "yellow",
         ApplicationStatus.REJECTED: "yellow",
     }.get(outcome.status, "red")
-    console.print(Panel(
-        f"[bold]{outcome.status.value}[/bold] — candidate {outcome.candidate_id}\n"
-        f"UCM mutated: {outcome.ucm_mutated}",
-        title="Controlled constraint application", border_style=color,
-    ))
+    console.print(
+        Panel(
+            f"[bold]{outcome.status.value}[/bold] — candidate {outcome.candidate_id}\n"
+            f"UCM mutated: {outcome.ucm_mutated}",
+            title="Controlled constraint application",
+            border_style=color,
+        )
+    )
     if outcome.applied_constraint_ids:
         console.print("Applied UCM constraints: " + ", ".join(outcome.applied_constraint_ids))
     if outcome.already_present_ids:
@@ -837,13 +960,16 @@ def apply(
 
 
 @app.command()
-def generate(config: str = typer.Argument(..., help="Path to project YAML"),
-             backend: str = typer.Option("generic", help="SDC backend: generic|opensta|synopsys|cadence"),
-             output: str | None = typer.Option(None, help="Output SDC path (default: output/design.sdc)"),
-             safe_mode: str = typer.Option("balanced", help="strict|balanced|aggressive"),
-             provenance_comments: bool = typer.Option(True, "--provenance/--no-provenance"),
-             scenario: str | None = typer.Option(None, "--scenario",
-                                                 help="MCMM scenario id; restrict SDC to one scenario")):
+def generate(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    backend: str = typer.Option("generic", help="SDC backend: generic|opensta|synopsys|cadence"),
+    output: str | None = typer.Option(None, help="Output SDC path (default: output/design.sdc)"),
+    safe_mode: str = typer.Option("balanced", help="strict|balanced|aggressive"),
+    provenance_comments: bool = typer.Option(True, "--provenance/--no-provenance"),
+    scenario: str | None = typer.Option(
+        None, "--scenario", help="MCMM scenario id; restrict SDC to one scenario"
+    ),
+):
     """Generate SDC from inferred + user-specified constraints (Step 6)."""
     configure_logging(level="INFO")
     cfg = _load(config)
@@ -856,21 +982,29 @@ def generate(config: str = typer.Argument(..., help="Path to project YAML"),
         mode = SafeMode(safe_mode)
     except ValueError:
         mode = SafeMode.BALANCED
-    result = sdc_backend.generate(cset, design_name=cfg.project.name, mode=mode,
-                                   with_provenance=provenance_comments,
-                                   scenario=scenario)
+    result = sdc_backend.generate(
+        cset,
+        design_name=cfg.project.name,
+        mode=mode,
+        with_provenance=provenance_comments,
+        scenario=scenario,
+    )
     am = _am(cfg)
     suffix = f".{scenario}" if scenario else ""
-    out_path = Path(output) if output else am.path(f"design{'.' + backend if backend else ''}{suffix}.sdc")
+    out_path = (
+        Path(output) if output else am.path(f"design{'.' + backend if backend else ''}{suffix}.sdc")
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(result.text, encoding="utf-8")
     am.write_json("constraint_model.json", cset.snapshot())
     am.write_json("assumptions.json", ledger.to_list())
     if scenario:
         _maybe_print_matrix(cfg, cset, console)
-        console.print(f"[dim]Scenario-specific SDC for {scenario} "
-                      f"(emitted {len(result.emitted_constraint_ids)}/"
-                      f"{len(cset)} constraints).[/]")
+        console.print(
+            f"[dim]Scenario-specific SDC for {scenario} "
+            f"(emitted {len(result.emitted_constraint_ids)}/"
+            f"{len(cset)} constraints).[/]"
+        )
 
     # Step 6 §29 summary block
     console.print("SDC GENERATION")
@@ -882,8 +1016,9 @@ def generate(config: str = typer.Argument(..., help="Path to project YAML"),
     console.print(f"Emitted:    {len(result.emitted_constraint_ids)}")
     console.print(f"Blocked:    {len(result.skipped_constraint_ids)}")
     status_str = result.status if isinstance(result.status, str) else result.status.value
-    status_color = {"COMPLETE": "green", "PARTIAL": "yellow",
-                    "BLOCKED": "red", "ERROR": "red"}.get(status_str, "white")
+    status_color = {"COMPLETE": "green", "PARTIAL": "yellow", "BLOCKED": "red", "ERROR": "red"}.get(
+        status_str, "white"
+    )
     console.print(f"Status:     [{status_color}]{status_str}[/]")
 
     # List blocked constraints with reasons
@@ -926,7 +1061,9 @@ def lineage(
     if current_mode == comparison_mode or (comparison_mode and (before is None or after is None)):
         message = "Provide exactly one --ucm, or provide both --before and --after canonical UCM snapshots."
         if json_out:
-            typer.echo(json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True))
+            typer.echo(
+                json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True)
+            )
         else:
             console.print(f"[red]{message}[/red]")
         raise typer.Exit(code=2)
@@ -937,20 +1074,37 @@ def lineage(
     def conservative_validation(cset: ConstraintSet):
         matrix = _mcmm_matrix(cfg, cset)
         active = set(matrix.active_ids) if matrix.is_enabled else None
-        return run_validation(design, timing_graph, cset, backend="generic", active_scenarios=active)
+        return run_validation(
+            design, timing_graph, cset, backend="generic", active_scenarios=active
+        )
 
     if current_mode:
         cset = _load_canonical_ucm(ucm, cfg)
         advisory = InferenceEngine().infer_candidates(
-            design, timing_graph, cfg, cset, AssumptionLedger(), knowledge=KnowledgeEngine(),
+            design,
+            timing_graph,
+            cfg,
+            cset,
+            AssumptionLedger(),
+            knowledge=KnowledgeEngine(),
         )
         validation = conservative_validation(cset)
         readiness_report = assess_constraint_readiness(
-            cfg, cset, design, timing_graph, validation=validation, inference_report=advisory,
+            cfg,
+            cset,
+            design,
+            timing_graph,
+            validation=validation,
+            inference_report=advisory,
         )
         report = build_constraint_lineage(
-            cset, config=cfg, design=design, timing_graph=timing_graph,
-            inference_report=advisory, validation=validation, readiness=readiness_report,
+            cset,
+            config=cfg,
+            design=design,
+            timing_graph=timing_graph,
+            inference_report=advisory,
+            validation=validation,
+            readiness=readiness_report,
         )
     else:
         before_ucm = _load_canonical_ucm(before, cfg)
@@ -958,24 +1112,39 @@ def lineage(
         before_validation = conservative_validation(before_ucm)
         after_validation = conservative_validation(after_ucm)
         before_readiness = assess_constraint_readiness(
-            cfg, before_ucm, design, timing_graph, validation=before_validation,
+            cfg,
+            before_ucm,
+            design,
+            timing_graph,
+            validation=before_validation,
         )
         after_readiness = assess_constraint_readiness(
-            cfg, after_ucm, design, timing_graph, validation=after_validation,
+            cfg,
+            after_ucm,
+            design,
+            timing_graph,
+            validation=after_validation,
         )
         report = build_constraint_lineage(
-            after_ucm, config=cfg, design=design, timing_graph=timing_graph,
-            validation=after_validation, readiness=after_readiness, before=before_ucm,
+            after_ucm,
+            config=cfg,
+            design=design,
+            timing_graph=timing_graph,
+            validation=after_validation,
+            readiness=after_readiness,
+            before=before_ucm,
             before_readiness=before_readiness,
         )
     if json_out:
         typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
         return
-    console.print(Panel(
-        "[cyan]Read-only traceability projection; canonical UCM unchanged[/cyan]",
-        title="Constraint lineage & audit trail",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            "[cyan]Read-only traceability projection; canonical UCM unchanged[/cyan]",
+            title="Constraint lineage & audit trail",
+            border_style="cyan",
+        )
+    )
     console.print(explain_constraint_lineage(report))
 
 
@@ -983,20 +1152,36 @@ def lineage(
 def review(
     config: str = typer.Argument(..., help="Path to project YAML"),
     ucm: str = typer.Option(..., "--ucm", help="Canonical UCM JSON snapshot to review"),
-    decision: str | None = typer.Option(None, "--decision", help="Explicit APPROVE|APPROVE_WITH_WARNINGS|REJECT|DEFER|REVOKE"),
-    reviewer: str | None = typer.Option(None, "--reviewer", help="Explicit reviewer identity; omitted is UNSPECIFIED"),
-    reviewer_role: str | None = typer.Option(None, "--reviewer-role", help="Optional explicit reviewer role"),
+    decision: str | None = typer.Option(
+        None, "--decision", help="Explicit APPROVE|APPROVE_WITH_WARNINGS|REJECT|DEFER|REVOKE"
+    ),
+    reviewer: str | None = typer.Option(
+        None, "--reviewer", help="Explicit reviewer identity; omitted is UNSPECIFIED"
+    ),
+    reviewer_role: str | None = typer.Option(
+        None, "--reviewer-role", help="Optional explicit reviewer role"
+    ),
     comment: str = typer.Option("", "--comment", help="Explicit reviewer rationale/comment"),
-    scenario_ids: Annotated[list[str] | None, typer.Option(
-        "--scenario", help="Selected MCMM scenario review scope (repeatable)",
-    )] = None,
-    all_active_scenarios: bool = typer.Option(False, "--all-active-scenarios",
-                                               help="Explicitly review all active MCMM scenarios"),
+    scenario_ids: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--scenario",
+            help="Selected MCMM scenario review scope (repeatable)",
+        ),
+    ] = None,
+    all_active_scenarios: bool = typer.Option(
+        False, "--all-active-scenarios", help="Explicitly review all active MCMM scenarios"
+    ),
     policy: str | None = typer.Option(None, "--policy", help="Explicit ReviewPolicy JSON file"),
-    allow_warnings: bool = typer.Option(False, "--allow-warnings",
-                                        help="Explicitly set policy.allow_approval_with_warnings"),
-    prior_review: str | None = typer.Option(None, "--review", help="Prior review JSON or review-assessment JSON"),
-    supersede: str | None = typer.Option(None, "--supersede", help="Prior review JSON to supersede with a new review"),
+    allow_warnings: bool = typer.Option(
+        False, "--allow-warnings", help="Explicitly set policy.allow_approval_with_warnings"
+    ),
+    prior_review: str | None = typer.Option(
+        None, "--review", help="Prior review JSON or review-assessment JSON"
+    ),
+    supersede: str | None = typer.Option(
+        None, "--supersede", help="Prior review JSON to supersede with a new review"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Output deterministic review JSON only"),
 ):
     """Assess or explicitly decide review of one canonical UCM snapshot.
@@ -1011,7 +1196,9 @@ def review(
     if prior_review and supersede:
         message = "Use at most one of --review and --supersede."
         if json_out:
-            typer.echo(json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True))
+            typer.echo(
+                json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True)
+            )
         else:
             console.print(f"[red]{message}[/red]")
         raise typer.Exit(code=2)
@@ -1025,38 +1212,64 @@ def review(
     timing_graph = _do_timing(cfg, design)
     matrix = _mcmm_matrix(cfg, cset)
     validation = run_validation(
-        design, timing_graph, cset, backend="generic",
+        design,
+        timing_graph,
+        cset,
+        backend="generic",
         active_scenarios=set(matrix.active_ids) if matrix.is_enabled else None,
     )
     readiness_report = assess_constraint_readiness(
-        cfg, cset, design, timing_graph, validation=validation,
+        cfg,
+        cset,
+        design,
+        timing_graph,
+        validation=validation,
         scenario_ids=tuple(scenario_ids or ()) if scenario_ids else (),
     )
     lineage_report = build_constraint_lineage(
-        cset, config=cfg, design=design, timing_graph=timing_graph,
-        validation=validation, readiness=readiness_report,
+        cset,
+        config=cfg,
+        design=design,
+        timing_graph=timing_graph,
+        validation=validation,
+        readiness=readiness_report,
     )
     if prior_review:
         record = _load_review_record(prior_review)
         if record.policy != review_policy:
             message = "--review must be assessed under its recorded policy; omit --policy/--allow-warnings changes."
             if json_out:
-                typer.echo(json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True))
+                typer.echo(
+                    json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True)
+                )
             else:
                 console.print(f"[red]{message}[/red]")
             raise typer.Exit(code=2)
     elif supersede:
         record = supersede_review(
-            _load_review_record(supersede), cset, policy=review_policy,
-            scenario_ids=tuple(scenario_ids or ()), all_active_scenarios=all_active_scenarios,
-            config=cfg, design=design, timing_graph=timing_graph, lineage=lineage_report,
-            readiness=readiness_report, validation=validation,
+            _load_review_record(supersede),
+            cset,
+            policy=review_policy,
+            scenario_ids=tuple(scenario_ids or ()),
+            all_active_scenarios=all_active_scenarios,
+            config=cfg,
+            design=design,
+            timing_graph=timing_graph,
+            lineage=lineage_report,
+            readiness=readiness_report,
+            validation=validation,
         )
     else:
         record = create_constraint_review(
-            cset, policy=review_policy, scenario_ids=tuple(scenario_ids or ()),
-            all_active_scenarios=all_active_scenarios, config=cfg, design=design,
-            timing_graph=timing_graph, lineage=lineage_report, readiness=readiness_report,
+            cset,
+            policy=review_policy,
+            scenario_ids=tuple(scenario_ids or ()),
+            all_active_scenarios=all_active_scenarios,
+            config=cfg,
+            design=design,
+            timing_graph=timing_graph,
+            lineage=lineage_report,
+            readiness=readiness_report,
             validation=validation,
         )
     try:
@@ -1064,7 +1277,9 @@ def review(
     except ValueError:
         message = f"Unsupported explicit review decision: {decision!r}"
         if json_out:
-            typer.echo(json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True))
+            typer.echo(
+                json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True)
+            )
         else:
             console.print(f"[red]{message}[/red]")
         raise typer.Exit(code=2) from None
@@ -1072,13 +1287,27 @@ def review(
     try:
         if parsed_decision is not None:
             record = decide_review(
-                record, cset, parsed_decision, actor=actor, comment=comment,
-                config=cfg, design=design, timing_graph=timing_graph, lineage=lineage_report,
-                readiness=readiness_report, validation=validation,
+                record,
+                cset,
+                parsed_decision,
+                actor=actor,
+                comment=comment,
+                config=cfg,
+                design=design,
+                timing_graph=timing_graph,
+                lineage=lineage_report,
+                readiness=readiness_report,
+                validation=validation,
             )
         assessment = assess_constraint_review(
-            cset, review=record, config=cfg, design=design, timing_graph=timing_graph,
-            lineage=lineage_report, readiness=readiness_report, validation=validation,
+            cset,
+            review=record,
+            config=cfg,
+            design=design,
+            timing_graph=timing_graph,
+            lineage=lineage_report,
+            readiness=readiness_report,
+            validation=validation,
         )
     except ReviewDecisionError as exc:
         payload = {"status": "INVALID", "message": str(exc), "ucm_mutated": False}
@@ -1091,16 +1320,27 @@ def review(
         typer.echo(json.dumps(assessment.to_dict(), indent=2, sort_keys=True, default=str))
         return
     color = {
-        "APPROVED": "green", "APPROVED_WITH_WARNINGS": "yellow", "NEEDS_REVIEW": "cyan",
-        "REJECTED": "red", "DEFERRED": "yellow", "STALE": "magenta", "INVALID": "red",
-        "REVOKED": "red", "UNKNOWN": "magenta", "BLOCKED": "red", "INCOMPLETE": "yellow",
+        "APPROVED": "green",
+        "APPROVED_WITH_WARNINGS": "yellow",
+        "NEEDS_REVIEW": "cyan",
+        "REJECTED": "red",
+        "DEFERRED": "yellow",
+        "STALE": "magenta",
+        "INVALID": "red",
+        "REVOKED": "red",
+        "UNKNOWN": "magenta",
+        "BLOCKED": "red",
+        "INCOMPLETE": "yellow",
         "UNSUPPORTED": "magenta",
     }[assessment.current_status.value]
-    console.print(Panel(
-        f"[bold {color}]{assessment.current_status.value}[/bold {color}] — governance review only; "
-        "not external EDA signoff",
-        title="Constraint review & approval boundary", border_style=color,
-    ))
+    console.print(
+        Panel(
+            f"[bold {color}]{assessment.current_status.value}[/bold {color}] — governance review only; "
+            "not external EDA signoff",
+            title="Constraint review & approval boundary",
+            border_style=color,
+        )
+    )
     console.print(explain_constraint_review(assessment))
 
 
@@ -1109,26 +1349,47 @@ def release(
     config: str = typer.Argument(..., help="Path to project YAML"),
     ucm: str = typer.Option(..., "--ucm", help="Explicit reviewed canonical UCM JSON snapshot"),
     review: str = typer.Option(..., "--review", help="Explicit approved Step-31 review JSON"),
-    decision: str | None = typer.Option(None, "--decision", help="Explicit RELEASE or REVOKE lifecycle action"),
+    decision: str | None = typer.Option(
+        None, "--decision", help="Explicit RELEASE or REVOKE lifecycle action"
+    ),
     releaser: str | None = typer.Option(None, "--releaser", help="Explicit release actor identity"),
-    releaser_role: str | None = typer.Option(None, "--releaser-role", help="Optional explicit release actor role"),
+    releaser_role: str | None = typer.Option(
+        None, "--releaser-role", help="Optional explicit release actor role"
+    ),
     comment: str = typer.Option("", "--comment", help="Explicit release rationale/comment"),
-    scenario_ids: Annotated[list[str] | None, typer.Option(
-        "--scenario", help="Selected MCMM release scope (repeatable)",
-    )] = None,
-    all_active_scenarios: bool = typer.Option(False, "--all-active-scenarios",
-                                               help="Explicitly release all active MCMM scenarios"),
+    scenario_ids: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--scenario",
+            help="Selected MCMM release scope (repeatable)",
+        ),
+    ] = None,
+    all_active_scenarios: bool = typer.Option(
+        False, "--all-active-scenarios", help="Explicitly release all active MCMM scenarios"
+    ),
     policy: str | None = typer.Option(None, "--policy", help="Explicit ReleasePolicy JSON file"),
-    allow_warnings: bool = typer.Option(False, "--allow-warnings",
-                                        help="Explicitly set policy.allow_release_with_warnings"),
-    prior_release: str | None = typer.Option(None, "--release-record",
-                                              help="Prior release JSON or release-assessment JSON"),
-    supersede: str | None = typer.Option(None, "--supersede", help="Prior release JSON to supersede"),
-    sdc: str | None = typer.Option(None, "--sdc", help="Existing explicitly supplied SDC; release never generates one"),
-    artifact: Annotated[list[str] | None, typer.Option(
-        "--artifact", help="Existing supplied KIND=PATH release artifact (repeatable)",
-    )] = None,
-    package_dir: str | None = typer.Option(None, "--package-dir", help="Explicit directory for a reproducible package"),
+    allow_warnings: bool = typer.Option(
+        False, "--allow-warnings", help="Explicitly set policy.allow_release_with_warnings"
+    ),
+    prior_release: str | None = typer.Option(
+        None, "--release-record", help="Prior release JSON or release-assessment JSON"
+    ),
+    supersede: str | None = typer.Option(
+        None, "--supersede", help="Prior release JSON to supersede"
+    ),
+    sdc: str | None = typer.Option(
+        None, "--sdc", help="Existing explicitly supplied SDC; release never generates one"
+    ),
+    artifact: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--artifact",
+            help="Existing supplied KIND=PATH release artifact (repeatable)",
+        ),
+    ] = None,
+    package_dir: str | None = typer.Option(
+        None, "--package-dir", help="Explicit directory for a reproducible package"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Output deterministic release JSON only"),
 ):
     """Assess or explicitly release one reviewed UCM; it is not EDA signoff.
@@ -1160,47 +1421,82 @@ def release(
     timing_graph = _do_timing(cfg, design)
     matrix = _mcmm_matrix(cfg, cset)
     validation = run_validation(
-        design, timing_graph, cset, backend="generic",
+        design,
+        timing_graph,
+        cset,
+        backend="generic",
         active_scenarios=set(matrix.active_ids) if matrix.is_enabled else None,
     )
     readiness_report = assess_constraint_readiness(
-        cfg, cset, design, timing_graph, validation=validation,
+        cfg,
+        cset,
+        design,
+        timing_graph,
+        validation=validation,
         scenario_ids=tuple(scenario_ids or ()),
     )
     lineage_report = build_constraint_lineage(
-        cset, config=cfg, design=design, timing_graph=timing_graph,
-        validation=validation, readiness=readiness_report,
+        cset,
+        config=cfg,
+        design=design,
+        timing_graph=timing_graph,
+        validation=validation,
+        readiness=readiness_report,
     )
     # Reassessment is read-only and makes an old review visibly stale rather
     # than silently treating it as current. It does not create/approve/revoke it.
     review_assessment = assess_constraint_review(
-        cset, review=review_record, config=cfg, design=design, timing_graph=timing_graph,
-        lineage=lineage_report, readiness=readiness_report, validation=validation,
+        cset,
+        review=review_record,
+        config=cfg,
+        design=design,
+        timing_graph=timing_graph,
+        lineage=lineage_report,
+        readiness=readiness_report,
+        validation=validation,
     )
     common = {
-        "config": cfg, "design": design, "timing_graph": timing_graph, "review": review_assessment,
-        "readiness": readiness_report, "validation": validation, "lineage": lineage_report,
-        "sdc_path": sdc, "additional_artifacts": artifacts,
+        "config": cfg,
+        "design": design,
+        "timing_graph": timing_graph,
+        "review": review_assessment,
+        "readiness": readiness_report,
+        "validation": validation,
+        "lineage": lineage_report,
+        "sdc_path": sdc,
+        "additional_artifacts": artifacts,
     }
     if stored_release is not None:
         record = stored_release
         if record.policy != release_policy:
-            _release_cli_error(json_out, "--release-record must use its recorded policy; provide a matching policy if overriding defaults.")
+            _release_cli_error(
+                json_out,
+                "--release-record must use its recorded policy; provide a matching policy if overriding defaults.",
+            )
     elif supersede:
         record = supersede_release(
-            _load_release_record(supersede), cset, policy=release_policy,
-            scenario_ids=tuple(scenario_ids or ()), all_active_scenarios=all_active_scenarios, **common,
+            _load_release_record(supersede),
+            cset,
+            policy=release_policy,
+            scenario_ids=tuple(scenario_ids or ()),
+            all_active_scenarios=all_active_scenarios,
+            **common,
         )
     else:
         record = create_release_candidate(
-            cset, policy=release_policy, scenario_ids=tuple(scenario_ids or ()),
-            all_active_scenarios=all_active_scenarios, **common,
+            cset,
+            policy=release_policy,
+            scenario_ids=tuple(scenario_ids or ()),
+            all_active_scenarios=all_active_scenarios,
+            **common,
         )
     action = (decision or "").strip().upper()
     actor = ReviewActor.from_value(releaser, role=releaser_role)
     try:
         if action == "RELEASE":
-            record = release_constraint_set(record, cset, policy=record.policy, actor=actor, comment=comment, **common)
+            record = release_constraint_set(
+                record, cset, policy=record.policy, actor=actor, comment=comment, **common
+            )
         elif action == "REVOKE":
             record = revoke_release(record, cset, actor=actor, comment=comment, **common)
         elif action:
@@ -1209,9 +1505,18 @@ def release(
         payload: dict[str, Any] = assessment.to_dict()
         if package_dir is not None:
             package = create_release_package(
-                record, cset, package_dir, config=cfg, design=design, timing_graph=timing_graph,
-                review=review_record, readiness=readiness_report, validation=validation, lineage=lineage_report,
-                sdc_path=sdc, additional_artifacts=artifacts,
+                record,
+                cset,
+                package_dir,
+                config=cfg,
+                design=design,
+                timing_graph=timing_graph,
+                review=review_record,
+                readiness=readiness_report,
+                validation=validation,
+                lineage=lineage_report,
+                sdc_path=sdc,
+                additional_artifacts=artifacts,
             )
             payload["package"] = package.to_dict()
     except (ReleaseDecisionError, ReleasePackageError) as exc:
@@ -1220,22 +1525,33 @@ def release(
         typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return
     color = {
-        "READY": "green", "RELEASED": "green", "RELEASED_WITH_WARNINGS": "yellow",
-        "CANDIDATE": "cyan", "BLOCKED": "red", "INVALID": "red", "STALE": "magenta",
-        "REVOKED": "red", "UNKNOWN": "magenta",
+        "READY": "green",
+        "RELEASED": "green",
+        "RELEASED_WITH_WARNINGS": "yellow",
+        "CANDIDATE": "cyan",
+        "BLOCKED": "red",
+        "INVALID": "red",
+        "STALE": "magenta",
+        "REVOKED": "red",
+        "UNKNOWN": "magenta",
     }[assessment.current_status.value]
-    console.print(Panel(
-        f"[bold {color}]{assessment.current_status.value}[/bold {color}] — RCA release only; "
-        "not external EDA, STA, physical, commercial, or ASIC signoff",
-        title="Constraint release baseline & package", border_style=color,
-    ))
+    console.print(
+        Panel(
+            f"[bold {color}]{assessment.current_status.value}[/bold {color}] — RCA release only; "
+            "not external EDA, STA, physical, commercial, or ASIC signoff",
+            title="Constraint release baseline & package",
+            border_style=color,
+        )
+    )
     console.print_json(json.dumps(payload, sort_keys=True, default=str))
 
 
 @app.command(name="release-verify")
 def release_verify(
     package: str = typer.Argument(..., help="Existing RCA release package directory"),
-    json_out: bool = typer.Option(False, "--json", help="Output deterministic verification JSON only"),
+    json_out: bool = typer.Option(
+        False, "--json", help="Output deterministic verification JSON only"
+    ),
 ):
     """Statelessly verify an RCA release package; never repairs or runs tools."""
     configure_logging(level="WARNING" if json_out else "INFO")
@@ -1247,11 +1563,14 @@ def release_verify(
             raise typer.Exit(code=2)
         return
     color = "green" if verification.status.value == "VERIFIED" else "red"
-    console.print(Panel(
-        f"[bold {color}]{verification.status.value}[/bold {color}] — integrity only; "
-        "no EDA/formal execution, mutation, or repair",
-        title="RCA release package verification", border_style=color,
-    ))
+    console.print(
+        Panel(
+            f"[bold {color}]{verification.status.value}[/bold {color}] — integrity only; "
+            "no EDA/formal execution, mutation, or repair",
+            title="RCA release package verification",
+            border_style=color,
+        )
+    )
     console.print_json(json.dumps(payload, sort_keys=True, default=str))
     if verification.status.value != "VERIFIED":
         raise typer.Exit(code=2)
@@ -1273,15 +1592,21 @@ def _parse_release_artifacts(values: list[str]) -> dict[str, str]:
 
 def _release_cli_error(json_out: bool, message: str) -> None:
     if json_out:
-        typer.echo(json.dumps({"status": "INVALID", "message": message, "ucm_mutated": False},
-                               indent=2, sort_keys=True))
+        typer.echo(
+            json.dumps(
+                {"status": "INVALID", "message": message, "ucm_mutated": False},
+                indent=2,
+                sort_keys=True,
+            )
+        )
     else:
         console.print(f"[red]{message}[/red]")
     raise typer.Exit(code=2)
 
 
-def _write_projection_report(cfg: ProjectConfig, requested_path: str | None, default_name: str,
-                             data: dict[str, Any]) -> Path | None:
+def _write_projection_report(
+    cfg: ProjectConfig, requested_path: str | None, default_name: str, data: dict[str, Any]
+) -> Path | None:
     """Explicitly persist a presentation report below configured output only."""
     if requested_path is None:
         return None
@@ -1291,7 +1616,9 @@ def _write_projection_report(cfg: ProjectConfig, requested_path: str | None, def
     try:
         destination.relative_to(root)
     except ValueError as exc:
-        raise ValueError("Projection report path must stay below configured flow.output_dir.") from exc
+        raise ValueError(
+            "Projection report path must stay below configured flow.output_dir."
+        ) from exc
     if destination.name != default_name:
         raise ValueError(f"Projection report file must be named {default_name!r}.")
     relative = str(destination.relative_to(root))
@@ -1302,10 +1629,18 @@ def _write_projection_report(cfg: ProjectConfig, requested_path: str | None, def
 @app.command(name="run")
 def run_workflow(
     config: str = typer.Argument(..., help="Path to project YAML"),
-    ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM snapshot; defaults to workflow.ucm_snapshot"),
-    review: str | None = typer.Option(None, "--review", help="Optional existing Step-31 review JSON"),
-    release_package: str | None = typer.Option(None, "--release-package", help="Optional existing Step-32 package directory"),
-    report_path: str | None = typer.Option(None, "--report", help="Explicit workflow_report.json below flow.output_dir"),
+    ucm: str | None = typer.Option(
+        None, "--ucm", help="Existing canonical UCM snapshot; defaults to workflow.ucm_snapshot"
+    ),
+    review: str | None = typer.Option(
+        None, "--review", help="Optional existing Step-31 review JSON"
+    ),
+    release_package: str | None = typer.Option(
+        None, "--release-package", help="Optional existing Step-32 package directory"
+    ),
+    report_path: str | None = typer.Option(
+        None, "--report", help="Explicit workflow_report.json below flow.output_dir"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Output deterministic workflow JSON only"),
 ):
     """Project the complete RCA workflow without bypassing any governance stage.
@@ -1328,18 +1663,40 @@ def run_workflow(
             knowledge.add_patterns(load_knowledge_file(source))
         except KnowledgeError as exc:
             _release_cli_error(json_out, f"Cannot load configured knowledge source: {exc}")
-    inference = InferenceEngine().infer_candidates(design, timing_graph, cfg, cset, AssumptionLedger(), knowledge=knowledge)
+    inference = InferenceEngine().infer_candidates(
+        design, timing_graph, cfg, cset, AssumptionLedger(), knowledge=knowledge
+    )
     matrix = _mcmm_matrix(cfg, cset)
-    validation = run_validation(design, timing_graph, cset, backend="generic",
-                                active_scenarios=set(matrix.active_ids) if matrix.is_enabled else None)
-    readiness_report = assess_constraint_readiness(cfg, cset, design, timing_graph, validation=validation)
-    lineage_report = build_constraint_lineage(cset, config=cfg, design=design, timing_graph=timing_graph,
-                                              validation=validation, readiness=readiness_report)
+    validation = run_validation(
+        design,
+        timing_graph,
+        cset,
+        backend="generic",
+        active_scenarios=set(matrix.active_ids) if matrix.is_enabled else None,
+    )
+    readiness_report = assess_constraint_readiness(
+        cfg, cset, design, timing_graph, validation=validation
+    )
+    lineage_report = build_constraint_lineage(
+        cset,
+        config=cfg,
+        design=design,
+        timing_graph=timing_graph,
+        validation=validation,
+        readiness=readiness_report,
+    )
     review_assessment = None
     if review:
-        review_assessment = assess_constraint_review(cset, review=_load_review_record(review), config=cfg, design=design,
-                                                     timing_graph=timing_graph, lineage=lineage_report,
-                                                     readiness=readiness_report, validation=validation)
+        review_assessment = assess_constraint_review(
+            cset,
+            review=_load_review_record(review),
+            config=cfg,
+            design=design,
+            timing_graph=timing_graph,
+            lineage=lineage_report,
+            readiness=readiness_report,
+            validation=validation,
+        )
     package_verification = None
     handoff_assessment = None
     if release_package:
@@ -1347,17 +1704,29 @@ def run_workflow(
 
         package_verification = verify_release_package(release_package)
         handoff_assessment = assess_constraint_handoff(
-            release_package, target=cfg.workflow.handoff_target,
-            policy=HandoffPolicy.from_dict(cfg.workflow.handoff_policy), config=cfg,
+            release_package,
+            target=cfg.workflow.handoff_target,
+            policy=HandoffPolicy.from_dict(cfg.workflow.handoff_policy),
+            config=cfg,
         )
     report = build_complete_workflow(
         cset,
-        inputs=WorkflowInputs(design=design, knowledge=knowledge, inference=inference, validation=validation,
-                              readiness=readiness_report, lineage=lineage_report, review=review_assessment,
-                              package_verification=package_verification, handoff=handoff_assessment),
+        inputs=WorkflowInputs(
+            design=design,
+            knowledge=knowledge,
+            inference=inference,
+            validation=validation,
+            readiness=readiness_report,
+            lineage=lineage_report,
+            review=review_assessment,
+            package_verification=package_verification,
+            handoff=handoff_assessment,
+        ),
     )
     try:
-        written = _write_projection_report(cfg, report_path, "workflow_report.json", report.to_dict())
+        written = _write_projection_report(
+            cfg, report_path, "workflow_report.json", report.to_dict()
+        )
     except ValueError as exc:
         _release_cli_error(json_out, str(exc))
     if json_out:
@@ -1371,11 +1740,21 @@ def run_workflow(
 @app.command(name="replay-evidence")
 def replay_evidence(
     config: str = typer.Argument(..., help="Path to project YAML"),
-    ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM snapshot; defaults to workflow.ucm_snapshot"),
-    manifest: str | None = typer.Option(None, "--manifest", help="Existing run_manifest.json; read only"),
-    release_package: str | None = typer.Option(None, "--release-package", help="Existing release package to verify; read only"),
-    report_path: str | None = typer.Option(None, "--report", help="Explicit replay_evidence.json below flow.output_dir"),
-    json_out: bool = typer.Option(False, "--json", help="Output deterministic replay-evidence JSON"),
+    ucm: str | None = typer.Option(
+        None, "--ucm", help="Existing canonical UCM snapshot; defaults to workflow.ucm_snapshot"
+    ),
+    manifest: str | None = typer.Option(
+        None, "--manifest", help="Existing run_manifest.json; read only"
+    ),
+    release_package: str | None = typer.Option(
+        None, "--release-package", help="Existing release package to verify; read only"
+    ),
+    report_path: str | None = typer.Option(
+        None, "--report", help="Explicit replay_evidence.json below flow.output_dir"
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Output deterministic replay-evidence JSON"
+    ),
 ):
     """Assess retained replay identity without rerunning tools or changing lifecycle state."""
     cfg = _load(config)
@@ -1385,14 +1764,20 @@ def replay_evidence(
         try:
             loaded = json.loads(Path(manifest).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            _release_cli_error(json_out, f"Cannot load manifest evidence: {type(exc).__name__}: {exc}")
+            _release_cli_error(
+                json_out, f"Cannot load manifest evidence: {type(exc).__name__}: {exc}"
+            )
         if not isinstance(loaded, dict):
             _release_cli_error(json_out, "Manifest evidence must be a JSON object.")
         manifest_data = RunManifest.from_dict(loaded)
     package = verify_release_package(release_package) if release_package else None
-    report = assess_replay_evidence(cset, config=cfg, manifest=manifest_data, package_verification=package)
+    report = assess_replay_evidence(
+        cset, config=cfg, manifest=manifest_data, package_verification=package
+    )
     try:
-        written = _write_projection_report(cfg, report_path, "replay_evidence.json", report.to_dict())
+        written = _write_projection_report(
+            cfg, report_path, "replay_evidence.json", report.to_dict()
+        )
     except ValueError as exc:
         _release_cli_error(json_out, str(exc))
     if json_out:
@@ -1406,11 +1791,19 @@ def replay_evidence(
 @app.command()
 def handoff(
     config: str = typer.Argument(..., help="Path to project YAML"),
-    release: str = typer.Option(..., "--release", help="Existing verified Step-32 release package directory"),
-    target: str = typer.Option("GENERIC", "--target", help="GENERIC|OPENSTA_OPENROAD|SYNOPSYS|CADENCE|FUTURE_VENDOR"),
+    release: str = typer.Option(
+        ..., "--release", help="Existing verified Step-32 release package directory"
+    ),
+    target: str = typer.Option(
+        "GENERIC", "--target", help="GENERIC|OPENSTA_OPENROAD|SYNOPSYS|CADENCE|FUTURE_VENDOR"
+    ),
     policy: str | None = typer.Option(None, "--policy", help="Explicit HandoffPolicy JSON file"),
-    prepare: bool = typer.Option(False, "--prepare", help="Explicitly prepare immutable target handoff projection"),
-    execute: bool = typer.Option(False, "--execute", help="Request boundary-only execution status; never runs a hidden tool"),
+    prepare: bool = typer.Option(
+        False, "--prepare", help="Explicitly prepare immutable target handoff projection"
+    ),
+    execute: bool = typer.Option(
+        False, "--execute", help="Request boundary-only execution status; never runs a hidden tool"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Output deterministic handoff JSON only"),
 ):
     """Assess or explicitly prepare a release package for one downstream target.
@@ -1428,28 +1821,42 @@ def handoff(
     try:
         target_value = HandoffTarget(target.strip().upper())
         if prepare:
-            record = prepare_constraint_handoff(release, target=target_value, policy=handoff_policy, config=cfg)
+            record = prepare_constraint_handoff(
+                release, target=target_value, policy=handoff_policy, config=cfg
+            )
             result = execute_constraint_handoff(record, execute=execute)
             payload = result.to_dict()
         else:
-            assessment = assess_constraint_handoff(release, target=target_value, policy=handoff_policy, config=cfg)
+            assessment = assess_constraint_handoff(
+                release, target=target_value, policy=handoff_policy, config=cfg
+            )
             payload = assessment.to_dict()
             result = None
     except (HandoffError, ValueError) as exc:
         _release_cli_error(json_out, str(exc))
     if json_out:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
-        if result is not None and result.status not in {HandoffStatus.HANDOFF_PREPARED, HandoffStatus.HANDOFF_EXECUTED}:
+        if result is not None and result.status not in {
+            HandoffStatus.HANDOFF_PREPARED,
+            HandoffStatus.HANDOFF_EXECUTED,
+        }:
             raise typer.Exit(code=2)
         if result is None and not assessment.handoff_possible:
             raise typer.Exit(code=2)
         return
     status = result.status if result is not None else assessment.handoff.status
-    color = "green" if status in {HandoffStatus.HANDOFF_READY, HandoffStatus.HANDOFF_PREPARED} else "red"
-    console.print(Panel(
-        f"[bold {color}]{status.value}[/bold {color}] — release package handoff only; not EDA signoff",
-        title="Constraint downstream handoff", border_style=color,
-    ))
+    color = (
+        "green"
+        if status in {HandoffStatus.HANDOFF_READY, HandoffStatus.HANDOFF_PREPARED}
+        else "red"
+    )
+    console.print(
+        Panel(
+            f"[bold {color}]{status.value}[/bold {color}] — release package handoff only; not EDA signoff",
+            title="Constraint downstream handoff",
+            border_style=color,
+        )
+    )
     console.print_json(json.dumps(payload, sort_keys=True, default=str))
     if status not in {HandoffStatus.HANDOFF_READY, HandoffStatus.HANDOFF_PREPARED}:
         raise typer.Exit(code=2)
@@ -1458,8 +1865,12 @@ def handoff(
 @app.command(name="handoff-verify")
 def handoff_verify(
     handoff: str = typer.Argument(..., help="Saved handoff or handoff-assessment JSON"),
-    release: str | None = typer.Option(None, "--release", help="Optional explicit package directory override"),
-    json_out: bool = typer.Option(False, "--json", help="Output deterministic handoff verification JSON only"),
+    release: str | None = typer.Option(
+        None, "--release", help="Optional explicit package directory override"
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Output deterministic handoff verification JSON only"
+    ),
 ):
     """Statelessly verify a handoff against its current release package."""
     configure_logging(level="WARNING" if json_out else "INFO")
@@ -1472,8 +1883,13 @@ def handoff_verify(
         typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
     else:
         color = "green" if assessment.handoff_possible else "red"
-        console.print(Panel(f"[bold {color}]{assessment.handoff.status.value}[/bold {color}] — verification only",
-                            title="Constraint handoff verification", border_style=color))
+        console.print(
+            Panel(
+                f"[bold {color}]{assessment.handoff.status.value}[/bold {color}] — verification only",
+                title="Constraint handoff verification",
+                border_style=color,
+            )
+        )
         console.print_json(json.dumps(payload, sort_keys=True, default=str))
     if not assessment.handoff_possible:
         raise typer.Exit(code=2)
@@ -1483,9 +1899,13 @@ def handoff_verify(
 def readiness(
     config: str = typer.Argument(..., help="Path to project YAML"),
     ucm: str = typer.Option(..., "--ucm", help="Current canonical UCM JSON snapshot (required)"),
-    scenario_ids: Annotated[list[str] | None, typer.Option(
-        "--scenario", help="Restrict report to an active MCMM scenario (repeatable)",
-    )] = None,
+    scenario_ids: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--scenario",
+            help="Restrict report to an active MCMM scenario (repeatable)",
+        ),
+    ] = None,
     json_out: bool = typer.Option(False, "--json", help="Output deterministic readiness JSON only"),
 ):
     """Assess constraint readiness without changing UCM or executing EDA.
@@ -1502,10 +1922,18 @@ def readiness(
     design, _ = _do_parse(cfg)
     timing_graph = _do_timing(cfg, design)
     inference_report = InferenceEngine().infer_candidates(
-        design, timing_graph, cfg, cset, AssumptionLedger(), knowledge=KnowledgeEngine(),
+        design,
+        timing_graph,
+        cfg,
+        cset,
+        AssumptionLedger(),
+        knowledge=KnowledgeEngine(),
     )
     report = assess_constraint_readiness(
-        cfg, cset, design, timing_graph,
+        cfg,
+        cset,
+        design,
+        timing_graph,
         inference_report=inference_report,
         scenario_ids=tuple(scenario_ids or ()),
     )
@@ -1513,21 +1941,29 @@ def readiness(
         typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
         return
     color = {
-        "READY": "green", "READY_WITH_WARNINGS": "yellow", "INCOMPLETE": "yellow",
-        "UNKNOWN": "magenta", "BLOCKED": "red", "UNSUPPORTED": "red",
+        "READY": "green",
+        "READY_WITH_WARNINGS": "yellow",
+        "INCOMPLETE": "yellow",
+        "UNKNOWN": "magenta",
+        "BLOCKED": "red",
+        "UNSUPPORTED": "red",
     }[report.status.value]
-    console.print(Panel(
-        f"[bold {color}]{report.status.value}[/bold {color}] — report only; canonical UCM unchanged",
-        title="Constraint readiness & closure",
-        border_style=color,
-    ))
+    console.print(
+        Panel(
+            f"[bold {color}]{report.status.value}[/bold {color}] — report only; canonical UCM unchanged",
+            title="Constraint readiness & closure",
+            border_style=color,
+        )
+    )
     console.print(explain_constraint_readiness(report))
 
 
 @app.command()
-def validate(config: str = typer.Argument(..., help="Path to project YAML"),
-             sdc: str | None = typer.Option(None, help="Path to existing SDC to validate"),
-             backend: str = typer.Option("generic", help="SDC backend name")):
+def validate(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    sdc: str | None = typer.Option(None, help="Path to existing SDC to validate"),
+    backend: str = typer.Option("generic", help="SDC backend name"),
+):
     """Validate generated (or imported) SDC against design model."""
     configure_logging(level="INFO")
     cfg = _load(config)
@@ -1548,9 +1984,15 @@ def validate(config: str = typer.Argument(..., help="Path to project YAML"),
     # scenario set so scenario-specific findings keep their identity.
     matrix = _mcmm_matrix(cfg, cset)
     active = matrix.active_ids if matrix.is_enabled else None
-    result = run_validation(design, tg, cset, backend=backend,
-                            active_scenarios=set(active) if active else None,
-                            parser=parser_obj, formal_backend=_formal_backend(cfg))
+    result = run_validation(
+        design,
+        tg,
+        cset,
+        backend=backend,
+        active_scenarios=set(active) if active else None,
+        parser=parser_obj,
+        formal_backend=_formal_backend(cfg),
+    )
     am = _am(cfg)
     am.write_json("validation_report.json", result.as_dict())
     if result.coverage:
@@ -1561,11 +2003,18 @@ def validate(config: str = typer.Argument(..., help="Path to project YAML"),
 
 def _print_validation_summary(console, result):
     from rich.table import Table
-    status_color = {"PASS": "green", "PASS_WITH_WARNINGS": "yellow",
-                    "BLOCKED": "red", "ERROR": "red"}.get(result.status, "white")
+
+    status_color = {
+        "PASS": "green",
+        "PASS_WITH_WARNINGS": "yellow",
+        "BLOCKED": "red",
+        "ERROR": "red",
+    }.get(result.status, "white")
     console.print(Panel(f"[cyan]Validation Report — [{status_color}]{result.status}[/]"))
     console.print(f"  Errors:   [{'red' if result.errors else 'green'}]{len(result.errors)}[/]")
-    console.print(f"  Warnings: [{'yellow' if result.warnings else 'green'}]{len(result.warnings)}[/]")
+    console.print(
+        f"  Warnings: [{'yellow' if result.warnings else 'green'}]{len(result.warnings)}[/]"
+    )
     console.print(f"  Blocking: [{'red' if result.blocking else 'green'}]{len(result.blocking)}[/]")
     if result.coverage:
         cov = result.coverage.as_dict()
@@ -1590,7 +2039,9 @@ def _print_validation_summary(console, result):
     all_issues = result.errors + result.warnings
     if all_issues:
         t = Table(title="Issues (grouped by severity)")
-        t.add_column("Severity"); t.add_column("Code"); t.add_column("Message")
+        t.add_column("Severity")
+        t.add_column("Code")
+        t.add_column("Message")
         for i in all_issues:
             t.add_row(i.severity.value, i.code.value, i.message)
         console.print(t)
@@ -1622,10 +2073,12 @@ def coverage(config: str = typer.Argument(..., help="Path to project YAML")):
 
 
 @app.command()
-def compare(config: str = typer.Argument(..., help="Path to project YAML"),
-            a: str = typer.Option(..., "--a", help="First SDC file"),
-            b: str = typer.Option(..., "--b", help="Second SDC file"),
-            json_out: bool = typer.Option(False, "--json", help="Emit JSON report")):
+def compare(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    a: str = typer.Option(..., "--a", help="First SDC file"),
+    b: str = typer.Option(..., "--b", help="Second SDC file"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON report"),
+):
     """Semantically compare two SDC files (UCM-level, Step 9).
 
     Differences are reported at field granularity; provenance is
@@ -1663,17 +2116,23 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
         "ERROR": "red",
     }.get(result.overall_status.value, "white")
     console.print(Panel(f"[cyan]SDC COMPARISON[/cyan]  {a}  vs  {b}"))
-    console.print(f"  Status: [bold {status_color}]{result.overall_status.value}[/]  "
-                  f"(level={result.comparison_level.value})")
+    console.print(
+        f"  Status: [bold {status_color}]{result.overall_status.value}[/]  "
+        f"(level={result.comparison_level.value})"
+    )
     c = result.counts()
-    console.print(f"  Equivalent: [green]{c['equivalent']}[/]"
-                  f"   Different: [yellow]{c['different']}[/]"
-                  f"   Only in A: {c['only_in_left']}"
-                  f"   Only in B: {c['only_in_right']}"
-                  f"   Unknown: [magenta]{c['unknown']}[/]")
-    console.print(f"  Duplicates in A: {c['duplicates_left']}   "
-                  f"Duplicates in B: {c['duplicates_right']}"
-                  f"   Scenario context findings: {c['scenario_differences']}")
+    console.print(
+        f"  Equivalent: [green]{c['equivalent']}[/]"
+        f"   Different: [yellow]{c['different']}[/]"
+        f"   Only in A: {c['only_in_left']}"
+        f"   Only in B: {c['only_in_right']}"
+        f"   Unknown: [magenta]{c['unknown']}[/]"
+    )
+    console.print(
+        f"  Duplicates in A: {c['duplicates_left']}   "
+        f"Duplicates in B: {c['duplicates_right']}"
+        f"   Scenario context findings: {c['scenario_differences']}"
+    )
     if result.scenario_differences:
         console.print("\n[bold]Scenario context findings:[/bold]")
         for finding in result.scenario_differences[:10]:
@@ -1685,7 +2144,7 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
         console.print("\n[bold]Top semantic differences:[/bold]")
         for shown, p in enumerate(result.different_constraints):
             if shown >= 10:
-                console.print(f"  … and {len(result.different_constraints)-shown} more")
+                console.print(f"  … and {len(result.different_constraints) - shown} more")
                 break
             ids = f"{p.a_id} → {p.b_id}" if p.a_id and p.b_id else (p.a_id or p.b_id or "")
             category = escape(f"[{p.constraint_type}]")
@@ -1735,9 +2194,11 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
 
 
 @app.command(name="explain")
-def explain_cmd(config: str = typer.Argument(..., help="Path to project YAML"),
-                constraint_id: str | None = typer.Option(None, "--constraint", "-c"),
-                candidate_id: str | None = typer.Option(None, "--candidate")):
+def explain_cmd(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    constraint_id: str | None = typer.Option(None, "--constraint", "-c"),
+    candidate_id: str | None = typer.Option(None, "--candidate"),
+):
     """Explain a constraint or candidate decision."""
     cfg = _load(config)
     am = _am(cfg)
@@ -1747,7 +2208,8 @@ def explain_cmd(config: str = typer.Argument(..., help="Path to project YAML"),
             console.print("[red]Run `rca generate` first to produce a constraint model.[/red]")
             raise typer.Exit(1)
         # Load and rebuild
-        design, _ = _do_parse(cfg); tg = _do_timing(cfg, design)
+        design, _ = _do_parse(cfg)
+        tg = _do_timing(cfg, design)
         ledger = AssumptionLedger()
         cset, _ = _do_inference(cfg, design, tg, ledger)
         c = cset.get(constraint_id)
@@ -1757,18 +2219,23 @@ def explain_cmd(config: str = typer.Argument(..., help="Path to project YAML"),
         console.print(explain_constraint(c))
         return
     if candidate_id:
-        console.print("[yellow]Candidate explanation requires the optimizer DB; load candidates.jsonl.[/yellow]")
+        console.print(
+            "[yellow]Candidate explanation requires the optimizer DB; load candidates.jsonl.[/yellow]"
+        )
         return
     console.print("Specify --constraint ID to explain a constraint.")
 
 
 @app.command(name="run-sta")
-def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
-            backend: str = typer.Option("yosys_opensta", help="EDA flow: yosys_opensta|mock"),
-            sdc: str | None = typer.Option(None, help="SDC file to use (defaults to generated)"),
-            force: bool = typer.Option(False, "--force", help="Bypass cache and rerun"),
-            allow_partial_sdc: bool = typer.Option(False, "--allow-partial-sdc",
-                                                  help="Exploratory: allow PARTIAL SDC to reach STA")):
+def run_sta(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    backend: str = typer.Option("yosys_opensta", help="EDA flow: yosys_opensta|mock"),
+    sdc: str | None = typer.Option(None, help="SDC file to use (defaults to generated)"),
+    force: bool = typer.Option(False, "--force", help="Bypass cache and rerun"),
+    allow_partial_sdc: bool = typer.Option(
+        False, "--allow-partial-sdc", help="Exploratory: allow PARTIAL SDC to reach STA"
+    ),
+):
     """Run synthesis + STA on the design and collect QoR (Step 10)."""
     configure_logging(level="INFO")
     cfg = _load(config)
@@ -1784,6 +2251,7 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
     mcmm_enabled = bool(matrix.is_enabled and matrix.scenario_count > 1)
     if mcmm_enabled:
         from ..optimizer import Candidate
+
         base_cand = Candidate(id="baseline", constraint_set=cset)
         if backend == "mock":
             ev = mock_mcmm_evaluator(matrix, base_cset=cset)
@@ -1799,30 +2267,46 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
         # Real backend: run the flow once per active scenario, then aggregate.
         sources = resolve_sources(cfg)
         include_dirs = resolve_include_dirs(cfg)
-        defines = dict(getattr(cfg, "sources", None).defines or {}) if getattr(cfg, "sources", None) else {}
+        defines = (
+            dict(getattr(cfg, "sources", None).defines or {})
+            if getattr(cfg, "sources", None)
+            else {}
+        )
         per_scenario: dict[str, dict] = {}
         for scenario in matrix.active_scenarios():
-            sdc_text = _mcmm_per_scenario_sdc(cset, sdc_backend, cfg.project.name,
-                                              matrix, scenario.id)
+            sdc_text = _mcmm_per_scenario_sdc(
+                cset, sdc_backend, cfg.project.name, matrix, scenario.id
+            )
             sdc_path = am.path(f"design.{scenario.id}.sdc")
             sdc_path.parent.mkdir(parents=True, exist_ok=True)
             sdc_path.write_text(sdc_text, encoding="utf-8")
             res = run_flow(
-                cfg=cfg, cset=cset, sdc_text=sdc_text,
+                cfg=cfg,
+                cset=cset,
+                sdc_text=sdc_text,
                 sdc_generation_status="COMPLETE",
-                sources=sources, include_dirs=include_dirs, defines=defines,
-                output_dir=Path(cfg.flow.output_dir), backend=backend,
+                sources=sources,
+                include_dirs=include_dirs,
+                defines=defines,
+                output_dir=Path(cfg.flow.output_dir),
+                backend=backend,
                 candidate_id=f"baseline_{scenario.id}",
-                scenario=scenario.id, corner=scenario.corner, mode=scenario.mode,
-                allow_partial_sdc=allow_partial_sdc, force=force,
+                scenario=scenario.id,
+                corner=scenario.corner,
+                mode=scenario.mode,
+                allow_partial_sdc=allow_partial_sdc,
+                force=force,
             )
             per_scenario[scenario.id] = res
         # ``qor_result`` is an internal canonical object used by optimizer
         # callbacks; persist the established JSON summary, not its repr.
-        am.write_json("mcmm_report.json", {
-            sid: {key: value for key, value in res.items() if key != "qor_result"}
-            for sid, res in per_scenario.items()
-        })
+        am.write_json(
+            "mcmm_report.json",
+            {
+                sid: {key: value for key, value in res.items() if key != "qor_result"}
+                for sid, res in per_scenario.items()
+            },
+        )
         # Keep the established mcmm_report.json layout untouched, then build
         # the existing MCMM model solely for relational aggregate indexing.
         from ..mcmm import (
@@ -1833,16 +2317,29 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
             global_feasibility,
             global_margin,
         )
+
         aggregate = MCMMResult(candidate_id="baseline", active_scenario_ids=list(matrix.active_ids))
         for sid in matrix.active_ids:
             scenario = matrix.scenario(sid)
             res = per_scenario[sid]
             sqor = ScenarioQoR(
-                candidate_id="baseline", scenario_id=sid, mode=scenario.mode, corner=scenario.corner,
-                name=scenario.name, qor=res.get("qor_result"), cache_key=res.get("cache_key", ""),
-                cache_status=("HIT" if res.get("status") == "CACHE_HIT" else
-                              "MISS" if res.get("cache_key") else res.get("status", "")),
-                run_id=res.get("run_id", ""), backend=backend, tool=backend,
+                candidate_id="baseline",
+                scenario_id=sid,
+                mode=scenario.mode,
+                corner=scenario.corner,
+                name=scenario.name,
+                qor=res.get("qor_result"),
+                cache_key=res.get("cache_key", ""),
+                cache_status=(
+                    "HIT"
+                    if res.get("status") == "CACHE_HIT"
+                    else "MISS"
+                    if res.get("cache_key")
+                    else res.get("status", "")
+                ),
+                run_id=res.get("run_id", ""),
+                backend=backend,
+                tool=backend,
             )
             # A failed/blocked scenario has no canonical QoR for the shared
             # MCMM helper to classify. Preserve that observed flow status
@@ -1852,8 +2349,10 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
                 sqor.status = BLOCKED
                 sqor.blocked = True
                 sqor.infeasible_reason = str(
-                    res.get("blocked_reason") or "; ".join(res.get("diagnostics") or []) or
-                    res.get("status") or "no QoR result"
+                    res.get("blocked_reason")
+                    or "; ".join(res.get("diagnostics") or [])
+                    or res.get("status")
+                    or "no QoR result"
                 )
             aggregate.scenario_results[sid] = sqor
             if sqor.run_id:
@@ -1869,16 +2368,20 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
         if persistence_warning:
             console.print(f"[yellow]{persistence_warning}[/yellow]")
         for sid, res in per_scenario.items():
-            console.print(f"[cyan]Scenario {sid}[/cyan]  status={res.get('status')}  "
-                          f"run_id={res.get('run_id')}")
+            console.print(
+                f"[cyan]Scenario {sid}[/cyan]  status={res.get('status')}  "
+                f"run_id={res.get('run_id')}"
+            )
             if isinstance(res.get("qor"), dict):
                 _print_power_summary(console, res["qor"], indent="    ")
         return
 
     # Generate SDC (using balanced safe mode by default; user can switch via --allow-partial)
     from ..utils.enums import SafeMode
-    gen = sdc_backend.generate(cset, design_name=cfg.project.name,
-                               mode=SafeMode.BALANCED, with_provenance=True)
+
+    gen = sdc_backend.generate(
+        cset, design_name=cfg.project.name, mode=SafeMode.BALANCED, with_provenance=True
+    )
     if sdc:
         sdc_path = Path(sdc)
         sdc_text = sdc_path.read_text(encoding="utf-8")
@@ -1887,7 +2390,9 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
 
     sources = resolve_sources(cfg)
     include_dirs = resolve_include_dirs(cfg)
-    defines = dict(getattr(cfg, "sources", None).defines or {}) if getattr(cfg, "sources", None) else {}
+    defines = (
+        dict(getattr(cfg, "sources", None).defines or {}) if getattr(cfg, "sources", None) else {}
+    )
 
     # Preserve a configured single scenario's identity when present so a
     # scenario-labelled power report is never silently ignored or rebound.
@@ -1900,11 +2405,19 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
         flow_corner = only_scenario.corner
         flow_mode = only_scenario.mode
     result = run_flow(
-        cfg=cfg, cset=cset, sdc_text=sdc_text,
+        cfg=cfg,
+        cset=cset,
+        sdc_text=sdc_text,
         sdc_generation_status=gen.status if isinstance(gen.status, str) else gen.status.value,
-        sources=sources, include_dirs=include_dirs, defines=defines,
-        output_dir=Path(cfg.flow.output_dir), backend=backend,
-        candidate_id="baseline", scenario=flow_scenario, corner=flow_corner, mode=flow_mode,
+        sources=sources,
+        include_dirs=include_dirs,
+        defines=defines,
+        output_dir=Path(cfg.flow.output_dir),
+        backend=backend,
+        candidate_id="baseline",
+        scenario=flow_scenario,
+        corner=flow_corner,
+        mode=flow_mode,
         allow_partial_sdc=allow_partial_sdc,
         force=force,
     )
@@ -1916,10 +2429,16 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
         sdc_out.write_text(sdc_text, encoding="utf-8")
 
     status = result["status"]
-    status_color = {"SUCCESS": "green", "MOCK": "cyan", "CACHE_HIT": "blue",
-                    "BLOCKED": "yellow", "SYNTHESIS_FAILED": "red",
-                    "STA_FAILED": "red", "TIMING_FAIL": "yellow",
-                    "ERROR": "red"}.get(status, "white")
+    status_color = {
+        "SUCCESS": "green",
+        "MOCK": "cyan",
+        "CACHE_HIT": "blue",
+        "BLOCKED": "yellow",
+        "SYNTHESIS_FAILED": "red",
+        "STA_FAILED": "red",
+        "TIMING_FAIL": "yellow",
+        "ERROR": "red",
+    }.get(status, "white")
 
     console.print(Panel(f"[cyan]EDA RUN[/cyan]  id={result['run_id']}"))
     console.print(f"  Status: [{status_color}]{status}[/]")
@@ -1927,29 +2446,44 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
     preflight = result.get("preflight")
     if isinstance(preflight, dict):
         preflight_state = "READY" if preflight.get("ready") else "BLOCKED"
-        console.print(f"  Real-EDA preflight: {preflight_state}"
-                      f"  ({preflight.get('failure_classification') or 'no failure'})")
+        console.print(
+            f"  Real-EDA preflight: {preflight_state}"
+            f"  ({preflight.get('failure_classification') or 'no failure'})"
+        )
         if not preflight.get("ready"):
             for check in preflight.get("checks", []):
                 if check.get("required") and not check.get("ready"):
-                    console.print(f"    - {check.get('component')}: {check.get('status')} — "
-                                  f"{check.get('detail')}")
+                    console.print(
+                        f"    - {check.get('component')}: {check.get('status')} — "
+                        f"{check.get('detail')}"
+                    )
     if result.get("synth") and isinstance(result["synth"], dict):
         si = result["synth"].get("tool_info") or {}
         yinfo = si.get("yosys") if isinstance(si, dict) else None
         if yinfo:
-            console.print(f"  Yosys:  {yinfo.get('executable','?')}  ({yinfo.get('version','?')})")
+            console.print(
+                f"  Yosys:  {yinfo.get('executable', '?')}  ({yinfo.get('version', '?')})"
+            )
     if result.get("sta") and isinstance(result["sta"], dict):
         si = result.get("manifest", {}).get("extra", {}).get("tool_info", {})
         oinfo = si.get("opensta") if isinstance(si, dict) else None
         if oinfo:
-            console.print(f"  OpenSTA: {oinfo.get('executable','?')}  ({oinfo.get('version','?')})")
+            console.print(
+                f"  OpenSTA: {oinfo.get('executable', '?')}  ({oinfo.get('version', '?')})"
+            )
     if result.get("qor"):
         q = result["qor"]
         console.print("\n[bold]TIMING[/bold]")
-        def _ns(x): return f"{x:.3f} ns" if isinstance(x, (int, float)) else "n/a"
-        console.print(f"  Setup WNS: {_ns(q.get('setup_wns_ns'))}   TNS: {_ns(q.get('setup_tns_ns'))}  violations={q.get('setup_violations')}")
-        console.print(f"  Hold  WNS: {_ns(q.get('hold_wns_ns'))}   TNS: {_ns(q.get('hold_tns_ns'))}  violations={q.get('hold_violations')}")
+
+        def _ns(x):
+            return f"{x:.3f} ns" if isinstance(x, (int, float)) else "n/a"
+
+        console.print(
+            f"  Setup WNS: {_ns(q.get('setup_wns_ns'))}   TNS: {_ns(q.get('setup_tns_ns'))}  violations={q.get('setup_violations')}"
+        )
+        console.print(
+            f"  Hold  WNS: {_ns(q.get('hold_wns_ns'))}   TNS: {_ns(q.get('hold_tns_ns'))}  violations={q.get('hold_violations')}"
+        )
         console.print("\n[bold]QoR[/bold]")
         area = q.get("area") if q.get("area") is not None else q.get("area_proxy")
         area_label = "area" if q.get("area") is not None else "area_proxy (cell_count)"
@@ -1958,8 +2492,10 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
         _print_power_summary(console, q)
         if q.get("critical_setup"):
             cs = q["critical_setup"]
-            console.print(f"  Worst setup path: {cs.get('startpoint')} -> {cs.get('endpoint')}  "
-                          f"(group {cs.get('path_group')}, slack={_ns(cs.get('slack'))})")
+            console.print(
+                f"  Worst setup path: {cs.get('startpoint')} -> {cs.get('endpoint')}  "
+                f"(group {cs.get('path_group')}, slack={_ns(cs.get('slack'))})"
+            )
     if result.get("diagnostics"):
         console.print("\n[yellow]Diagnostics:[/yellow]")
         for d in result["diagnostics"]:
@@ -1969,14 +2505,18 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
 
 
 @app.command()
-def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
-             backend: str = typer.Option("mock", help="EDA backend for closed-loop: mock|yosys_opensta"),
-             dashboard: bool = typer.Option(False, "--dashboard", help="Launch web dashboard")):
+def optimize(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    backend: str = typer.Option("mock", help="EDA backend for closed-loop: mock|yosys_opensta"),
+    dashboard: bool = typer.Option(False, "--dashboard", help="Launch web dashboard"),
+):
     """Run multi-objective constraint optimization."""
     configure_logging(level="INFO")
     cfg = _load(config)
     if not cfg.optimization.enabled:
-        console.print("[yellow]Optimization is disabled in config; set optimization.enabled = true to run.[/yellow]")
+        console.print(
+            "[yellow]Optimization is disabled in config; set optimization.enabled = true to run.[/yellow]"
+        )
         if not typer.confirm("Enable temporarily and run?"):
             raise typer.Exit(1)
         cfg.optimization.enabled = True
@@ -2000,15 +2540,23 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
         def _real_scenario_evaluate(scenario, cand, work):
             cand_cset = cand.constraint_set or cset
             sdc_text = _mcmm_per_scenario_sdc(
-                cand_cset, sdc_backend, cfg.project.name, matrix, scenario.id)
+                cand_cset, sdc_backend, cfg.project.name, matrix, scenario.id
+            )
             task_run_id = _parallel_task_flow_id(work, cand.id, scenario.id)
             flow_result = run_flow(
-                cfg=cfg, cset=cand_cset, sdc_text=sdc_text,
-                sdc_generation_status="COMPLETE", sources=sources,
+                cfg=cfg,
+                cset=cand_cset,
+                sdc_text=sdc_text,
+                sdc_generation_status="COMPLETE",
+                sources=sources,
                 include_dirs=resolve_include_dirs(cfg),
-                output_dir=Path(cfg.flow.output_dir), backend="yosys_opensta",
-                run_id=task_run_id, candidate_id=cand.id, scenario=scenario.id,
-                corner=scenario.corner, mode=scenario.mode,
+                output_dir=Path(cfg.flow.output_dir),
+                backend="yosys_opensta",
+                run_id=task_run_id,
+                candidate_id=cand.id,
+                scenario=scenario.id,
+                corner=scenario.corner,
+                mode=scenario.mode,
                 defer_history_indexing=task_run_id is not None,
             )
             return {
@@ -2023,9 +2571,10 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
             evaluate = mock_mcmm_evaluator(matrix, base_cset=cset)
         else:
             evaluate = MCMMEvaluator(
-                matrix, evaluate_scenario=_real_scenario_evaluate,
-                base_cset=cset, name=backend)
+                matrix, evaluate_scenario=_real_scenario_evaluate, base_cset=cset, name=backend
+            )
     else:
+
         def evaluate(cand, work):
             cand_cset = cand.constraint_set or cset
             sdc_text = sdc_backend.render(cand_cset, design_name=cfg.project.name)
@@ -2034,11 +2583,16 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
                 return tool.evaluate_candidate(cand, work)
             task_run_id = _parallel_task_flow_id(work, cand.id, "default")
             flow_result = run_flow(
-                cfg=cfg, cset=cand_cset, sdc_text=sdc_text,
-                sdc_generation_status="COMPLETE", sources=sources,
+                cfg=cfg,
+                cset=cand_cset,
+                sdc_text=sdc_text,
+                sdc_generation_status="COMPLETE",
+                sources=sources,
                 include_dirs=resolve_include_dirs(cfg),
-                output_dir=Path(cfg.flow.output_dir), backend="yosys_opensta",
-                run_id=task_run_id, candidate_id=cand.id,
+                output_dir=Path(cfg.flow.output_dir),
+                backend="yosys_opensta",
+                run_id=task_run_id,
+                candidate_id=cand.id,
                 defer_history_indexing=task_run_id is not None,
             )
             if task_run_id is not None:
@@ -2068,7 +2622,11 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
     # Persist existing optimizer state plus the new deterministic ledger and
     # its normal RunManifest before advisory SQLite work begins.
     execution_artifacts = _persist_optimizer_execution_artifacts(
-        am, cfg, result, candidates_path=cj_path, pareto_path=pareto_path,
+        am,
+        cfg,
+        result,
+        candidates_path=cj_path,
+        pareto_path=pareto_path,
         final_sdc_path=final_sdc_path,
     )
     # Parallel workers return completed physical-flow evidence rather than
@@ -2082,8 +2640,12 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
 
     history_session_id = None
     try:
-        history_session_id = SQLiteQoRRepository.for_output_dir(cfg.flow.output_dir).record_optimizer_session(
-            result, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
+        history_session_id = SQLiteQoRRepository.for_output_dir(
+            cfg.flow.output_dir
+        ).record_optimizer_session(
+            result,
+            project_name=cfg.project.name,
+            output_dir=cfg.flow.output_dir,
         )
     except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
         warning = f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
@@ -2096,7 +2658,9 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
         f"  Execution stop: {result.execution_stop_reason.value if result.execution_stop_reason else 'n/a'}"
     )
     console.print(f"  Execution ledger: {execution_artifacts['ledger']}")
-    console.print(f"  Iterations:  {result.iterations}  EDA runs: {result.eda_runs}  Elapsed: {result.elapsed_seconds:.1f}s")
+    console.print(
+        f"  Iterations:  {result.iterations}  EDA runs: {result.eda_runs}  Elapsed: {result.elapsed_seconds:.1f}s"
+    )
     console.print(f"  Pareto size: {len(result.pareto)}")
     if mcmm_enabled:
         _print_scenario_matrix(console, matrix)
@@ -2111,11 +2675,23 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
                 sq = m.scenario_results.get(sid)
                 if sq is None:
                     continue
-                s_wns = (f"{sq.qor.setup_wns * 1e9:.3f}" if sq.qor and sq.qor.setup_wns is not None else "-")
-                h_wns = (f"{sq.qor.hold_wns * 1e9:.3f}" if sq.qor and sq.qor.hold_wns is not None else "-")
-                utilization = f"{sq.margin_utilization:.2f}" if sq.margin_utilization is not None else "-"
-                console.print(f"    [{sid} {sq.mode}/{sq.corner}] {sq.status}  "
-                              f"setup={s_wns}ns  hold={h_wns}ns  util={utilization}")
+                s_wns = (
+                    f"{sq.qor.setup_wns * 1e9:.3f}"
+                    if sq.qor and sq.qor.setup_wns is not None
+                    else "-"
+                )
+                h_wns = (
+                    f"{sq.qor.hold_wns * 1e9:.3f}"
+                    if sq.qor and sq.qor.hold_wns is not None
+                    else "-"
+                )
+                utilization = (
+                    f"{sq.margin_utilization:.2f}" if sq.margin_utilization is not None else "-"
+                )
+                console.print(
+                    f"    [{sid} {sq.mode}/{sq.corner}] {sq.status}  "
+                    f"setup={s_wns}ns  hold={h_wns}ns  util={utilization}"
+                )
                 if sq.qor:
                     _print_power_summary(console, sq.qor.summary(), indent="      ")
         elif q:
@@ -2141,22 +2717,35 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
     val_result = run_validation(design, tg, cset, formal_backend=_formal_backend(cfg))
     missing = tg.missing_information()
     latest_qor = _latest_qor_summary(cfg)
-    text = design_report(design.summary(), tg.summary(), val_result.as_dict(),
-                         val_result.coverage.as_dict() if val_result.coverage else None,
-                         cset, missing, latest_qor)
+    text = design_report(
+        design.summary(),
+        tg.summary(),
+        val_result.as_dict(),
+        val_result.coverage.as_dict() if val_result.coverage else None,
+        cset,
+        missing,
+        latest_qor,
+    )
     am = _am(cfg)
     am.write_text("inference_report.txt", text)
     _maybe_print_matrix(cfg, cset, console)
-    am.write_json("inference_report.json",
-                  {"design": design.summary(), "timing": tg.summary(),
-                   "validation": val_result.as_dict(),
-                   "coverage": val_result.coverage.as_dict() if val_result.coverage else None,
-                   "qor": latest_qor,
-                   "constraints": cset.snapshot()})
+    am.write_json(
+        "inference_report.json",
+        {
+            "design": design.summary(),
+            "timing": tg.summary(),
+            "validation": val_result.as_dict(),
+            "coverage": val_result.coverage.as_dict() if val_result.coverage else None,
+            "qor": latest_qor,
+            "constraints": cset.snapshot(),
+        },
+    )
     sys.stdout.write(text)
 
 
-def _knowledge_engine(knowledge_files: list[str], history_output_dir: str | None) -> KnowledgeEngine:
+def _knowledge_engine(
+    knowledge_files: list[str], history_output_dir: str | None
+) -> KnowledgeEngine:
     """Create an advisory corpus from declared, local, non-executing sources."""
     engine = KnowledgeEngine()
     try:
@@ -2172,8 +2761,13 @@ def _knowledge_engine(knowledge_files: list[str], history_output_dir: str | None
 
 @knowledge_app.command("list")
 def knowledge_list(
-    knowledge_file: Annotated[list[str] | None, typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)")] = None,
-    history_output_dir: str | None = typer.Option(None, "--history-output-dir", help="Read-only local QoR sidecar directory"),
+    knowledge_file: Annotated[
+        list[str] | None,
+        typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)"),
+    ] = None,
+    history_output_dir: str | None = typer.Option(
+        None, "--history-output-dir", help="Read-only local QoR sidecar directory"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
 ):
     """List loaded knowledge items; no project, UCM, or history row is modified."""
@@ -2188,9 +2782,13 @@ def knowledge_list(
     if json_out:
         sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
         return
-    console.print(Panel("[cyan]Constraint knowledge[/cyan] — offline advisory items, not UCM constraints"))
+    console.print(
+        Panel("[cyan]Constraint knowledge[/cyan] — offline advisory items, not UCM constraints")
+    )
     table = Table(title="Knowledge patterns")
-    table.add_column("ID"); table.add_column("Origin"); table.add_column("Trust")
+    table.add_column("ID")
+    table.add_column("Origin")
+    table.add_column("Trust")
     table.add_column("Title")
     for item in data["items"]:
         table.add_row(item["id"], item["origin"], item["trust_level"], item["title"])
@@ -2202,8 +2800,13 @@ def knowledge_list(
 @knowledge_app.command("show")
 def knowledge_show(
     item_id: str = typer.Argument(..., help="Knowledge item ID"),
-    knowledge_file: Annotated[list[str] | None, typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)")] = None,
-    history_output_dir: str | None = typer.Option(None, "--history-output-dir", help="Read-only local QoR sidecar directory"),
+    knowledge_file: Annotated[
+        list[str] | None,
+        typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)"),
+    ] = None,
+    history_output_dir: str | None = typer.Option(
+        None, "--history-output-dir", help="Read-only local QoR sidecar directory"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
 ):
     """Show one pattern and its retained provenance without accepting it."""
@@ -2212,8 +2815,13 @@ def knowledge_show(
     if item is None:
         console.print(f"[red]Knowledge item '{item_id}' was not found.[/red]")
         raise typer.Exit(code=2)
-    data = {"kind": "rca_knowledge_item", "schema_version": 1, "advisory": True,
-            "item": item.to_dict(), "diagnostics": sorted(engine.diagnostics)}
+    data = {
+        "kind": "rca_knowledge_item",
+        "schema_version": 1,
+        "advisory": True,
+        "item": item.to_dict(),
+        "diagnostics": sorted(engine.diagnostics),
+    }
     if json_out:
         sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
     else:
@@ -2222,29 +2830,53 @@ def knowledge_show(
 
 @knowledge_app.command("search")
 def knowledge_search(
-    query: str = typer.Argument(..., help="Text to search over pattern IDs, titles, descriptions, and types"),
-    knowledge_file: Annotated[list[str] | None, typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)")] = None,
-    history_output_dir: str | None = typer.Option(None, "--history-output-dir", help="Read-only local QoR sidecar directory"),
+    query: str = typer.Argument(
+        ..., help="Text to search over pattern IDs, titles, descriptions, and types"
+    ),
+    knowledge_file: Annotated[
+        list[str] | None,
+        typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)"),
+    ] = None,
+    history_output_dir: str | None = typer.Option(
+        None, "--history-output-dir", help="Read-only local QoR sidecar directory"
+    ),
     limit: int = typer.Option(20, "--limit", min=0, help="Maximum deterministic result count"),
     json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
 ):
     """Search advisory patterns only; ranking is relevance, not correctness."""
     engine = _knowledge_engine(knowledge_file or [], history_output_dir)
-    data = {"kind": "rca_knowledge_search", "schema_version": 1, "advisory": True,
-            **engine.search(text=query, limit=limit).to_dict()}
+    data = {
+        "kind": "rca_knowledge_search",
+        "schema_version": 1,
+        "advisory": True,
+        **engine.search(text=query, limit=limit).to_dict(),
+    }
     if json_out:
         sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
     else:
-        console.print(Panel("[cyan]Constraint knowledge search[/cyan] — relevance is not a correctness probability"))
+        console.print(
+            Panel(
+                "[cyan]Constraint knowledge search[/cyan] — relevance is not a correctness probability"
+            )
+        )
         console.print_json(json.dumps(data, indent=2, sort_keys=True, default=str))
 
 
 @knowledge_app.command("suggest")
 def knowledge_suggest(
-    config: str | None = typer.Argument(None, help="Optional project YAML used only to build a read-only inferred UCM view"),
-    knowledge_file: Annotated[list[str] | None, typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)")] = None,
-    history_output_dir: str | None = typer.Option(None, "--history-output-dir", help="Read-only local QoR sidecar directory"),
-    limit_per_constraint: int = typer.Option(5, "--limit-per-constraint", min=0, help="Deterministic result cap per UCM constraint"),
+    config: str | None = typer.Argument(
+        None, help="Optional project YAML used only to build a read-only inferred UCM view"
+    ),
+    knowledge_file: Annotated[
+        list[str] | None,
+        typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)"),
+    ] = None,
+    history_output_dir: str | None = typer.Option(
+        None, "--history-output-dir", help="Read-only local QoR sidecar directory"
+    ),
+    limit_per_constraint: int = typer.Option(
+        5, "--limit-per-constraint", min=0, help="Deterministic result cap per UCM constraint"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
 ):
     """Produce advisory project matches; never accepts or changes project intent.
@@ -2269,29 +2901,43 @@ def knowledge_suggest(
         project_name = cfg.project.name
         # This is a pure index of the inferred view; it never writes it back.
         engine.index_constraint_set(cset)
-        suggestions = engine.suggestions_for_constraint_set(cset, limit_per_constraint=limit_per_constraint)
+        suggestions = engine.suggestions_for_constraint_set(
+            cset, limit_per_constraint=limit_per_constraint
+        )
         references = engine.inference_references(report, cset)
         payload = {
-            "kind": "rca_knowledge_suggestions", "schema_version": 1, "advisory": True,
-            "project": project_name, "suggestions": [item.to_dict() for item in suggestions],
-            "inference_knowledge_references": references, "diagnostics": sorted(engine.diagnostics),
+            "kind": "rca_knowledge_suggestions",
+            "schema_version": 1,
+            "advisory": True,
+            "project": project_name,
+            "suggestions": [item.to_dict() for item in suggestions],
+            "inference_knowledge_references": references,
+            "diagnostics": sorted(engine.diagnostics),
             "acceptance": "No suggestion was accepted or written to the project.",
         }
         artifact_path = _am(cfg).write_json("knowledge_suggestions.json", payload)
     data = {
-        "kind": "rca_knowledge_suggestions", "schema_version": 1, "advisory": True,
-        "project": project_name, "suggestions": [item.to_dict() for item in suggestions],
-        "inference_knowledge_references": references, "diagnostics": sorted(engine.diagnostics),
+        "kind": "rca_knowledge_suggestions",
+        "schema_version": 1,
+        "advisory": True,
+        "project": project_name,
+        "suggestions": [item.to_dict() for item in suggestions],
+        "inference_knowledge_references": references,
+        "diagnostics": sorted(engine.diagnostics),
         "artifact": str(artifact_path) if artifact_path else None,
         "acceptance": "No suggestion was accepted or written to the project.",
     }
     if not config:
-        data["diagnostics"].append("No project config supplied; no project-UCM applicability check was performed.")
+        data["diagnostics"].append(
+            "No project config supplied; no project-UCM applicability check was performed."
+        )
         data["diagnostics"].sort()
     if json_out:
         sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
     else:
-        console.print(Panel("[cyan]Constraint knowledge suggestions[/cyan] — advisory only; no UCM mutation"))
+        console.print(
+            Panel("[cyan]Constraint knowledge suggestions[/cyan] — advisory only; no UCM mutation")
+        )
         console.print_json(json.dumps(data, indent=2, sort_keys=True, default=str))
 
 
@@ -2301,28 +2947,47 @@ def history(
     candidate_id: str | None = typer.Option(None, "--candidate", help="Candidate id"),
     session_id: str | None = typer.Option(None, "--session", help="Optimization session id"),
     scenario_id: str | None = typer.Option(None, "--scenario", help="Scenario id"),
-    constraint_set_hash: str | None = typer.Option(None, "--constraint-set", help="Constraint-set hash"),
+    constraint_set_hash: str | None = typer.Option(
+        None, "--constraint-set", help="Constraint-set hash"
+    ),
     best: str | None = typer.Option(None, "--best", help="setup_wns|area|power"),
-    import_legacy: bool = typer.Option(False, "--import-legacy", help="Explicitly index existing run artifacts"),
+    import_legacy: bool = typer.Option(
+        False, "--import-legacy", help="Explicitly index existing run artifacts"
+    ),
     optimization_ledger: bool = typer.Option(
-        False, "--optimization-ledger",
+        False,
+        "--optimization-ledger",
         help="Read the authoritative optimizer execution ledger (no SQLite query)",
     ),
-    include_mock: bool = typer.Option(False, "--include-mock", help="Include mock evidence in best queries"),
-    area_source: str | None = typer.Option(None, "--area-source", help="real|proxy for --best area"),
+    include_mock: bool = typer.Option(
+        False, "--include-mock", help="Include mock evidence in best queries"
+    ),
+    area_source: str | None = typer.Option(
+        None, "--area-source", help="real|proxy for --best area"
+    ),
     output_dir: str = typer.Option(
-        "output", "--output-dir",
+        "output",
+        "--output-dir",
         help="Flow output directory containing optimizer artifacts and/or qor.sqlite3",
     ),
-    config: str | None = typer.Option(None, "--config", help="Project YAML; supplies flow.output_dir"),
+    config: str | None = typer.Option(
+        None, "--config", help="Project YAML; supplies flow.output_dir"
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
 ):
     """Query local historical QoR evidence; never executes EDA or cache reuse."""
     if config:
         output_dir = str(_load(config).flow.output_dir)
-    selectors = sum(value is not None for value in (
-        run_id, candidate_id, scenario_id, constraint_set_hash, best,
-    )) + int(optimization_ledger)
+    selectors = sum(
+        value is not None
+        for value in (
+            run_id,
+            candidate_id,
+            scenario_id,
+            constraint_set_hash,
+            best,
+        )
+    ) + int(optimization_ledger)
     if import_legacy and selectors:
         console.print("[red]--import-legacy cannot be combined with a query selector.[/red]")
         raise typer.Exit(code=2)
@@ -2357,10 +3022,15 @@ def history(
             data = repo.get_replay_identity(run_id)
         elif candidate_id and session_id:
             candidate = repo.get_candidate(session_id, candidate_id)
-            data = ({"candidate": candidate,
-                     "lineage": repo.candidate_lineage(session_id, candidate_id),
-                     "mcmm": repo.get_mcmm(session_id=session_id, candidate_id=candidate_id)}
-                    if candidate else None)
+            data = (
+                {
+                    "candidate": candidate,
+                    "lineage": repo.candidate_lineage(session_id, candidate_id),
+                    "mcmm": repo.get_mcmm(session_id=session_id, candidate_id=candidate_id),
+                }
+                if candidate
+                else None
+            )
         elif candidate_id:
             data = repo.list_runs(candidate_id=candidate_id)
         elif scenario_id:
@@ -2380,50 +3050,73 @@ def history(
     if data is None:
         console.print("[yellow]No matching QoR history record.[/yellow]")
         return
-    console.print(Panel("[cyan]QoR historical repository[/cyan] — artifacts/cache remain authoritative"))
+    console.print(
+        Panel("[cyan]QoR historical repository[/cyan] — artifacts/cache remain authoritative")
+    )
     console.print_json(json.dumps(data, indent=2, sort_keys=True, default=str))
 
 
 @app.command()
-def inspect(config: str = typer.Argument(..., help="Path to project YAML"),
-            element: str = typer.Argument(..., help="clock|reset|port|register|module")):
+def inspect(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    element: str = typer.Argument(..., help="clock|reset|port|register|module"),
+):
     """Inspect discovered design elements."""
     cfg = _load(config)
     design, _ = _do_parse(cfg)
     tg = _do_timing(cfg, design)
     table = Table(title=f"{element.capitalize()}s in {design.name}")
-    table.add_column("Name"); table.add_column("Details")
+    table.add_column("Name")
+    table.add_column("Details")
     if element == "clock":
         for n, c in tg.clocks.items():
-            table.add_row(n, f"period={c.period_ns():.3f}ns, edge={c.edge.value}, regs={len(c.registers_driven)}")
+            table.add_row(
+                n,
+                f"period={c.period_ns():.3f}ns, edge={c.edge.value}, regs={len(c.registers_driven)}",
+            )
     elif element == "reset":
         for n, r in tg.resets.items():
-            table.add_row(n, f"type={r.reset_type.value}, pol={r.polarity.value}, regs={len(r.registers_driven)}")
+            table.add_row(
+                n,
+                f"type={r.reset_type.value}, pol={r.polarity.value}, regs={len(r.registers_driven)}",
+            )
     elif element == "port":
         for p in design.top_ports():
             table.add_row(p.local_name, f"dir={p.direction.value}, width={p.width}")
     elif element == "register":
         for r in design.top_registers():
-            table.add_row(r.hierarchical_name, f"clk={r.clock_signal}, rst={r.reset_signal}, w={r.width}")
+            table.add_row(
+                r.hierarchical_name, f"clk={r.clock_signal}, rst={r.reset_signal}, w={r.width}"
+            )
     elif element == "module":
         for m in design.modules.values():
-            table.add_row(m.name, f"ports={len(m.port_names)}, instances={len(m.instance_names)}, processes={len(m.process_ids)}")
+            table.add_row(
+                m.name,
+                f"ports={len(m.port_names)}, instances={len(m.instance_names)}, processes={len(m.process_ids)}",
+            )
     else:
-        console.print(f"[red]Unknown element type '{element}'.[/red] Options: clock, reset, port, register, module.")
+        console.print(
+            f"[red]Unknown element type '{element}'.[/red] Options: clock, reset, port, register, module."
+        )
         raise typer.Exit(2)
     console.print(table)
 
 
 @app.command()
-def dashboard(config: str | None = typer.Argument(None, help="Path to project YAML (optional)"),
-              host: str = typer.Option("127.0.0.1"), port: int = typer.Option(8765),
-              open_browser: bool = typer.Option(True)):
+def dashboard(
+    config: str | None = typer.Argument(None, help="Path to project YAML (optional)"),
+    host: str = typer.Option("127.0.0.1"),
+    port: int = typer.Option(8765),
+    open_browser: bool = typer.Option(True),
+):
     """Launch the RCA web dashboard."""
     results_dir = Path("output")
     if config:
         cfg = _load(config)
         results_dir = Path(cfg.flow.output_dir)
-    _run_dashboard(cfg=None, host=host, port=port, open_browser=open_browser, results_dir=results_dir)
+    _run_dashboard(
+        cfg=None, host=host, port=port, open_browser=open_browser, results_dir=results_dir
+    )
 
 
 def _run_dashboard(cfg=None, host="127.0.0.1", port=8765, open_browser=True, results_dir=None):
@@ -2441,9 +3134,13 @@ def _run_dashboard(cfg=None, host="127.0.0.1", port=8765, open_browser=True, res
 
 
 @app.command(name="import")
-def import_sdc(sdc: str = typer.Argument(..., help="Path to SDC file to import"),
-               config: str | None = typer.Option(None, "--config", "-c", help="Project config (enables design-aware resolution)"),
-               verbose: bool = typer.Option(False, "--verbose", "-v")):
+def import_sdc(
+    sdc: str = typer.Argument(..., help="Path to SDC file to import"),
+    config: str | None = typer.Option(
+        None, "--config", "-c", help="Project config (enables design-aware resolution)"
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
     """Import an existing SDC file into the UCM and print a summary."""
     configure_logging(level="WARNING" if not verbose else "INFO")
     design, tg = None, None
@@ -2459,22 +3156,34 @@ def import_sdc(sdc: str = typer.Argument(..., help="Path to SDC file to import")
     console.print(f"  Fully resolved:   [green]{counts['complete']}[/green]")
     console.print(f"  Partially resolved: [yellow]{counts['partial']}[/yellow]")
     console.print(f"  Unresolved:       [yellow]{counts['unresolved']}[/yellow]")
-    console.print(f"  Errors:           [{'red' if counts['error'] else 'green'}]{counts['error']}[/]")
+    console.print(
+        f"  Errors:           [{'red' if counts['error'] else 'green'}]{counts['error']}[/]"
+    )
     console.print(f"  UCM constraints:  {counts['constraints']}")
     # Diagnostics summary
     diags = [d for d in res.diagnostics if d.severity.value in ("ERROR", "WARNING", "SECURITY")]
     if diags and (verbose or any(d.severity.value in ("ERROR", "SECURITY") for d in diags)):
         t = Table(title="Issues")
-        t.add_column("Line"); t.add_column("Severity"); t.add_column("Code"); t.add_column("Message")
+        t.add_column("Line")
+        t.add_column("Severity")
+        t.add_column("Code")
+        t.add_column("Message")
         for d in diags[:50]:
             t.add_row(str(d.line), d.severity.value, d.code or "-", d.message[:120])
         console.print(t)
     if verbose:
         t = Table(title="Imported commands")
-        t.add_column("Line"); t.add_column("Command"); t.add_column("Status"); t.add_column("Constraints")
+        t.add_column("Line")
+        t.add_column("Command")
+        t.add_column("Status")
+        t.add_column("Constraints")
         for ic in res.imports:
-            t.add_row(str(ic.source_line_start), ic.command_name,
-                      ic.import_status.value, ", ".join(ic.constraint_ids) or "-")
+            t.add_row(
+                str(ic.source_line_start),
+                ic.command_name,
+                ic.import_status.value,
+                ", ".join(ic.constraint_ids) or "-",
+            )
         console.print(t)
 
 
@@ -2523,10 +3232,15 @@ def doctor(
         cfg.model_dump(mode="json", exclude={"config_path", "project_root"}) if cfg else {}
     )
     preflight = preflight_yosys_opensta(
-        backend=selected_backend, top=cfg.top_module() if cfg else "", sources=sources,
-        liberty=liberty, sdc_path=None, output_dir=output,
+        backend=selected_backend,
+        top=cfg.top_module() if cfg else "",
+        sources=sources,
+        liberty=liberty,
+        sdc_path=None,
+        output_dir=output,
         expected_outputs=[output / "top_synth.v"],
-        yosys_info=yinfo, opensta_info=oinfo,
+        yosys_info=yinfo,
+        opensta_info=oinfo,
         liberty_hashes={str(path): hash_file(path) for path in liberty if path.is_file()},
         config_hash=stable_hash({"config": config_identity, "backend": selected_backend}),
         include_dirs=include_dirs,
@@ -2536,16 +3250,25 @@ def doctor(
     checks = [check.to_dict() for check in preflight.checks]
     for check in checks:
         if check["component"] == "generated_sdc":
-            check.update({"required": False, "ready": True, "status": "not_required",
-                          "classification": "available",
-                          "detail": "generated during a real flow before execution",
-                          "path": str(expected_sdc)})
+            check.update(
+                {
+                    "required": False,
+                    "ready": True,
+                    "status": "not_required",
+                    "classification": "available",
+                    "detail": "generated during a real flow before execution",
+                    "path": str(expected_sdc),
+                }
+            )
     preflight_data = preflight.to_dict()
     preflight_data["checks"] = checks
     preflight_data["ready"] = not configuration_error and all(item["ready"] for item in checks)
-    preflight_data["overall_status"] = "environment_ready" if preflight_data["ready"] else "configuration_invalid"
+    preflight_data["overall_status"] = (
+        "environment_ready" if preflight_data["ready"] else "configuration_invalid"
+    )
     preflight_data["failure_classification"] = (
-        "configuration_invalid" if configuration_error
+        "configuration_invalid"
+        if configuration_error
         else (None if preflight_data["ready"] else preflight_data["failure_classification"])
     )
 
@@ -2555,7 +3278,8 @@ def doctor(
     if cfg and cfg.formal.backend == "symbiyosys":
         formal = SymbiYosysFormalBackend(
             executable=cfg.formal.symbiyosys_executable,
-            work_dir=Path(cfg.formal.work_dir), timeout_seconds=cfg.formal.timeout_seconds,
+            work_dir=Path(cfg.formal.work_dir),
+            timeout_seconds=cfg.formal.timeout_seconds,
         )
         formal_executable = formal.executable
         formal_version = formal.get_version()
@@ -2565,17 +3289,22 @@ def doctor(
         formal_executable = formal.executable
         formal_version = formal.get_version()
     formal_preflight = preflight_symbiyosys(
-        executable=formal_executable, version=formal_version, proofs=proof_paths,
-        sources=sources, config_hash=preflight_data["environment_fingerprint"],
+        executable=formal_executable,
+        version=formal_version,
+        proofs=proof_paths,
+        sources=sources,
+        config_hash=preflight_data["environment_fingerprint"],
         required=bool(cfg and cfg.formal.backend == "symbiyosys"),
     )
     result = {
         "kind": "rca_doctor",
         "rca_version": __version__,
         "python": sys.version.split()[0],
-        "configuration": {"path": str(Path(config).resolve()) if config else None,
-                          "configured_backend": cfg.flow.backend if cfg else None,
-                          "error": configuration_error or None},
+        "configuration": {
+            "path": str(Path(config).resolve()) if config else None,
+            "configured_backend": cfg.flow.backend if cfg else None,
+            "error": configuration_error or None,
+        },
         "preflight": preflight_data,
         "formal_preflight": formal_preflight.to_dict(),
         "mock_policy": "mock is available only when explicitly selected",
@@ -2592,20 +3321,28 @@ def doctor(
     else:
         configured = result["configuration"]["configured_backend"]
         suffix = f" (project SDC backend: {configured})" if configured else ""
-        console.print(f"  Backend: {selected_backend}{suffix}  Overall: "
-                      f"[{'green' if preflight_data['ready'] else 'yellow'}]"
-                      f"{preflight_data['overall_status']}[/]")
+        console.print(
+            f"  Backend: {selected_backend}{suffix}  Overall: "
+            f"[{'green' if preflight_data['ready'] else 'yellow'}]"
+            f"{preflight_data['overall_status']}[/]"
+        )
     table = Table(title="Yosys/OpenSTA checks")
-    table.add_column("Component"); table.add_column("Status"); table.add_column("Detail")
+    table.add_column("Component")
+    table.add_column("Status")
+    table.add_column("Detail")
     for check in checks:
         table.add_row(check["component"], check["status"], check["detail"])
     console.print(table)
     formal_table = Table(title="SymbiYosys checks")
-    formal_table.add_column("Component"); formal_table.add_column("Status"); formal_table.add_column("Detail")
+    formal_table.add_column("Component")
+    formal_table.add_column("Status")
+    formal_table.add_column("Detail")
     for check in formal_preflight.to_dict()["checks"]:
         formal_table.add_row(check["component"], check["status"], check["detail"])
     console.print(formal_table)
-    console.print("[dim]Mock is not selected automatically. Tool discovery is not a successful EDA run or signoff.[/dim]")
+    console.print(
+        "[dim]Mock is not selected automatically. Tool discovery is not a successful EDA run or signoff.[/dim]"
+    )
 
 
 _DEFAULT_RTL = """// Auto-generated by `rca init`

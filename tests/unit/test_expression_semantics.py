@@ -14,6 +14,7 @@ Each test asserts:
   * Timing paths: CONTROL edges do NOT create ordinary data timing
     paths (requirement 4); MUX_SELECT edges DO participate.
 """
+
 from __future__ import annotations
 
 import textwrap
@@ -21,10 +22,7 @@ from typing import Any
 
 import pytest
 
-from rca.design_model.connectivity import build_structural_connectivity
 from rca.parser import SlangAdapter
-from rca.utils.enums import DependencyKind
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,10 +30,13 @@ from rca.utils.enums import DependencyKind
 
 
 def parse_sv(sv: str, top: str = "top") -> Any:
-    import tempfile, os
+    import os
+    import tempfile
+
     sv = textwrap.dedent(sv)
     with tempfile.NamedTemporaryFile("w", suffix=".sv", delete=False) as f:
-        f.write(sv); path = f.name
+        f.write(sv)
+        path = f.name
     try:
         a = SlangAdapter()
         d = a.parse([path], top=top)
@@ -49,8 +50,9 @@ def reg(d, leaf: str):
     for r in d.registers.values():
         if r.local_name == leaf:
             return r
-    raise AssertionError(f"register '{leaf}' not found; "
-                         f"have: {[r.local_name for r in d.registers.values()]}")
+    raise AssertionError(
+        f"register '{leaf}' not found; have: {[r.local_name for r in d.registers.values()]}"
+    )
 
 
 def leaves(lst: list[str]) -> set[str]:
@@ -69,9 +71,7 @@ def edge_map(d) -> dict[tuple[str, str], set[str]]:
 def path_set(d) -> set[tuple[str, str, str]]:
     out = set()
     for p in d.structural_paths + d.cdc_paths:
-        out.add((p.startpoint.split(".")[-1],
-                 p.endpoint.split(".")[-1],
-                 p.path_class.value))
+        out.add((p.startpoint.split(".")[-1], p.endpoint.split(".")[-1], p.path_class.value))
     return out
 
 
@@ -491,7 +491,8 @@ def test_hierarchy_rhs_comparison_preserves_data_semantics():
     child_q = None
     for r in d.registers.values():
         if r.local_name == "q" and "u." in r.hierarchical_name:
-            child_q = r; break
+            child_q = r
+            break
     assert child_q is not None, [r.hierarchical_name for r in d.registers.values()]
     # Within the child scope the data sources are its formal ports a,b.
     assert leaves(child_q.data_sources) == {"a", "b"}

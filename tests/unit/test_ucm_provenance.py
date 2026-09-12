@@ -28,10 +28,8 @@ Scenarios (numbered per Step 3 item 17):
 
 from __future__ import annotations
 
-import copy
 import json
 import sys
-import os
 from pathlib import Path
 
 import pytest
@@ -45,8 +43,14 @@ from rca.constraint_model import (
     Scenario,
     SnapshotFormatError,
 )
-from rca.constraint_model.constraint_set import ValidationIssue
-from rca.provenance import Assumption, AssumptionLedger, Evidence, ImportMetadata, ProvenanceRecord, make_provenance
+from rca.provenance import (
+    Assumption,
+    AssumptionLedger,
+    Evidence,
+    ImportMetadata,
+    ProvenanceRecord,
+    make_provenance,
+)
 from rca.utils.enums import (
     Confidence,
     ConstraintStatus,
@@ -56,15 +60,18 @@ from rca.utils.enums import (
     SourceKind,
 )
 
-
 # ---------------------------------------------------------------------------
 # 1. Lifecycle
 # ---------------------------------------------------------------------------
 
 
 def test_01_lifecycle_status_transitions():
-    c = Constraint(id="CLK0001", type=ConstraintType.CREATE_CLOCK,
-                   target_objects=["clk"], values={"name": "clk", "period": 10e-9})
+    c = Constraint(
+        id="CLK0001",
+        type=ConstraintType.CREATE_CLOCK,
+        target_objects=["clk"],
+        values={"name": "clk", "period": 10e-9},
+    )
     assert c.status == ConstraintStatus.PROPOSED
     assert c.is_safe_to_emit("balanced")  # PROPOSED emits in balanced
     c.confirm(Confidence.HIGH)
@@ -80,8 +87,12 @@ def test_01_lifecycle_status_transitions():
 
 
 def test_01_rejected_not_emittable():
-    c = Constraint(id="FP0001", type=ConstraintType.SET_FALSE_PATH,
-                   confidence=Confidence.HIGH, status=ConstraintStatus.PROPOSED)
+    c = Constraint(
+        id="FP0001",
+        type=ConstraintType.SET_FALSE_PATH,
+        confidence=Confidence.HIGH,
+        status=ConstraintStatus.PROPOSED,
+    )
     assert c.is_safe_to_emit("exploratory")
     c.mark_rejected("just a test")
     assert c.status == ConstraintStatus.REJECTED
@@ -96,17 +107,25 @@ def test_01_rejected_not_emittable():
 
 
 def test_02_high_confidence_proposed_is_legal():
-    c = Constraint(id="X1", type=ConstraintType.CREATE_CLOCK,
-                   confidence=Confidence.HIGH, status=ConstraintStatus.PROPOSED)
+    c = Constraint(
+        id="X1",
+        type=ConstraintType.CREATE_CLOCK,
+        confidence=Confidence.HIGH,
+        status=ConstraintStatus.PROPOSED,
+    )
     assert c.confidence == Confidence.HIGH
     assert c.status == ConstraintStatus.PROPOSED
 
 
 def test_02_low_confidence_confirmed_is_representable():
     """User may explicitly confirm a weakly-evidenced constraint."""
-    c = Constraint(id="X2", type=ConstraintType.SET_FALSE_PATH,
-                   confidence=Confidence.LOW, status=ConstraintStatus.CONFIRMED,
-                   opt_status=OptimizationStatus.FIXED)
+    c = Constraint(
+        id="X2",
+        type=ConstraintType.SET_FALSE_PATH,
+        confidence=Confidence.LOW,
+        status=ConstraintStatus.CONFIRMED,
+        opt_status=OptimizationStatus.FIXED,
+    )
     # Validate should NOT complain about LOW+CONFIRMED+FIXED:
     assert not any("FIXED" in p and "TUNABLE" in p for p in c.validate_invariants())
 
@@ -117,18 +136,25 @@ def test_02_low_confidence_confirmed_is_representable():
 
 
 def test_03_fixed_immutable():
-    c = Constraint(id="X3", type=ConstraintType.CREATE_CLOCK,
-                   status=ConstraintStatus.FIXED, opt_status=OptimizationStatus.FIXED,
-                   values={"period": 10e-9})
+    c = Constraint(
+        id="X3",
+        type=ConstraintType.CREATE_CLOCK,
+        status=ConstraintStatus.FIXED,
+        opt_status=OptimizationStatus.FIXED,
+        values={"period": 10e-9},
+    )
     assert c.is_fixed()
     with pytest.raises(ValueError):
         c.add_value("period", 8e-9)
 
 
 def test_03_tunable_optimizer_can_modify():
-    c = Constraint(id="X4", type=ConstraintType.SET_INPUT_DELAY,
-                   opt_status=OptimizationStatus.TUNABLE,
-                   values={"delay": 1.0e-9})
+    c = Constraint(
+        id="X4",
+        type=ConstraintType.SET_INPUT_DELAY,
+        opt_status=OptimizationStatus.TUNABLE,
+        values={"delay": 1.0e-9},
+    )
     assert not c.is_fixed()
     c.add_value("delay", 1.2e-9)  # must not raise
 
@@ -165,12 +191,18 @@ def test_04_make_provenance_helper():
 
 
 def test_05_multiple_evidence_dedup():
-    c = Constraint(id="X5", type=ConstraintType.CREATE_CLOCK,
-                   target_objects=["clk"], values={"name": "clk", "period": 10e-9})
-    e1 = Evidence(id="E1", kind="structural", description="posedge in always_ff",
-                  source_objects=["m.clk"])
-    e2 = Evidence(id="E2", kind="structural", description="posedge in always_ff",
-                  source_objects=["m.clk"])  # semantically equivalent
+    c = Constraint(
+        id="X5",
+        type=ConstraintType.CREATE_CLOCK,
+        target_objects=["clk"],
+        values={"name": "clk", "period": 10e-9},
+    )
+    e1 = Evidence(
+        id="E1", kind="structural", description="posedge in always_ff", source_objects=["m.clk"]
+    )
+    e2 = Evidence(
+        id="E2", kind="structural", description="posedge in always_ff", source_objects=["m.clk"]
+    )  # semantically equivalent
     e3 = Evidence(id="E3", kind="user", description="user declared clock")
     c.provenance.add_evidence(e1)
     c.provenance.add_evidence(e2)  # dedup
@@ -190,8 +222,12 @@ def test_06_assumption_ledger_register_and_query():
     ledger.reset_id_counter(0)
     a = ledger.make(
         "Clock 'clk' period is 10 ns",
-        origin="USER", confidence="HIGH", severity="REQUIRED",
-        fixed=True, default_value=10e-9, current_value=10e-9,
+        origin="USER",
+        confidence="HIGH",
+        severity="REQUIRED",
+        fixed=True,
+        default_value=10e-9,
+        current_value=10e-9,
     )
     assert a.id == "A0001"
     assert ledger.get(a.id) is a
@@ -204,8 +240,9 @@ def test_06_assumption_ledger_register_and_query():
 
 
 def test_06_assumption_confirm_updates_value():
-    a = Assumption(id="AX", statement="x", origin="INFERENCE",
-                   default_value=None, current_value=None)
+    a = Assumption(
+        id="AX", statement="x", origin="INFERENCE", default_value=None, current_value=None
+    )
     assert not a.user_confirmed
     a.confirm(8e-9)
     assert a.user_confirmed
@@ -262,11 +299,15 @@ def test_08_scenario_attachment():
 
 
 def test_09_clone_isolates_mutable_state():
-    c = Constraint(id="X9", type=ConstraintType.CREATE_CLOCK,
-                   target_objects=["clk"],
-                   values={"name": "clk", "period": 10e-9},
-                   scenario_ids=["s1"], assumption_ids=["A1"],
-                   dependency_ids=["X0"])
+    c = Constraint(
+        id="X9",
+        type=ConstraintType.CREATE_CLOCK,
+        target_objects=["clk"],
+        values={"name": "clk", "period": 10e-9},
+        scenario_ids=["s1"],
+        assumption_ids=["A1"],
+        dependency_ids=["X0"],
+    )
     c.provenance.add_evidence(Evidence(id="E1", kind="structural", description="e"))
     cand = c.clone(new_id="X9_cand")
     assert cand.id == "X9_cand"
@@ -287,8 +328,9 @@ def test_09_clone_isolates_mutable_state():
 
 def test_09_clone_constraint_set_isolates_baseline():
     cs = ConstraintSet(name="base")
-    c = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                        source_kind=SourceKind.USER, fixed=True)
+    c = cs.create_clock(
+        name="clk", period_seconds=10e-9, source="clk", source_kind=SourceKind.USER, fixed=True
+    )
     base_id = c.id
     cs2 = cs.clone(name="cand")
     assert cs2 is not cs
@@ -322,30 +364,48 @@ def test_10_deterministic_snapshot():
 
 
 def test_11_semantic_equivalence_units():
-    c1 = Constraint(id="A", type=ConstraintType.CREATE_CLOCK,
-                    target_objects=["clk"],
-                    values={"name": "clk", "period": 10e-9})
-    c2 = Constraint(id="B", type=ConstraintType.CREATE_CLOCK,
-                    target_objects=["clk"],
-                    values={"name": "clk", "period": 10000e-12})
+    c1 = Constraint(
+        id="A",
+        type=ConstraintType.CREATE_CLOCK,
+        target_objects=["clk"],
+        values={"name": "clk", "period": 10e-9},
+    )
+    c2 = Constraint(
+        id="B",
+        type=ConstraintType.CREATE_CLOCK,
+        target_objects=["clk"],
+        values={"name": "clk", "period": 10000e-12},
+    )
     assert c1.semantically_equivalent(c2)
 
 
 def test_11_semantic_equivalence_order_independent():
-    c1 = Constraint(id="A", type=ConstraintType.SET_FALSE_PATH,
-                    path_selector=PathSelector(from_set=["a", "b"], to_set=["z"]))
-    c2 = Constraint(id="B", type=ConstraintType.SET_FALSE_PATH,
-                    path_selector=PathSelector(from_set=["b", "a"], to_set=["z"]))
+    c1 = Constraint(
+        id="A",
+        type=ConstraintType.SET_FALSE_PATH,
+        path_selector=PathSelector(from_set=["a", "b"], to_set=["z"]),
+    )
+    c2 = Constraint(
+        id="B",
+        type=ConstraintType.SET_FALSE_PATH,
+        path_selector=PathSelector(from_set=["b", "a"], to_set=["z"]),
+    )
     assert c1.semantically_equivalent(c2)
 
 
 def test_11_semantic_inequality_when_values_differ():
-    c1 = Constraint(id="A", type=ConstraintType.CREATE_CLOCK,
-                    target_objects=["clk"],
-                    values={"name": "clk", "period": 10e-9})
-    c2 = Constraint(id="B", type=ConstraintType.CREATE_CLOCK,
-                    target_objects=["clk"],
-                    values={"name": "clk", "period": 8e-9})
+    c1 = Constraint(
+        id="A",
+        type=ConstraintType.CREATE_CLOCK,
+        target_objects=["clk"],
+        values={"name": "clk", "period": 10e-9},
+    )
+    c2 = Constraint(
+        id="B",
+        type=ConstraintType.CREATE_CLOCK,
+        target_objects=["clk"],
+        values={"name": "clk", "period": 8e-9},
+    )
     assert not c1.semantically_equivalent(c2)
 
 
@@ -356,9 +416,16 @@ def test_11_semantic_inequality_when_values_differ():
 
 def test_12_validate_detects_missing_assumption_and_dependency():
     cs = ConstraintSet(name="v")
-    c = cs.add(Constraint(id="X", type=ConstraintType.CREATE_CLOCK,
-                          target_objects=["clk"], values={"name": "clk"},
-                          assumption_ids=["BOGUS"], dependency_ids=["NOPE"]))
+    cs.add(
+        Constraint(
+            id="X",
+            type=ConstraintType.CREATE_CLOCK,
+            target_objects=["clk"],
+            values={"name": "clk"},
+            assumption_ids=["BOGUS"],
+            dependency_ids=["NOPE"],
+        )
+    )
     ledger = AssumptionLedger()
     issues = cs.validate(ledger=ledger)
     codes = {i.code for i in issues}
@@ -368,9 +435,15 @@ def test_12_validate_detects_missing_assumption_and_dependency():
 
 def test_12_validate_rejects_missing_scenario_reference():
     cs = ConstraintSet(name="v")
-    cs.add(Constraint(id="X", type=ConstraintType.CREATE_CLOCK,
-                      target_objects=["clk"], values={"name": "clk"},
-                      scenario_ids=["ghost"]))
+    cs.add(
+        Constraint(
+            id="X",
+            type=ConstraintType.CREATE_CLOCK,
+            target_objects=["clk"],
+            values={"name": "clk"},
+            scenario_ids=["ghost"],
+        )
+    )
     issues = cs.validate()
     assert any(i.code == "BAD_SCENARIO" for i in issues)
 
@@ -380,8 +453,7 @@ def test_12_validate_clean_when_consistent():
     cs.add_scenario(Scenario(id="func_slow", mode="functional", corner="slow"))
     ledger = AssumptionLedger()
     a = ledger.make("period of clk")
-    c = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                        assumption_ids=[a.id])
+    c = cs.create_clock(name="clk", period_seconds=10e-9, source="clk", assumption_ids=[a.id])
     # bind
     ledger.bind_constraint(a.id, c.id)
     issues = cs.validate(ledger=ledger)
@@ -395,9 +467,13 @@ def test_12_validate_clean_when_consistent():
 
 
 def test_13_fixed_constraint_cannot_become_tunable():
-    c = Constraint(id="FX", type=ConstraintType.CREATE_CLOCK,
-                   status=ConstraintStatus.FIXED, opt_status=OptimizationStatus.FIXED,
-                   values={"x": 1})
+    c = Constraint(
+        id="FX",
+        type=ConstraintType.CREATE_CLOCK,
+        status=ConstraintStatus.FIXED,
+        opt_status=OptimizationStatus.FIXED,
+        values={"x": 1},
+    )
     problems = c.validate_invariants()
     assert not any("TUNABLE" in p for p in problems)
     # Attempt to force TUNABLE opt_status
@@ -412,20 +488,29 @@ def test_13_fixed_constraint_cannot_become_tunable():
 
 @pytest.mark.parametrize("status", [ConstraintStatus.REJECTED, ConstraintStatus.DEPRECATED])
 def test_14_rejected_not_emittable_all_modes(status):
-    c = Constraint(id="RJ", type=ConstraintType.SET_FALSE_PATH,
-                   confidence=Confidence.HIGH, status=status)
+    c = Constraint(
+        id="RJ", type=ConstraintType.SET_FALSE_PATH, confidence=Confidence.HIGH, status=status
+    )
     for mode in ("strict", "balanced", "exploratory"):
         assert not c.is_safe_to_emit(mode)
 
 
 def test_14_emittable_excludes_rejected_in_set():
     cs = ConstraintSet(name="e")
-    cs.add(Constraint(id="K1", type=ConstraintType.CREATE_CLOCK,
-                      target_objects=["clk"], values={"name": "clk", "period": 10e-9},
-                      source_kind=SourceKind.USER, confidence=Confidence.HIGH,
-                      status=ConstraintStatus.CONFIRMED))
-    cs.add(Constraint(id="K2", type=ConstraintType.SET_FALSE_PATH,
-                      status=ConstraintStatus.REJECTED))
+    cs.add(
+        Constraint(
+            id="K1",
+            type=ConstraintType.CREATE_CLOCK,
+            target_objects=["clk"],
+            values={"name": "clk", "period": 10e-9},
+            source_kind=SourceKind.USER,
+            confidence=Confidence.HIGH,
+            status=ConstraintStatus.CONFIRMED,
+        )
+    )
+    cs.add(
+        Constraint(id="K2", type=ConstraintType.SET_FALSE_PATH, status=ConstraintStatus.REJECTED)
+    )
     emit = cs.emittable(SafeMode.EXPLORATORY)
     ids = {c.id for c in emit}
     assert "K1" in ids
@@ -456,8 +541,7 @@ def test_15_stale_set_from_assumption_change():
     ledger = AssumptionLedger()
     ledger.reset_id_counter(0)
     a = ledger.make("clk period 10", default_value=10e-9)
-    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                          assumption_ids=[a.id])
+    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk", assumption_ids=[a.id])
     ledger.bind_constraint(a.id, clk.id)
     clk.dependent_analyses.append("STA01")
     stale = cs.stale_set(changed_assumption_ids={a.id}, ledger=ledger)
@@ -472,6 +556,7 @@ def test_15_stale_set_from_assumption_change():
 
 def test_16_imported_sdc_provenance_metadata(tmp_path):
     from rca.sdc.parser import SDCParser
+
     sdc = "create_clock -name clk -period 10 [get_ports clk]\n"
     p = tmp_path / "in.sdc"
     p.write_text(sdc)
@@ -495,15 +580,30 @@ def test_16_imported_sdc_provenance_metadata(tmp_path):
 def test_17_missing_info_severity_levels():
     ledger = AssumptionLedger()
     ledger.reset_id_counter(0)
-    req = ledger.make("Clock clk period missing", origin="INFERENCE",
-                      confidence="UNKNOWN", severity="REQUIRED",
-                      user_confirmed=False, fixed=False)
-    rec = ledger.make("Relationship clka<->clkb unknown", origin="INFERENCE",
-                      confidence="UNKNOWN", severity="RECOMMENDED",
-                      user_confirmed=False, fixed=False)
-    info = ledger.make("Input 'd' clock association unknown", origin="INFERENCE",
-                       confidence="UNKNOWN", severity="INFO",
-                       user_confirmed=False, fixed=False)
+    req = ledger.make(
+        "Clock clk period missing",
+        origin="INFERENCE",
+        confidence="UNKNOWN",
+        severity="REQUIRED",
+        user_confirmed=False,
+        fixed=False,
+    )
+    ledger.make(
+        "Relationship clka<->clkb unknown",
+        origin="INFERENCE",
+        confidence="UNKNOWN",
+        severity="RECOMMENDED",
+        user_confirmed=False,
+        fixed=False,
+    )
+    ledger.make(
+        "Input 'd' clock association unknown",
+        origin="INFERENCE",
+        confidence="UNKNOWN",
+        severity="INFO",
+        user_confirmed=False,
+        fixed=False,
+    )
     by_sev = {a.severity for a in ledger}
     assert by_sev == {"REQUIRED", "RECOMMENDED", "INFO"}
     assert not req.user_confirmed
@@ -529,9 +629,16 @@ def test_18_source_kind_enum_normalized_in_provenance():
 
 
 def test_19_path_selector_fields_and_key():
-    ps = PathSelector(from_set=["a"], to_set=["z"], through_set=[["b", "c"]],
-                      edge="rise", min_max="min", setup_hold="setup",
-                      add_delay=True, from_clock=["clk"])
+    ps = PathSelector(
+        from_set=["a"],
+        to_set=["z"],
+        through_set=[["b", "c"]],
+        edge="rise",
+        min_max="min",
+        setup_hold="setup",
+        add_delay=True,
+        from_clock=["clk"],
+    )
     s = ps.to_dict()
     assert s["from_set"] == ["a"]
     assert s["edge"] == "rise"
@@ -566,8 +673,12 @@ def test_20_semantic_duplicates_detected():
 
 
 def test_21_negative_reject_fixed_raises():
-    c = Constraint(id="N1", type=ConstraintType.CREATE_CLOCK,
-                   status=ConstraintStatus.FIXED, opt_status=OptimizationStatus.FIXED)
+    c = Constraint(
+        id="N1",
+        type=ConstraintType.CREATE_CLOCK,
+        status=ConstraintStatus.FIXED,
+        opt_status=OptimizationStatus.FIXED,
+    )
     with pytest.raises(ValueError):
         c.mark_rejected("nope")
 
@@ -579,8 +690,9 @@ def test_21_negative_reject_fixed_raises():
 
 def test_22_clone_baseline_unchanged_after_cand_mutation():
     cs = ConstraintSet(name="d")
-    c = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                        source_kind=SourceKind.USER, fixed=True)
+    c = cs.create_clock(
+        name="clk", period_seconds=10e-9, source="clk", source_kind=SourceKind.USER, fixed=True
+    )
     before = json.dumps(cs.snapshot(), sort_keys=True, default=str)
     cand = cs.clone(name="cand")
     cand.get(c.id).values["period"] = 6e-9
@@ -595,23 +707,31 @@ def test_22_clone_baseline_unchanged_after_cand_mutation():
 
 
 def test_lifecycle_integration_end_to_end():
-    from rca.sdc.parser import SDCParser
     # Build a UCM via mixed sources: one user clock + one imported clock.
     cs = ConstraintSet(name="top")
     cs.add_scenario(Scenario(id="func_slow", mode="functional", corner="slow"))
     ledger = AssumptionLedger()
     ledger.reset_id_counter(0)
-    a_period = ledger.make("clk period 10ns", default_value=10e-9,
-                           current_value=10e-9, severity="REQUIRED")
-    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                          source_kind=SourceKind.USER, fixed=True,
-                          scenario_ids=["func_slow"], assumption_ids=[a_period.id])
+    a_period = ledger.make(
+        "clk period 10ns", default_value=10e-9, current_value=10e-9, severity="REQUIRED"
+    )
+    clk = cs.create_clock(
+        name="clk",
+        period_seconds=10e-9,
+        source="clk",
+        source_kind=SourceKind.USER,
+        fixed=True,
+        scenario_ids=["func_slow"],
+        assumption_ids=[a_period.id],
+    )
     ledger.bind_constraint(a_period.id, clk.id)
-    clk.provenance.add_evidence(Evidence(
-        id="UE1", kind="user", description="user-provided clock period"))
+    clk.provenance.add_evidence(
+        Evidence(id="UE1", kind="user", description="user-provided clock period")
+    )
     # Input delay depends on clk.
-    ind = cs.create_input_delay(port="d", clock="clk", delay_seconds=0.5e-9,
-                                scenario_ids=["func_slow"])
+    ind = cs.create_input_delay(
+        port="d", clock="clk", delay_seconds=0.5e-9, scenario_ids=["func_slow"]
+    )
     ind.add_dependency(clk.id)
     clk.add_downstream(ind.id)
     ledger.bind_constraint(a_period.id, ind.id)
@@ -629,7 +749,8 @@ def test_lifecycle_integration_end_to_end():
     snap1 = cs.snapshot()
     snap2 = cs.snapshot()
     assert json.dumps(snap1, sort_keys=True, default=str) == json.dumps(
-        snap2, sort_keys=True, default=str)
+        snap2, sort_keys=True, default=str
+    )
     # Round-trip from snapshot and semantic equality on clone vs baseline
     rt = ConstraintSet.from_snapshot(snap1)
     assert rt.name == "top"
@@ -678,41 +799,55 @@ def test_23_confidence_normalized_across_layers():
 def test_23_canonical_roundtrip_preserves_full_provenance_and_evidence():
     cs = ConstraintSet(name="rt")
     cs.add_scenario(Scenario(id="func_slow", mode="functional", corner="slow"))
-    a = cs.ledger.make("clk period 10ns", default_value=10e-9, current_value=10e-9,
-                       severity="REQUIRED")
-    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                          source_kind=SourceKind.USER, fixed=True,
-                          confidence=Confidence.HIGH,
-                          scenario_ids=["func_slow"], assumption_ids=[a.id])
-    clk.provenance.add_evidence(Evidence(id="UE1", kind="user",
-                                         description="user provided clock",
-                                         source_objects=["clk"],
-                                         location="project.rca:12",
-                                         confidence=Confidence.HIGH,
-                                         rule_id="U-CLK"))
-    # Complex PathSelector false path
-    fp = cs.add(Constraint(
-        id="FP0001",
-        type=ConstraintType.SET_FALSE_PATH,
-        path_selector=PathSelector(
-            from_set=["u_a/q"],
-            through_set=[["u_b/d"]],
-            to_set=["u_c/d"],
-            edge="rise",
-            min_max="max",
-            setup_hold="setup",
-            add_delay=False,
-            from_clock=["clk"],
-            to_clock=["clk"],
-        ),
-        source_kind=SourceKind.INFERENCE,
-        confidence=Confidence.LOW,
-        status=ConstraintStatus.REQUIRES_CONFIRMATION,
-        opt_status=OptimizationStatus.TUNABLE,
-        assumption_ids=[a.id],
+    a = cs.ledger.make(
+        "clk period 10ns", default_value=10e-9, current_value=10e-9, severity="REQUIRED"
+    )
+    clk = cs.create_clock(
+        name="clk",
+        period_seconds=10e-9,
+        source="clk",
+        source_kind=SourceKind.USER,
+        fixed=True,
+        confidence=Confidence.HIGH,
         scenario_ids=["func_slow"],
-        dependent_analyses=["STA01"],
-    ))
+        assumption_ids=[a.id],
+    )
+    clk.provenance.add_evidence(
+        Evidence(
+            id="UE1",
+            kind="user",
+            description="user provided clock",
+            source_objects=["clk"],
+            location="project.rca:12",
+            confidence=Confidence.HIGH,
+            rule_id="U-CLK",
+        )
+    )
+    # Complex PathSelector false path
+    fp = cs.add(
+        Constraint(
+            id="FP0001",
+            type=ConstraintType.SET_FALSE_PATH,
+            path_selector=PathSelector(
+                from_set=["u_a/q"],
+                through_set=[["u_b/d"]],
+                to_set=["u_c/d"],
+                edge="rise",
+                min_max="max",
+                setup_hold="setup",
+                add_delay=False,
+                from_clock=["clk"],
+                to_clock=["clk"],
+            ),
+            source_kind=SourceKind.INFERENCE,
+            confidence=Confidence.LOW,
+            status=ConstraintStatus.REQUIRES_CONFIRMATION,
+            opt_status=OptimizationStatus.TUNABLE,
+            assumption_ids=[a.id],
+            scenario_ids=["func_slow"],
+            dependent_analyses=["STA01"],
+        )
+    )
     cs.ledger.bind_constraint(a.id, fp.id)
     # Dependency
     fp.add_dependency(clk.id)
@@ -794,8 +929,11 @@ def test_23_canonical_roundtrip_preserves_full_provenance_and_evidence():
 
 def test_23_import_metadata_roundtrip_preserves_original_command(tmp_path):
     from rca.sdc.parser import SDCParser
-    sdc = ("create_clock -name clk -period 10 [get_ports clk]\n"
-           "set_input_delay -clock clk -max 0.5 [get_ports d]\n")
+
+    sdc = (
+        "create_clock -name clk -period 10 [get_ports clk]\n"
+        "set_input_delay -clock clk -max 0.5 [get_ports d]\n"
+    )
     p = tmp_path / "in.sdc"
     p.write_text(sdc)
     cs = SDCParser().parse_file(str(p))
@@ -817,8 +955,7 @@ def test_23_import_metadata_roundtrip_preserves_original_command(tmp_path):
 def test_23_assumption_invalidation_survives_roundtrip():
     cs = ConstraintSet(name="inv")
     a = cs.ledger.make("period", default_value=10e-9, current_value=10e-9)
-    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                          assumption_ids=[a.id])
+    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk", assumption_ids=[a.id])
     cs.ledger.bind_constraint(a.id, clk.id)
     clk.dependent_analyses.append("STA01")
     snap = cs.to_snapshot_dict()
@@ -834,14 +971,12 @@ def test_23_assumption_invalidation_survives_roundtrip():
 def test_23_clone_distinct_provenance_and_assumptions_not_aliased():
     cs = ConstraintSet(name="b")
     a = cs.ledger.make("p", default_value=10e-9, current_value=10e-9)
-    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                          assumption_ids=[a.id])
+    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk", assumption_ids=[a.id])
     clk.provenance.add_evidence(Evidence(id="E1", kind="user", description="d"))
     cand = cs.clone(name="c")
     # Mutate candidate: add evidence and change value.
     cand.get(clk.id).values["period"] = 8e-9
-    cand.get(clk.id).provenance.add_evidence(
-        Evidence(id="E2", kind="heuristic", description="opt"))
+    cand.get(clk.id).provenance.add_evidence(Evidence(id="E2", kind="heuristic", description="opt"))
     cand.ledger.get(a.id).current_value = 8e-9
     # Baseline unchanged
     assert cs.get(clk.id).values["period"] == 10e-9
@@ -959,8 +1094,14 @@ def test_23_unknown_top_level_field_error_mode():
 
 
 def test_23_future_schema_version_rejected():
-    snap = {"schema_version": 99, "name": "future", "constraints": {}, "scenarios": {},
-            "metadata": {}, "assumptions": None}
+    snap = {
+        "schema_version": 99,
+        "name": "future",
+        "constraints": {},
+        "scenarios": {},
+        "metadata": {},
+        "assumptions": None,
+    }
     with pytest.raises(ValueError) as ei:
         ConstraintSet.from_snapshot_dict(snap)
     assert "schema_version" in str(ei.value)
@@ -989,8 +1130,9 @@ def test_23_validation_catches_un_normalized_source_kind():
     # object.__setattr__ to ensure validate flags it. We simulate this by
     # constructing via pydantic parse with a raw dict where provenance's
     # source_kind was forced to a non-normalized value through a backdoor.
-    c = Constraint(id="X", type=ConstraintType.CREATE_CLOCK,
-                   target_objects=["clk"], values={"name": "clk"})
+    c = Constraint(
+        id="X", type=ConstraintType.CREATE_CLOCK, target_objects=["clk"], values={"name": "clk"}
+    )
     # Provenance is already normalized. Force an invalid state.
     object.__setattr__(c.provenance, "source_kind", "WEIRD")
     issues = c.validate_invariants()
@@ -1005,77 +1147,131 @@ def test_24_canonical_json_deterministic_across_insertion_orders():
     Construction pins IDs and timestamps so counter-generated IDs and
     `created_at` values do not differ across the two builders.
     """
-    from datetime import datetime, timezone
 
     TS = "2025-01-01T00:00:00+00:00"
 
     def build(order="AB"):
         cs = ConstraintSet(name="det", run_id="r1", created_at=TS)
-        s1 = Scenario(id="s_fast", mode="functional", corner="fast",
-                      libraries=["lib_fast"], active=True)
-        s2 = Scenario(id="s_slow", mode="functional", corner="slow",
-                      libraries=["lib_slow"], active=True)
+        s1 = Scenario(
+            id="s_fast", mode="functional", corner="fast", libraries=["lib_fast"], active=True
+        )
+        s2 = Scenario(
+            id="s_slow", mode="functional", corner="slow", libraries=["lib_slow"], active=True
+        )
         # Reset counter so fixed ids line up regardless of order.
         cs._counter = 0
-        for sid in (["s_fast", "s_slow"] if order == "AB" else ["s_slow", "s_fast"]):
+        for sid in ["s_fast", "s_slow"] if order == "AB" else ["s_slow", "s_fast"]:
             cs.scenarios[sid] = s1 if sid == "s_fast" else s2
-        a1 = cs.ledger.add(Assumption(
-            id="A0001", statement="io registers", origin="parser",
-            confidence=Confidence.LOW, default_value=True, current_value=True,
-            dependent_constraints=[], dependent_analyses=["setup"],
-            created_at=TS))
-        a2 = cs.ledger.add(Assumption(
-            id="A0002", statement="clock naming", origin="hint",
-            confidence=Confidence.LOW, default_value="clk", current_value="clk",
-            created_at=TS))
-        ev1 = Evidence(id="EV1", kind="PARSER", description="SDC file", confidence=Confidence.HIGH,
-                       source_objects=["top.sdc"], location="top.sdc:1",
-                       created_by="rca", created_at=TS)
-        ev2 = Evidence(id="EV2", kind="USER", description="user said so", confidence=Confidence.HIGH,
-                       source_objects=["user"], location=None,
-                       created_by="rca", created_at=TS)
+        cs.ledger.add(
+            Assumption(
+                id="A0001",
+                statement="io registers",
+                origin="parser",
+                confidence=Confidence.LOW,
+                default_value=True,
+                current_value=True,
+                dependent_constraints=[],
+                dependent_analyses=["setup"],
+                created_at=TS,
+            )
+        )
+        cs.ledger.add(
+            Assumption(
+                id="A0002",
+                statement="clock naming",
+                origin="hint",
+                confidence=Confidence.LOW,
+                default_value="clk",
+                current_value="clk",
+                created_at=TS,
+            )
+        )
+        ev1 = Evidence(
+            id="EV1",
+            kind="PARSER",
+            description="SDC file",
+            confidence=Confidence.HIGH,
+            source_objects=["top.sdc"],
+            location="top.sdc:1",
+            created_by="rca",
+            created_at=TS,
+        )
+        ev2 = Evidence(
+            id="EV2",
+            kind="USER",
+            description="user said so",
+            confidence=Confidence.HIGH,
+            source_objects=["user"],
+            location=None,
+            created_by="rca",
+            created_at=TS,
+        )
 
         # Manually build constraints with fixed IDs to avoid order-dependent
         # CLK0001/INP0002 counter assignment.
-        clk = Constraint(id="CLK1", type=ConstraintType.CREATE_CLOCK,
-                         target_objects=["clk"], clock_refs=["clk"],
-                         values={"name": "clk", "period": 10e-9},
-                         source_kind=SourceKind.USER, confidence=Confidence.HIGH,
-                         status=ConstraintStatus.FIXED, opt_status=OptimizationStatus.FIXED,
-                         scenario_ids=["s_slow", "s_fast"],
-                         assumption_ids=["A0001"],
-                         provenance=ProvenanceRecord(created_by="rca", created_at=TS,
-                                                     source_kind=SourceKind.USER))
-        ind = Constraint(id="INP1", type=ConstraintType.SET_INPUT_DELAY,
-                         target_objects=["d"], clock_refs=["clk"],
-                         values={"clock": "clk", "delay": 0.5e-9, "min_max": "max"},
-                         source_kind=SourceKind.USER, confidence=Confidence.HIGH,
-                         status=ConstraintStatus.CONFIRMED,
-                         opt_status=OptimizationStatus.TUNABLE,
-                         scenario_ids=["s_slow"],
-                         provenance=ProvenanceRecord(created_by="rca", created_at=TS,
-                                                     source_kind=SourceKind.USER))
-        fp = Constraint(id="FP1", type=ConstraintType.SET_FALSE_PATH,
-                        path_selector=PathSelector(from_set=["rst"], to_set=["q"]),
-                        source_kind=SourceKind.INFERENCE, confidence=Confidence.LOW,
-                        status=ConstraintStatus.REQUIRES_CONFIRMATION,
-                        opt_status=OptimizationStatus.TUNABLE,
-                        scenario_ids=["s_fast"], assumption_ids=["A0002"],
-                        provenance=ProvenanceRecord(created_by="rca", created_at=TS,
-                                                    source_kind=SourceKind.INFERENCE))
+        clk = Constraint(
+            id="CLK1",
+            type=ConstraintType.CREATE_CLOCK,
+            target_objects=["clk"],
+            clock_refs=["clk"],
+            values={"name": "clk", "period": 10e-9},
+            source_kind=SourceKind.USER,
+            confidence=Confidence.HIGH,
+            status=ConstraintStatus.FIXED,
+            opt_status=OptimizationStatus.FIXED,
+            scenario_ids=["s_slow", "s_fast"],
+            assumption_ids=["A0001"],
+            provenance=ProvenanceRecord(
+                created_by="rca", created_at=TS, source_kind=SourceKind.USER
+            ),
+        )
+        ind = Constraint(
+            id="INP1",
+            type=ConstraintType.SET_INPUT_DELAY,
+            target_objects=["d"],
+            clock_refs=["clk"],
+            values={"clock": "clk", "delay": 0.5e-9, "min_max": "max"},
+            source_kind=SourceKind.USER,
+            confidence=Confidence.HIGH,
+            status=ConstraintStatus.CONFIRMED,
+            opt_status=OptimizationStatus.TUNABLE,
+            scenario_ids=["s_slow"],
+            provenance=ProvenanceRecord(
+                created_by="rca", created_at=TS, source_kind=SourceKind.USER
+            ),
+        )
+        fp = Constraint(
+            id="FP1",
+            type=ConstraintType.SET_FALSE_PATH,
+            path_selector=PathSelector(from_set=["rst"], to_set=["q"]),
+            source_kind=SourceKind.INFERENCE,
+            confidence=Confidence.LOW,
+            status=ConstraintStatus.REQUIRES_CONFIRMATION,
+            opt_status=OptimizationStatus.TUNABLE,
+            scenario_ids=["s_fast"],
+            assumption_ids=["A0002"],
+            provenance=ProvenanceRecord(
+                created_by="rca", created_at=TS, source_kind=SourceKind.INFERENCE
+            ),
+        )
         # Insert in different orders.
-        items = [("CLK1", clk), ("INP1", ind), ("FP1", fp)] if order == "AB" \
-                else [("FP1", fp), ("INP1", ind), ("CLK1", clk)]
+        items = (
+            [("CLK1", clk), ("INP1", ind), ("FP1", fp)]
+            if order == "AB"
+            else [("FP1", fp), ("INP1", ind), ("CLK1", clk)]
+        )
         for cid, c in items:
             cs.constraints[cid] = c
         cs._counter = 1
 
         # Dependency edge order varies
         if order == "AB":
-            ind.dependency_ids = ["CLK1"]; clk.downstream_ids = ["FP1", "INP1"]
+            ind.dependency_ids = ["CLK1"]
+            clk.downstream_ids = ["FP1", "INP1"]
             fp.dependency_ids = ["CLK1"]
         else:
-            fp.dependency_ids = ["CLK1"]; ind.dependency_ids = ["CLK1"]
+            fp.dependency_ids = ["CLK1"]
+            ind.dependency_ids = ["CLK1"]
             clk.downstream_ids = ["INP1", "FP1"]
 
         ev_order = [ev1, ev2] if order == "AB" else [ev2, ev1]
@@ -1099,36 +1295,58 @@ def test_24_canonical_json_deterministic_across_insertion_orders():
 
 def test_24_full_canonical_roundtrip_double_json_equivalence(tmp_path):
     """Comprehensive UCM -> JSON -> restore -> JSON must be byte identical."""
-    import tempfile, os
-    from rca.sdc.parser import SDCParser
 
     cs = ConstraintSet(name="full", run_id="r")
-    s = Scenario(id="func", mode="functional", corner="slow",
-                 libraries=["tt"], active=True)
+    s = Scenario(id="func", mode="functional", corner="slow", libraries=["tt"], active=True)
     cs.scenarios[s.id] = s
-    clk = cs.create_clock(name="clk", period_seconds=10e-9, source="clk",
-                          source_kind=SourceKind.USER, confidence=Confidence.HIGH,
-                          fixed=True, scenario_ids=["func"])
-    ind = cs.create_input_delay(port="d", clock="clk", delay_seconds=0.5e-9,
-                                scenario_ids=["func"])
-    fp = cs.create_false_path(from_set=["rst"], to_set=["q"],
-                              from_clock=["clk"], to_clock=["clk"],
-                              through_set=[["u1"]])
+    clk = cs.create_clock(
+        name="clk",
+        period_seconds=10e-9,
+        source="clk",
+        source_kind=SourceKind.USER,
+        confidence=Confidence.HIGH,
+        fixed=True,
+        scenario_ids=["func"],
+    )
+    ind = cs.create_input_delay(port="d", clock="clk", delay_seconds=0.5e-9, scenario_ids=["func"])
+    fp = cs.create_false_path(
+        from_set=["rst"], to_set=["q"], from_clock=["clk"], to_clock=["clk"], through_set=[["u1"]]
+    )
     cs.add_dependency_edge(clk.id, ind.id)
     cs.add_dependency_edge(clk.id, fp.id)
-    ev = Evidence(id="EVU", kind="USER", description="user declared", confidence=Confidence.HIGH,
-                  source_objects=["interactive"], location=None)
-    clk.provenance.add_evidence(ev); clk.evidence_ids.append(ev.id)
-    a = cs.ledger.add(Assumption(
-        id="A0001", statement="input registered", origin="inference",
-        confidence=Confidence.LOW, default_value=True, current_value=True,
-        dependent_constraints=[ind.id], dependent_analyses=["setup_check"]))
+    ev = Evidence(
+        id="EVU",
+        kind="USER",
+        description="user declared",
+        confidence=Confidence.HIGH,
+        source_objects=["interactive"],
+        location=None,
+    )
+    clk.provenance.add_evidence(ev)
+    clk.evidence_ids.append(ev.id)
+    cs.ledger.add(
+        Assumption(
+            id="A0001",
+            statement="input registered",
+            origin="inference",
+            confidence=Confidence.LOW,
+            default_value=True,
+            current_value=True,
+            dependent_constraints=[ind.id],
+            dependent_analyses=["setup_check"],
+        )
+    )
     cs.ledger.bind_constraint("A0001", ind.id)
     ind.add_assumption("A0001")
     # Add import_meta to clk.provenance
     clk.provenance.import_meta = ImportMetadata(
-        source_file="user.sdc", source_line=1, original_command="create_clock ...",
-        source_format="sdc", import_run_id="r", extra={"note": "ok"})
+        source_file="user.sdc",
+        source_line=1,
+        original_command="create_clock ...",
+        source_format="sdc",
+        import_run_id="r",
+        extra={"note": "ok"},
+    )
 
     j1 = cs.to_canonical_json(indent=2)
     r = ConstraintSet.from_canonical_json(j1)

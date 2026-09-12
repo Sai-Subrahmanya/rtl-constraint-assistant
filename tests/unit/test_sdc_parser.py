@@ -1,8 +1,8 @@
 """SDC parser / importer tests."""
 import pytest
+
 from rca.sdc import SDCParser
 from rca.utils.enums import ConstraintType
-
 
 SDC_SAMPLE = """
 create_clock -name clk -period 10.000 [get_ports clk]
@@ -34,7 +34,7 @@ def test_clock_values():
 
 def test_unknown_command_warning():
     p = SDCParser()
-    cset = p.parse_text("some_weird_command -x 1\n")
+    p.parse_text("some_weird_command -x 1\n")
     assert len(p.warnings) == 1
     assert "unknown" in p.warnings[0].lower() or "minimal support" in p.warnings[0].lower()
 

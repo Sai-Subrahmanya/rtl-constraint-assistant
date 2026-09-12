@@ -13,9 +13,9 @@ constraints.
 from __future__ import annotations
 
 import threading
-from copy import deepcopy
+from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Any, Iterator
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -117,7 +117,7 @@ class Assumption(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "Assumption":
+    def from_dict(cls, d: dict[str, Any]) -> Assumption:
         return cls(
             id=d["id"],
             statement=d["statement"],
@@ -292,7 +292,7 @@ class AssumptionLedger:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "AssumptionLedger":
+    def from_dict(cls, d: dict[str, Any]) -> AssumptionLedger:
         ledger = cls()
         for ad in d.get("assumptions", []):
             a = Assumption.from_dict(ad)

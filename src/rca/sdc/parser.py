@@ -10,11 +10,10 @@ unknown commands and variable/$-substitutions best-effort.
 from __future__ import annotations
 
 import re
-import io
 from pathlib import Path
 from typing import Any
 
-from ..constraint_model import ConstraintSet, PathSelector
+from ..constraint_model import ConstraintSet
 from ..provenance import ImportMetadata, ProvenanceRecord
 from ..utils.enums import (
     Confidence,

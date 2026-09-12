@@ -16,21 +16,18 @@ subset become UNRESOLVED with their raw text preserved.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from ..config.model import ProjectConfig
 from ..constraint_model import ConstraintSet, PathSelector
 from ..constraint_model.constraint import Constraint
 from ..design_model import Design
-from ..provenance import Evidence, ImportMetadata, ProvenanceRecord
+from ..provenance import ImportMetadata, ProvenanceRecord
 from ..timing_model import TimingGraph
 from ..utils.enums import (
     ClockGroupsRelationship,
-    CollectionKind,
     Confidence,
     ConstraintStatus,
     ConstraintType,
@@ -40,12 +37,14 @@ from ..utils.enums import (
     ResolutionStatus,
     SourceKind,
 )
-from ..utils.hashing import stable_hash
 from ..utils.logging import get_logger
 from ..utils.units import parse_time_string
 from .collections import DesignResolver, TargetCollection, parse_target_value
 from .parser import (
-    ParseDiagnostic, ParsedSdc, SdcCommand, SdcParseResult, SdcParser,
+    ParseDiagnostic,
+    SdcCommand,
+    SdcParser,
+    SdcParseResult,
     _CmdSubstValue,
 )
 

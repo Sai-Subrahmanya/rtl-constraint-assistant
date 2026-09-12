@@ -26,12 +26,11 @@ from rca.design_model.module import Module
 from rca.design_model.net import Net
 from rca.design_model.port import Port, PortDirection
 from rca.design_model.register import Register
-from rca.timing_model.timing_graph import TimingGraph
-from rca.timing_model.timing_path import TimingPath
 from rca.timing_model.clock import Clock
 from rca.timing_model.clock_domain import ClockDomainEdge
+from rca.timing_model.timing_graph import TimingGraph
+from rca.timing_model.timing_path import TimingPath
 from rca.utils.enums import (
-    ClockDomainRelationship,
     ConstraintStatus,
     ConstraintType,
     ErrorCode,
@@ -40,9 +39,8 @@ from rca.utils.enums import (
     TimingPathClass,
     ValidationStatus,
 )
+from rca.validation.base import ValidationIssue
 from rca.validation.engine import run_validation
-from rca.validation.base import ValidationIssue, ValidationReport
-
 
 # ---------------------------------------------------------------------------
 # Helpers

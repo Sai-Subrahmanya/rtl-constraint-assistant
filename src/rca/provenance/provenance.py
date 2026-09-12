@@ -25,7 +25,6 @@ execution), but Evidence objects are frozen.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -65,7 +64,7 @@ class ImportMetadata(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ImportMetadata":
+    def from_dict(cls, d: dict[str, Any]) -> ImportMetadata:
         return cls(
             source_file=d["source_file"],
             source_line=d.get("source_line"),
@@ -206,7 +205,7 @@ class ProvenanceRecord(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ProvenanceRecord":
+    def from_dict(cls, d: dict[str, Any]) -> ProvenanceRecord:
         evs = [Evidence.from_dict(ed) for ed in d.get("evidence", [])]
         im = d.get("import_meta")
         return cls(

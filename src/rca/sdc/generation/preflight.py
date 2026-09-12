@@ -17,9 +17,8 @@ Capability negotiation policy (Step 6 corrective pass):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-from ...constraint_model import Constraint, PathSelector
+from ...constraint_model import Constraint
 from ...utils.enums import CollectionKind, ConstraintType
 
 

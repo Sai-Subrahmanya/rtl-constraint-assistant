@@ -5,12 +5,20 @@ kind from name syntax.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
-from ..constraint_model import Constraint, PathSelector
+from ..constraint_model import Constraint
 from ..constraint_model.targets import (
-    TargetRef, CollectionKind, port, pin, net, cell, clock, register,
-    literal, all_inputs, all_outputs, all_clocks, all_registers,
+    CollectionKind,
+    TargetRef,
+    all_clocks,
+    all_inputs,
+    all_outputs,
+    all_registers,
+    cell,
+    clock,
+    net,
+    register,
     unresolved,
 )
 from .collections import TargetCollection

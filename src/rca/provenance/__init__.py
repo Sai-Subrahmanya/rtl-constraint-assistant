@@ -1,5 +1,5 @@
 from .assumption import Assumption, AssumptionLedger
-from .evidence import Evidence, EVIDENCE_KINDS
+from .evidence import EVIDENCE_KINDS, Evidence
 from .provenance import ImportMetadata, ProvenanceRecord, make_provenance
 
 __all__ = [

@@ -8,12 +8,14 @@ SHADOWED / OVERLAPPING.  Nothing is deleted — findings are reported.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any
 
 from ..constraint_model import Constraint, ConstraintSet
-from ..constraint_model.targets import CollectionKind
 from ..utils.enums import (
-    ConstraintStatus, ConstraintType, ErrorCode, Severity, SourceKind,
+    ConstraintStatus,
+    ConstraintType,
+    ErrorCode,
+    Severity,
+    SourceKind,
     ValidationCategory,
 )
 from .base import ValidationIssue, ValidationReport

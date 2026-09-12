@@ -18,18 +18,15 @@ per-scenario records are always retained by the caller (see
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from ..qor.objectives import (
-    AREA_PROXY,
-    AREA_REAL,
     AREA_UNKNOWN,
-    Direction,
     OBJECTIVE_SPECS,
+    Direction,
     _area_value,
     _cmp_metric,
-    compare_objectives,
     objective_vector,
 )
 from .model import (
@@ -693,7 +690,6 @@ def _priority_compare(a, b, baseline, priorities) -> int:
 
 
 def _compare_global_metric(name: str, a, b) -> int | None:
-    from ..qor.objectives import _cmp_higher_better, _cmp_lower_better
 
     a_mcmm = getattr(a, "mcmm", None)
     b_mcmm = getattr(b, "mcmm", None)

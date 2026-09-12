@@ -18,7 +18,7 @@ from ..qor.model import QoRResult
 from ..utils.enums import CandidateDecision
 
 if False:  # typing only; avoids a runtime import cycle at dataclass-creation time
-    from ..mcmm.model import MCMMResult
+    pass
 
 
 @dataclass

@@ -9,9 +9,15 @@ from __future__ import annotations
 
 from . import objectives as _obj
 from .objectives import (
-    AREA_REAL, AREA_PROXY, AREA_UNKNOWN,
-    AreaValue, CompareResult, Direction, FeasibilityResult, ObjectiveSpec,
+    AREA_PROXY,
+    AREA_REAL,
+    AREA_UNKNOWN,
     OBJECTIVE_SPECS,
+    AreaValue,
+    CompareResult,
+    Direction,
+    FeasibilityResult,
+    ObjectiveSpec,
 )
 
 __all__ = [

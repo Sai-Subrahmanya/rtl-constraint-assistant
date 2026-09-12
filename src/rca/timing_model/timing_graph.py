@@ -42,9 +42,9 @@ from ..utils.enums import (
     TimingPathClass,
 )
 from ..utils.logging import get_logger
-from .clock import Clock, ClockEvidence, ClockEvidenceKind
+from .clock import Clock, ClockEvidenceKind
 from .clock_domain import ClockDomain, ClockDomainEdge
-from .reset import Reset, ResetEvidence, ResetEvidenceKind
+from .reset import Reset, ResetEvidenceKind
 from .timing_path import TimingPath
 
 log = get_logger("timing")
@@ -82,7 +82,7 @@ class TimingGraph(BaseModel):
 
     @classmethod
     def build(cls, design: Design, user_clocks: list[dict[str, Any]] | None = None,
-              user_relationships: list[dict[str, Any]] | None = None) -> "TimingGraph":
+              user_relationships: list[dict[str, Any]] | None = None) -> TimingGraph:
         """Build a TimingGraph from a structurally-analyzed Design."""
         tg = cls()
         # Ensure connectivity is built (idempotent).
@@ -640,9 +640,7 @@ class TimingGraph(BaseModel):
         """For each top-level input/output port, try to identify which
         clock domain it feeds/is fed by.  Leave UNKNOWN when there is no
         structural evidence (we do not assume 'first clock')."""
-        g = getattr(design, "_structural_graph_internal", None)
-        data_fanout = g.data_fanout if g else {}
-        data_fanin = g.data_fanin if g else {}
+        getattr(design, "_structural_graph_internal", None)
         for port in design.ports.values():
             if not _is_top_port(design, port):
                 continue

@@ -33,15 +33,12 @@ import os
 import sys
 import tempfile
 
-import pytest
-
 # Ensure src is on path.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from rca.parser.slang_adapter import SlangAdapter
 from rca.timing_model import TimingGraph
 from rca.utils.enums import ClockDomainRelationship, TimingPathClass
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -197,7 +194,7 @@ reg q;
 always_ff @(posedge clk_g) q <= d;
 endmodule"""
     t = _tg(sv)
-    gated = {g["output"].split(".")[-1]: g for g in t.clock_gating_candidates}
+    {g["output"].split(".")[-1]: g for g in t.clock_gating_candidates}
     # clk_g may appear as a clock with structural evidence.
     # Either way the gate candidate must list clk as the source.
     assert any("clk" == g.get("clock") for g in t.clock_gating_candidates)
@@ -460,7 +457,7 @@ endmodule"""
     # No clocks exist; input 'a' association must be None or absent.
     assoc = t.input_clock_assoc.get("m.a")
     assert assoc is None
-    cats = {m["category"] for m in t.missing_information()}
+    {m["category"] for m in t.missing_information()}
     # input_clock_association missing-info only appears when we have
     # clocks but can't associate; when there are no clocks we skip.
 

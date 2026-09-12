@@ -51,8 +51,8 @@ class Feasibility:
         }
 
     @classmethod
-    def from_qor(cls, qor: "QoRResult", *, setup_margin_ns: float = 0.0,
-                 hold_margin_ns: float = 0.0) -> "Feasibility":
+    def from_qor(cls, qor: QoRResult, *, setup_margin_ns: float = 0.0,
+                 hold_margin_ns: float = 0.0) -> Feasibility:
         if qor is None:
             return cls(blocked=True, reason="no QoR result", status=RunStatus.BLOCKED.value)
         if qor.setup_wns is None and qor.hold_wns is None and qor.cell_count is None:
@@ -74,9 +74,6 @@ class Feasibility:
             status=RunStatus.TIMING_FAIL.value if not feasible else RunStatus.SUCCESS.value,
         )
 
-    @classmethod
-    def blocked(cls, reason: str) -> "Feasibility":
-        return cls(blocked=True, reason=reason, status=RunStatus.BLOCKED.value)
 
 
 @dataclass

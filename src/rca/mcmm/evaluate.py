@@ -15,13 +15,13 @@ development and is clearly labelled.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ..constraint_model import ConstraintSet, Scenario
 from ..qor.model import QoRResult
-from ..utils.hashing import stable_hash
 from .aggregate import (
     aggregate_objectives,
     finalize_limiting,
@@ -31,8 +31,6 @@ from .aggregate import (
 from .cache import mcmm_run_cache_key, scenario_cache_key
 from .matrix import ScenarioMatrix
 from .model import (
-    BLOCKED,
-    FEASIBLE,
     MCMMResult,
     ScenarioQoR,
 )
@@ -306,9 +304,9 @@ def mock_mcmm_evaluator(matrix: ScenarioMatrix,
     baseline_qor_by_scenario = baseline_qor_by_scenario or {}
 
     def evaluate_scenario(scenario: Scenario, cand: Any, work_dir: Path) -> QoRResult:
-        from ..eda import MockEDA
         import random
-        from ..qor.model import QoRResult, PowerStatus
+
+        from ..qor.model import PowerStatus, QoRResult
 
         rng = random.Random(f"{getattr(cand, 'id', '')}-{scenario.id}-{seed}")
         offsets = (scenario_offsets or {}).get(scenario.id, {})

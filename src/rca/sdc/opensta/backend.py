@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from io import StringIO
-
 from ...constraint_model import ConstraintSet
 from ...utils.enums import SafeMode
 from ..generic.backend import GenericSDCBackend

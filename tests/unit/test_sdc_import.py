@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import tempfile
@@ -12,24 +11,19 @@ from pathlib import Path
 import pytest
 
 from rca.constraint_model import ConstraintSet
-from rca.constraint_model.selectors import PathSelector
 from rca.sdc_importer import (
     SdcImporter,
     SdcParser,
-    TargetCollection,
     TclLexer,
 )
 from rca.sdc_importer.lexer import BWORD, CMD_SUBST, COMMENT, QWORD, WORD
-from rca.sdc_importer.parser import ParseDiagnostic
 from rca.utils.enums import (
     CollectionKind,
     ConstraintType,
     DiagnosticSeverity,
     ImportStatus,
-    ResolutionStatus,
     SourceKind,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,7 +153,9 @@ def test_parser_create_clock_add_flag():
 
 
 def test_parser_create_generated_clock_basic():
-    r = _imp("create_generated_clock -name clkdiv -source clk -master_clock clk -divide_by 2 [get_pins U1/Q]\n")
+    r = _imp(
+        "create_generated_clock -name clkdiv -source clk -master_clock clk -divide_by 2 [get_pins U1/Q]\n"
+    )
     c = _first(r.constraint_set, ConstraintType.CREATE_GENERATED_CLOCK)
     assert c.values["name"] == "clkdiv"
     assert c.values["divide_by"] == 2
@@ -168,7 +164,9 @@ def test_parser_create_generated_clock_basic():
 
 
 def test_parser_create_generated_clock_divide_source():
-    r = _imp("create_generated_clock -name gclk -source [get_ports clk] -divide_by 4 [get_pins reg/Q]\n")
+    r = _imp(
+        "create_generated_clock -name gclk -source [get_ports clk] -divide_by 4 [get_pins reg/Q]\n"
+    )
     c = _first(r.constraint_set, ConstraintType.CREATE_GENERATED_CLOCK)
     assert c.values["divide_by"] == 4
     # source target should resolve to "clk" via the collection parser
@@ -197,8 +195,10 @@ def test_parser_output_delay():
 
 
 def test_parser_input_delay_min_max_separate():
-    sdc = ("set_input_delay -clock clk -max 2.0 [get_ports d]\n"
-           "set_input_delay -clock clk -min 0.5 [get_ports d]\n")
+    sdc = (
+        "set_input_delay -clock clk -max 2.0 [get_ports d]\n"
+        "set_input_delay -clock clk -min 0.5 [get_ports d]\n"
+    )
     r = _imp(sdc)
     cs = _all(r.constraint_set, ConstraintType.SET_INPUT_DELAY)
     # First cmd: max + rise + fall (2). Second: min + rise + fall (2). Total 4.
@@ -320,6 +320,7 @@ def test_parser_get_ports_collection():
     p = SdcParser()
     pr = p.parse_text("set_input_delay 1 -clock clk [get_ports foo]\n")
     from rca.sdc_importer.collections import parse_target_value
+
     pv = parse_target_value(pr.parsed.commands[0].positional[1])
     assert pv.collection_kind == CollectionKind.PORT
     assert pv.pattern == "foo"
@@ -327,6 +328,7 @@ def test_parser_get_ports_collection():
 
 def test_parser_get_pins_collection():
     from rca.sdc_importer.collections import parse_target_value
+
     pv = parse_target_value("[get_pins U1/A]")
     assert pv.collection_kind == CollectionKind.PIN
     assert pv.pattern == "U1/A"
@@ -334,6 +336,7 @@ def test_parser_get_pins_collection():
 
 def test_parser_get_clocks_collection():
     from rca.sdc_importer.collections import parse_target_value
+
     pv = parse_target_value("[get_clocks clk]")
     assert pv.collection_kind == CollectionKind.CLOCK
     assert pv.pattern == "clk"
@@ -341,6 +344,7 @@ def test_parser_get_clocks_collection():
 
 def test_all_inputs_outputs_supported():
     from rca.sdc_importer.collections import parse_target_value
+
     pv_in = parse_target_value("[all_inputs]")
     pv_out = parse_target_value("[all_outputs]")
     assert pv_in.collection_kind == CollectionKind.ALL_INPUTS
@@ -429,13 +433,15 @@ def test_security_never_executes_commands():
     sentinel = Path(tempfile.gettempdir()) / "__rca_security_marker__"
     if sentinel.exists():
         sentinel.unlink()
-    sdc = f'set_false_path -from [exec touch {sentinel}]\n'
+    sdc = f"set_false_path -from [exec touch {sentinel}]\n"
     r = _imp(sdc)
     # Must not have executed
     assert not sentinel.exists(), "importer executed an exec!"
     # A SECURITY diagnostic must exist
     sevs = [d for d in r.diagnostics if d.severity == DiagnosticSeverity.SECURITY]
-    assert sevs, f"expected SECURITY diagnostic; got {[(d.severity, d.code, d.message) for d in r.diagnostics]}"
+    assert sevs, (
+        f"expected SECURITY diagnostic; got {[(d.severity, d.code, d.message) for d in r.diagnostics]}"
+    )
 
 
 def test_security_top_level_forbidden():
@@ -477,21 +483,30 @@ def test_determinism_cross_process():
         print(res.constraint_set.to_canonical_json(indent=None))
     """)
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
-        f.write(worker); script = f.name
+        f.write(worker)
+        script = f.name
     src = str(Path(__file__).resolve().parents[2] / "src")
     try:
+
         def run():
-            p = subprocess.run([sys.executable, script, src], capture_output=True, text=True, check=True, timeout=30)
+            p = subprocess.run(
+                [sys.executable, script, src],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            )
             return p.stdout.strip()
-        a = run(); b = run()
+
+        a = run()
+        b = run()
         assert a == b, "canonical JSON differs between processes"
     finally:
         Path(script).unlink(missing_ok=True)
 
 
 def test_multi_constraint_semantics_min_max_rise_fall_distinct():
-    sdc = ("set_input_delay -clock clk -max 2 data_in\n"
-           "set_input_delay -clock clk -min 1 data_in\n")
+    sdc = "set_input_delay -clock clk -max 2 data_in\nset_input_delay -clock clk -min 1 data_in\n"
     r = _imp(sdc)
     cs = _all(r.constraint_set, ConstraintType.SET_INPUT_DELAY)
     # 2 for max (rise+fall) + 2 for min (rise+fall) = 4
@@ -520,8 +535,11 @@ def test_adversarial_unmatched_brace_recovers():
     # Should not crash; may emit diagnostics
     assert isinstance(r.diagnostics, list)
     # Second command should still parse successfully
-    assert any(c.values.get("name") == "clk2" for c in r.constraint_set
-               if c.type == ConstraintType.CREATE_CLOCK)
+    assert any(
+        c.values.get("name") == "clk2"
+        for c in r.constraint_set
+        if c.type == ConstraintType.CREATE_CLOCK
+    )
 
 
 def test_adversarial_unmatched_bracket_recovers():
@@ -548,9 +566,11 @@ def test_adversarial_unknown_switches_preserved_partial():
 
 
 def test_import_status_counts():
-    sdc = ("create_clock -name clk -period 10 [get_ports clk]\n"
-           "bogus_cmd x y\n"
-           "create_clock -name clk2 [get_ports clk2]\n")
+    sdc = (
+        "create_clock -name clk -period 10 [get_ports clk]\n"
+        "bogus_cmd x y\n"
+        "create_clock -name clk2 [get_ports clk2]\n"
+    )
     r = _imp(sdc)
     counts = r.counts()
     assert counts["complete"] >= 1
@@ -582,6 +602,7 @@ def simple_design():
     """Minimal design with clk, rst_n, d_in, clk_b ports and two registers."""
     from rca.parser.slang_adapter import SlangAdapter
     from rca.timing_model import TimingGraph
+
     sv = textwrap.dedent("""\
         module m(input clk, rst_n, d_in, clk_b, output reg q_a, q_b);
             always_ff @(posedge clk or negedge rst_n) if (!rst_n) q_a<=1'b0; else q_a<=d_in;
@@ -589,11 +610,13 @@ def simple_design():
         endmodule
     """)
     with tempfile.NamedTemporaryFile("w", suffix=".sv", delete=False) as f:
-        f.write(sv); p = f.name
+        f.write(sv)
+        p = f.name
     try:
         d = SlangAdapter().parse([p], top="m")
     finally:
         Path(p).unlink(missing_ok=True)
-    tg = TimingGraph.build(d, user_clocks=[{"name": "clk", "fixed": True,
-                                            "port": None, "period_seconds": 10e-9}])
+    tg = TimingGraph.build(
+        d, user_clocks=[{"name": "clk", "fixed": True, "port": None, "period_seconds": 10e-9}]
+    )
     return d, tg

@@ -6,8 +6,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..utils.units import nearly_equal
-
 
 def excess_setup_margin(wns_seconds: float | None, required_ns: float = 0.0) -> float:
     """Manual §81: excess_margin = max(0, WNS - required_operating_margin)."""

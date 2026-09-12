@@ -20,8 +20,9 @@ We retain:
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..utils.enums import CollectionKind, ResolutionStatus
 
@@ -73,14 +74,14 @@ class TargetCollection:
         }
 
     @classmethod
-    def literal(cls, name: str) -> "TargetCollection":
+    def literal(cls, name: str) -> TargetCollection:
         return cls(collection_kind=CollectionKind.LITERAL,
                    expression=name, pattern=name,
                    resolved_objects=[name], resolution_status=ResolutionStatus.RESOLVED,
                    raw=name)
 
     @classmethod
-    def unresolved_expr(cls, expr: str, reason: str = "unsupported Tcl expression") -> "TargetCollection":
+    def unresolved_expr(cls, expr: str, reason: str = "unsupported Tcl expression") -> TargetCollection:
         return cls(collection_kind=CollectionKind.EXPR,
                    expression=expr, resolution_status=ResolutionStatus.UNRESOLVED,
                    unresolved_reason=reason, raw=expr)
@@ -141,7 +142,10 @@ def _parse_collection_expr(inner: str, raw: str) -> TargetCollection:
     # Import here to avoid a module-init cycle with .parser.
     from .parser import (
         SdcParser as _InnerSdcParser,
-        _BraceValue, _stringify_token, _split_braced_list,
+    )
+    from .parser import (
+        _BraceValue,
+        _split_braced_list,
     )
     inner = inner.strip()
     if not inner:
@@ -185,7 +189,6 @@ def _parse_collection_expr(inner: str, raw: str) -> TargetCollection:
         )
     kind = _GET_KIND_MAP[cmd.command]
     # Separate pattern/filter options.
-    args: list[str] = []
     patterns: list[str] = []
     filters: dict[str, Any] = {}
     # Patterns are positional words (after the command name) that are
@@ -245,8 +248,8 @@ class DesignResolver:
     (all resolutions return UNRESOLVED with the pattern preserved).
     """
 
-    def __init__(self, design: "Design | None" = None,
-                 tg: "TimingGraph | None" = None) -> None:
+    def __init__(self, design: Design | None = None,
+                 tg: TimingGraph | None = None) -> None:
         self.design = design
         self.tg = tg
         self._port_index: set[str] = set()

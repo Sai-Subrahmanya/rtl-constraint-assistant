@@ -1,9 +1,10 @@
 """Tests for the Universal Constraint Model, SDC generation, and validation."""
 import pytest
+
 from rca.constraint_model import ConstraintSet
-from rca.sdc import SDCParser, get_backend
+from rca.sdc import get_backend
 from rca.sdc.generic import GenericSDCBackend
-from rca.utils.enums import ConstraintType, SourceKind, Confidence, SafeMode
+from rca.utils.enums import Confidence, SafeMode, SourceKind
 
 
 def _make_cset():

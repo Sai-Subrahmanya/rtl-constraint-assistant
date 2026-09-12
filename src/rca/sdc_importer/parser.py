@@ -17,16 +17,19 @@ target collections against a Design; that's Stage C.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from ..utils.enums import DiagnosticSeverity
 from .lexer import (
-    BWORD, CMD_SUBST, COMMENT, LexError, LexToken, NEWLINE, QWORD, SEMI, WORD,
-    TclLexer, _fold_line_continuations,
+    BWORD,
+    CMD_SUBST,
+    COMMENT,
+    QWORD,
+    WORD,
+    LexToken,
+    TclLexer,
 )
-
 
 # ---------------------------------------------------------------------------
 # Data classes

@@ -19,8 +19,12 @@ from rca.constraint_model import Constraint, ConstraintSet, PathSelector
 from rca.sdc import get_backend
 from rca.sdc.generation.result import GenerationStatus
 from rca.utils.enums import (
-    ConstraintStatus, ConstraintType, Confidence, OptimizationStatus,
-    SafeMode, SourceKind,
+    Confidence,
+    ConstraintStatus,
+    ConstraintType,
+    OptimizationStatus,
+    SafeMode,
+    SourceKind,
 )
 
 
@@ -89,7 +93,6 @@ def _():
     for e, mm, ed in [("in", "max", 2.0), ("in", "min", 0.5),
                       ("out", "max", 3.0), ("out", "min", 0.8)]:
         t = ConstraintType.SET_INPUT_DELAY if e == "in" else ConstraintType.SET_OUTPUT_DELAY
-        cmd = "set_input_delay" if e == "in" else "set_output_delay"
         cs.add(_c(id=f"{e.upper()}{mm}", type=t,
                   target_objects=["d"], clock_refs=["clk"],
                   values={"delay": ed * 1e-9, "min_max": mm}))

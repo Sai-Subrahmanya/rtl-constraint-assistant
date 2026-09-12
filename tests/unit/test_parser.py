@@ -1,6 +1,7 @@
 """Parser / design-model tests for the simple counter (Manual §60)."""
+
 import pytest
-from pathlib import Path
+
 from rca.parser import SlangAdapter
 
 COUNTER = """

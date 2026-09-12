@@ -26,14 +26,24 @@ from .test_constraint_release import _clean_inputs, _released, _ucm
 
 def _package(tmp_path: Path, *, sdc: bool = False) -> tuple[Path, object]:
     tmp_path.mkdir(parents=True, exist_ok=True)
-    cset = _ucm(); args = _clean_inputs(cset)
+    cset = _ucm()
+    args = _clean_inputs(cset)
     if sdc:
-        path = tmp_path / "existing.sdc"; path.write_text("create_clock -period 10 clk\n", encoding="utf-8")
+        path = tmp_path / "existing.sdc"
+        path.write_text("create_clock -period 10 clk\n", encoding="utf-8")
         args["sdc_path"] = path
     release = _released(cset, **args)
     root = tmp_path / "package"
-    create_release_package(release, cset, root, review=args["review"], readiness=args["readiness"],
-                           validation=args["validation"], lineage=args["lineage"], sdc_path=args.get("sdc_path"))
+    create_release_package(
+        release,
+        cset,
+        root,
+        review=args["review"],
+        readiness=args["readiness"],
+        validation=args["validation"],
+        lineage=args["lineage"],
+        sdc_path=args.get("sdc_path"),
+    )
     return root, release
 
 
@@ -43,11 +53,15 @@ def _policy(**kwargs):
 
 def test_generic_assessment_consumes_verified_package_without_mutating_it(tmp_path: Path):
     root, _ = _package(tmp_path)
-    before = {item.relative_to(root): item.read_bytes() for item in root.rglob("*") if item.is_file()}
+    before = {
+        item.relative_to(root): item.read_bytes() for item in root.rglob("*") if item.is_file()
+    }
     assessment = assess_constraint_handoff(root, policy=_policy())
     assert assessment.handoff.status == HandoffStatus.HANDOFF_READY
     assert assessment.handoff_possible
-    assert {item.relative_to(root): item.read_bytes() for item in root.rglob("*") if item.is_file()} == before
+    assert {
+        item.relative_to(root): item.read_bytes() for item in root.rglob("*") if item.is_file()
+    } == before
 
 
 def test_assessment_and_identity_are_deterministic(tmp_path: Path):
@@ -55,7 +69,9 @@ def test_assessment_and_identity_are_deterministic(tmp_path: Path):
     first = assess_constraint_handoff(root, policy=_policy())
     second = assess_constraint_handoff(root, policy=_policy())
     assert first.handoff.id == second.handoff.id
-    assert json.dumps(first.to_dict(), sort_keys=True) == json.dumps(second.to_dict(), sort_keys=True)
+    assert json.dumps(first.to_dict(), sort_keys=True) == json.dumps(
+        second.to_dict(), sort_keys=True
+    )
 
 
 def test_preparation_is_explicit_immutable_successor_projection(tmp_path: Path):
@@ -91,24 +107,35 @@ def test_required_sdc_is_only_satisfied_by_preexisting_packaged_sdc(tmp_path: Pa
     missing = assess_constraint_handoff(root, policy=_policy(require_sdc=True))
     assert missing.handoff.status == HandoffStatus.FAILED
     root, _ = _package(tmp_path / "with-sdc", sdc=True)
-    supplied = assess_constraint_handoff(root, policy=_policy(require_sdc=True, sdc_dialect="GENERIC"))
+    supplied = assess_constraint_handoff(
+        root, policy=_policy(require_sdc=True, sdc_dialect="GENERIC")
+    )
     assert supplied.handoff.status == HandoffStatus.HANDOFF_READY
 
 
-@pytest.mark.parametrize("target", [HandoffTarget.OPENSTA_OPENROAD, HandoffTarget.SYNOPSYS, HandoffTarget.CADENCE])
-def test_vendor_targets_require_explicit_compatible_sdc_dialect(tmp_path: Path, target: HandoffTarget):
+@pytest.mark.parametrize(
+    "target", [HandoffTarget.OPENSTA_OPENROAD, HandoffTarget.SYNOPSYS, HandoffTarget.CADENCE]
+)
+def test_vendor_targets_require_explicit_compatible_sdc_dialect(
+    tmp_path: Path, target: HandoffTarget
+):
     root, _ = _package(tmp_path, sdc=True)
     unknown = assess_constraint_handoff(root, target=target, policy=_policy())
     assert unknown.handoff.status == HandoffStatus.FAILED
-    dialect = {HandoffTarget.OPENSTA_OPENROAD: "OPENSTA", HandoffTarget.SYNOPSYS: "SYNOPSYS",
-               HandoffTarget.CADENCE: "CADENCE"}[target]
+    dialect = {
+        HandoffTarget.OPENSTA_OPENROAD: "OPENSTA",
+        HandoffTarget.SYNOPSYS: "SYNOPSYS",
+        HandoffTarget.CADENCE: "CADENCE",
+    }[target]
     compatible = assess_constraint_handoff(root, target=target, policy=_policy(sdc_dialect=dialect))
     assert compatible.handoff.status == HandoffStatus.HANDOFF_READY
 
 
 def test_incompatible_vendor_dialect_and_future_vendor_fail_closed(tmp_path: Path):
     root, _ = _package(tmp_path, sdc=True)
-    incompatible = assess_constraint_handoff(root, target="SYNOPSYS", policy=_policy(sdc_dialect="CADENCE"))
+    incompatible = assess_constraint_handoff(
+        root, target="SYNOPSYS", policy=_policy(sdc_dialect="CADENCE")
+    )
     future = assess_constraint_handoff(root, target="FUTURE_VENDOR", policy=_policy())
     assert incompatible.handoff.status == HandoffStatus.FAILED
     assert future.handoff.status == HandoffStatus.FAILED
@@ -134,7 +161,9 @@ def test_handoff_verification_detects_tampered_identity_scope_and_artifacts(tmp_
 
 def test_required_artifact_kind_is_checked_against_package_members(tmp_path: Path):
     root, _ = _package(tmp_path)
-    assessment = assess_constraint_handoff(root, policy=_policy(required_artifact_kinds=("timing_report",)))
+    assessment = assess_constraint_handoff(
+        root, policy=_policy(required_artifact_kinds=("timing_report",))
+    )
     assert assessment.handoff.status == HandoffStatus.FAILED
     assert any(item.category == "ARTIFACT" for item in assessment.issues)
 

@@ -20,11 +20,11 @@ selection from configuration.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from ..constraint_model import Constraint, ConstraintSet, Scenario
-from .model import FEASIBLE, ScenarioQoR
 
 
 @dataclass

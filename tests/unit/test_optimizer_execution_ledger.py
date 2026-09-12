@@ -104,12 +104,13 @@ def _run(tmp_path: Path, *, workers: int = 2, max_runs: int = 5,
     cfg = _cfg(tmp_path, workers=workers, max_runs=max_runs,
                max_iterations=max_iterations, mcmm=mcmm)
     if callback is None:
-        callback = lambda candidate, work_dir: {
-            "qor": _qor(candidate.id),
-            "cache_key": f"input-only-{candidate.constraint_model_hash}",
-            "cache_status": "MISS",
-            "run_id": f"run-{candidate.id}",
-        }
+        def callback(candidate, work_dir):
+            return {
+                    "qor": _qor(candidate.id),
+                    "cache_key": f"input-only-{candidate.constraint_model_hash}",
+                    "cache_status": "MISS",
+                    "run_id": f"run-{candidate.id}",
+                }
     optimizer = Optimizer(cfg, evaluate_fn=callback, work_dir=tmp_path / "tasks")
     result = optimizer.run(_cset(mcmm=mcmm))
     assert result.execution_ledger is not None
@@ -311,9 +312,10 @@ def test_budget_and_controlled_deadline_skips_are_explicit(tmp_path, monkeypatch
 
     import rca.optimizer.base as optimizer_base
 
-    callback = lambda candidate, work_dir: {
-        "qor": _qor(candidate.id), "cache_status": "MISS", "run_id": candidate.id,
-    }
+    def callback(candidate, work_dir):
+        return {
+            "qor": _qor(candidate.id), "cache_status": "MISS", "run_id": candidate.id,
+        }
     deadline_cfg = _cfg(tmp_path / "deadline", workers=2, max_runs=5)
     optimizer = Optimizer(deadline_cfg, evaluate_fn=callback, work_dir=tmp_path / "deadline" / "tasks")
     original_from_config = optimizer_base.OptimizationBudget.from_config
@@ -365,12 +367,13 @@ def test_mcmm_ledger_accounts_complete_candidate_scenarios_and_cache_observation
 
 def test_repeated_runs_have_equivalent_ledgers_after_invocation_locator_normalization(tmp_path):
     cfg = _cfg(tmp_path, workers=3)
-    callback = lambda candidate, work_dir: {
-        "qor": _qor(candidate.id),
-        "cache_key": f"input-only-{candidate.constraint_model_hash}",
-        "cache_status": "MISS",
-        "run_id": f"run-{candidate.id}",
-    }
+    def callback(candidate, work_dir):
+        return {
+            "qor": _qor(candidate.id),
+            "cache_key": f"input-only-{candidate.constraint_model_hash}",
+            "cache_status": "MISS",
+            "run_id": f"run-{candidate.id}",
+        }
     optimizer = Optimizer(cfg, evaluate_fn=callback, work_dir=tmp_path / "tasks")
     first = optimizer.run(_cset())
     second = optimizer.run(_cset())

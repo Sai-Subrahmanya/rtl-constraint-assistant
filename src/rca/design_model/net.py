@@ -11,9 +11,7 @@ signal connectivity only (Manual §16, §17, Step 1 requirement A).
 
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ..utils.enums import DependencyKind
 from .module import SourceLocation

@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..constraint_model import ConstraintSet, Scenario, stable_hash_cset
-from ..utils.hashing import hash_file, stable_hash
+from ..utils.hashing import stable_hash
 
 # Canonical MCMM cache-identity versioning policy (Step 12 §10, §5).
 # This single constant is used by every scenario-aware cache key so the code,

@@ -20,12 +20,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Iterable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..utils.enums import PowerStatus
 
 if TYPE_CHECKING:
-    from ..optimizer.candidate import Candidate
+    pass
 
 
 class Direction(Enum):
@@ -43,14 +43,13 @@ class ObjectiveSpec:
 
 
 OBJECTIVE_SPECS: dict[str, ObjectiveSpec] = {
-    "setup_wns":   ObjectiveSpec("setup_wns",   Direction.MAXIMIZE, "timing"),
-    "hold_wns":    ObjectiveSpec("hold_wns",    Direction.MAXIMIZE, "timing"),
-    "setup_tns":   ObjectiveSpec("setup_tns",   Direction.MAXIMIZE, "timing"),
-    "hold_tns":    ObjectiveSpec("hold_tns",    Direction.MAXIMIZE, "timing"),
-    "area":        ObjectiveSpec("area",        Direction.MINIMIZE, "area"),
-    "power":       ObjectiveSpec("power",       Direction.MINIMIZE, "power"),
-    "constraint_quality":
-        ObjectiveSpec("constraint_quality", Direction.MAXIMIZE, "quality"),
+    "setup_wns": ObjectiveSpec("setup_wns", Direction.MAXIMIZE, "timing"),
+    "hold_wns": ObjectiveSpec("hold_wns", Direction.MAXIMIZE, "timing"),
+    "setup_tns": ObjectiveSpec("setup_tns", Direction.MAXIMIZE, "timing"),
+    "hold_tns": ObjectiveSpec("hold_tns", Direction.MAXIMIZE, "timing"),
+    "area": ObjectiveSpec("area", Direction.MINIMIZE, "area"),
+    "power": ObjectiveSpec("power", Direction.MINIMIZE, "power"),
+    "constraint_quality": ObjectiveSpec("constraint_quality", Direction.MAXIMIZE, "quality"),
     # NOTE: margin_utilization is intentionally NOT a Pareto objective.
     # Consuming slack is not a benefit by itself; it is a secondary tie-break
     # / tradeoff signal used only after Pareto filtering and priority ordering.
@@ -70,6 +69,7 @@ class CompareResult(Enum):
 
 # ---------- Feasibility ----------
 
+
 @dataclass
 class FeasibilityResult:
     feasible: bool
@@ -80,13 +80,17 @@ class FeasibilityResult:
     exploratory: bool = False
 
 
-def classify_feasibility(qor, *, required_setup_ns: float = 0.0,
-                         required_hold_ns: float = 0.0,
-                         allow_unsafe_exceptions: bool = False
-                         ) -> FeasibilityResult:
+def classify_feasibility(
+    qor,
+    *,
+    required_setup_ns: float = 0.0,
+    required_hold_ns: float = 0.0,
+    allow_unsafe_exceptions: bool = False,
+) -> FeasibilityResult:
     if qor is None:
-        return FeasibilityResult(False, True, "blocked_no_qor",
-                                 ["No QoR (experiment did not complete)."])
+        return FeasibilityResult(
+            False, True, "blocked_no_qor", ["No QoR (experiment did not complete)."]
+        )
     diag: list[str] = []
     unsafe = False
     exploratory = False
@@ -94,13 +98,13 @@ def classify_feasibility(qor, *, required_setup_ns: float = 0.0,
         diag.append("setup WNS unavailable")
         return FeasibilityResult(False, False, "setup_unknown", diag)
     if qor.setup_wns < required_setup_ns * 1e-9 - 1e-12:
-        diag.append(f"setup WNS {qor.setup_wns*1e9:.3f}ns < required {required_setup_ns}ns")
+        diag.append(f"setup WNS {qor.setup_wns * 1e9:.3f}ns < required {required_setup_ns}ns")
         return FeasibilityResult(False, False, "setup_violation", diag)
     if qor.hold_wns is None:
         diag.append("hold WNS unavailable")
         return FeasibilityResult(False, False, "hold_unknown", diag)
     if qor.hold_wns < required_hold_ns * 1e-9 - 1e-12:
-        diag.append(f"hold WNS {qor.hold_wns*1e9:.3f}ns < required {required_hold_ns}ns")
+        diag.append(f"hold WNS {qor.hold_wns * 1e9:.3f}ns < required {required_hold_ns}ns")
         return FeasibilityResult(False, False, "hold_violation", diag)
     val_err = getattr(qor, "validation_errors", 0) or 0
     if val_err > 0:
@@ -115,11 +119,11 @@ def classify_feasibility(qor, *, required_setup_ns: float = 0.0,
         exploratory = True
     if getattr(qor, "tool", "") == "error":
         return FeasibilityResult(False, True, "tool_error", list(getattr(qor, "notes", [])))
-    return FeasibilityResult(True, False, "", diag, unsafe=unsafe,
-                             exploratory=exploratory)
+    return FeasibilityResult(True, False, "", diag, unsafe=unsafe, exploratory=exploratory)
 
 
 # ---------- Objective vector ----------
+
 
 @dataclass
 class AreaValue:
@@ -140,15 +144,19 @@ def _area_value(qor) -> AreaValue:
 def _raw_metric(qor, name: str) -> tuple[float | None, str | None]:
     if qor is None:
         return None, None
-    if name == "setup_wns":   return qor.setup_wns, None
-    if name == "hold_wns":    return qor.hold_wns, None
+    if name == "setup_wns":
+        return qor.setup_wns, None
+    if name == "hold_wns":
+        return qor.hold_wns, None
     if name == "setup_tns":
-        if qor.setup_tns is not None: return qor.setup_tns, None
+        if qor.setup_tns is not None:
+            return qor.setup_tns, None
         if qor.setup_wns is not None and qor.setup_wns >= 0:
             return 0.0, None
         return None, None
     if name == "hold_tns":
-        if qor.hold_tns is not None: return qor.hold_tns, None
+        if qor.hold_tns is not None:
+            return qor.hold_tns, None
         if qor.hold_wns is not None and qor.hold_wns >= 0:
             return 0.0, None
         return None, None
@@ -171,19 +179,29 @@ def _raw_metric(qor, name: str) -> tuple[float | None, str | None]:
 
 def objective_vector(qor) -> dict[str, tuple[float | None, str | None]]:
     vec: dict[str, tuple[float | None, str | None]] = {}
-    for name in ("setup_wns", "hold_wns", "setup_tns", "hold_tns",
-                 "area", "power", "constraint_quality"):
+    for name in (
+        "setup_wns",
+        "hold_wns",
+        "setup_tns",
+        "hold_tns",
+        "area",
+        "power",
+        "constraint_quality",
+    ):
         vec[name] = _raw_metric(qor, name)
     return vec
 
 
 # ---------- Margins ----------
 
-def compute_margin(qor, required_setup_ns: float = 0.0,
-                   required_hold_ns: float = 0.0,
-                   baseline_setup_wns: float | None = None,
-                   baseline_hold_wns: float | None = None
-                   ) -> dict[str, float | None]:
+
+def compute_margin(
+    qor,
+    required_setup_ns: float = 0.0,
+    required_hold_ns: float = 0.0,
+    baseline_setup_wns: float | None = None,
+    baseline_hold_wns: float | None = None,
+) -> dict[str, float | None]:
     """Candidate binding headroom + margin utilization (diagnostic).
 
     margin_headroom_ns (diagnostic, ns):
@@ -263,8 +281,12 @@ def compute_margin(qor, required_setup_ns: float = 0.0,
     # Utilization: requires BOTH setup and hold dimensions to be known and
     # positive at baseline. Otherwise None.
     utilization: float | None = None
-    if (baseline_setup_wns is not None and baseline_hold_wns is not None
-            and qor.setup_wns is not None and qor.hold_wns is not None):
+    if (
+        baseline_setup_wns is not None
+        and baseline_hold_wns is not None
+        and qor.setup_wns is not None
+        and qor.hold_wns is not None
+    ):
         b_setup_hr = max(0.0, baseline_setup_wns - req_s) * 1e9
         b_hold_hr = max(0.0, baseline_hold_wns - req_h) * 1e9
         # Need positive headroom on BOTH dimensions to speak meaningfully
@@ -283,6 +305,7 @@ def compute_margin(qor, required_setup_ns: float = 0.0,
 
 # ---------- Comparison & dominance ----------
 
+
 def _cmp_metric(name: str, a_entry, b_entry) -> CompareResult:
     av, atag = a_entry if isinstance(a_entry, tuple) else (a_entry, None)
     bv, btag = b_entry if isinstance(b_entry, tuple) else (b_entry, None)
@@ -291,8 +314,7 @@ def _cmp_metric(name: str, a_entry, b_entry) -> CompareResult:
         if atag != btag:
             return CompareResult.INCOMPARABLE
         if atag == AREA_UNKNOWN:
-            return (CompareResult.EQUAL if av is None and bv is None
-                    else CompareResult.INCOMPARABLE)
+            return CompareResult.EQUAL if av is None and bv is None else CompareResult.INCOMPARABLE
     if av is None or bv is None:
         if spec.unknown_conservative:
             if av is None and bv is None:
@@ -308,7 +330,8 @@ def _cmp_metric(name: str, a_entry, b_entry) -> CompareResult:
 
 
 def compare_objectives(a, b) -> dict[str, CompareResult]:
-    va = objective_vector(a.qor); vb = objective_vector(b.qor)
+    va = objective_vector(a.qor)
+    vb = objective_vector(b.qor)
     return {k: _cmp_metric(k, va.get(k), vb.get(k)) for k in OBJECTIVE_SPECS}
 
 
@@ -346,14 +369,18 @@ def is_dominating(a, b) -> bool:
         return False
     if _is_unsafe(a) or _is_unsafe(b):
         return False
-    if _scenario_field(a, qa, "scenario", "default") != _scenario_field(b, qb, "scenario", "default"):
+    if _scenario_field(a, qa, "scenario", "default") != _scenario_field(
+        b, qb, "scenario", "default"
+    ):
         return False
     if _scenario_field(a, qa, "corner", "default") != _scenario_field(b, qb, "corner", "default"):
         return False
     if getattr(qa, "flow_stage", "synthesis_sta") != getattr(qb, "flow_stage", "synthesis_sta"):
         return False
-    va = objective_vector(qa); vb = objective_vector(qb)
-    any_better = False; all_ge = True
+    va = objective_vector(qa)
+    vb = objective_vector(qb)
+    any_better = False
+    all_ge = True
     for k in OBJECTIVE_SPECS:
         r = _cmp_metric(k, va.get(k), vb.get(k))
         # Conservative baseline policy: ANY incomparable objective blocks
@@ -363,7 +390,8 @@ def is_dominating(a, b) -> bool:
         if r == CompareResult.INCOMPARABLE:
             return False
         if r == CompareResult.WORSE:
-            all_ge = False; break
+            all_ge = False
+            break
         if r == CompareResult.BETTER:
             any_better = True
     return all_ge and any_better
@@ -373,10 +401,12 @@ def pareto_front(candidates) -> list:
     cands = [c for c in candidates if _feasible_bool(c) and not _is_unsafe(c)]
     front: list = []
     for c in cands:
-        dominated = False; new_front: list = []
+        dominated = False
+        new_front: list = []
         for existing in front:
             if is_dominating(existing, c):
-                dominated = True; new_front.append(existing)
+                dominated = True
+                new_front.append(existing)
             elif is_dominating(c, existing):
                 continue
             else:
@@ -385,13 +415,15 @@ def pareto_front(candidates) -> list:
             new_front.append(c)
         front = new_front
     for c in front:
-        c.decision = _decision("PARETO"); c.pareto_member = True
+        c.decision = _decision("PARETO")
+        c.pareto_member = True
     return front
 
 
 def _decision(s: str):
     try:
         from ..utils.enums import CandidateDecision
+
         return getattr(CandidateDecision, s, CandidateDecision.PARETO)
     except Exception:
         return s
@@ -415,8 +447,10 @@ def _area_scalar(q):
     """Return a numeric area value ONLY when source is real or proxy; None
     otherwise. Used for priority comparison when both sides match source."""
     s = _area_source(q)
-    if s == "real": return float(q.area)
-    if s == "proxy": return float(q.area_proxy)
+    if s == "real":
+        return float(q.area)
+    if s == "proxy":
+        return float(q.area_proxy)
     return None
 
 
@@ -443,8 +477,7 @@ def _cmp_timing(qa, qb) -> int | None:
     on both sides (setup+hold). If any side is missing, timing is
     INCOMPARABLE (skip) — we do not fake -1e18 sentinels."""
     # Need both setup and hold on both sides to rank on timing.
-    if (qa.setup_wns is None or qa.hold_wns is None or
-        qb.setup_wns is None or qb.hold_wns is None):
+    if qa.setup_wns is None or qa.hold_wns is None or qb.setup_wns is None or qb.hold_wns is None:
         return None
     # Lexicographic within timing: setup first, then hold. A missing component
     # on either side already returned None above.
@@ -474,8 +507,10 @@ def _cmp_power(qa, qb) -> int | None:
     if qa.power is None or qb.power is None:
         return None
     usable_power_statuses = {PowerStatus.AVAILABLE.value, PowerStatus.ESTIMATED.value}
-    if (getattr(qa, "power_status", None) not in usable_power_statuses or
-            getattr(qb, "power_status", None) not in usable_power_statuses):
+    if (
+        getattr(qa, "power_status", None) not in usable_power_statuses
+        or getattr(qb, "power_status", None) not in usable_power_statuses
+    ):
         return None
     return _cmp_lower_better(qa.power, qb.power)
 
@@ -494,7 +529,8 @@ def _area_for_score(q, bq) -> float:
     sa, sb = _area_source(q), _area_source(bq)
     if sa != sb or sa == "unknown":
         return 0.0
-    bv = _area_scalar(bq); v = _area_scalar(q)
+    bv = _area_scalar(bq)
+    v = _area_scalar(q)
     if bv is None or v is None or bv == 0:
         return 0.0
     return 1.0 - v / bv
@@ -504,21 +540,28 @@ def _ordered_buckets(priorities) -> list[tuple[str, float]]:
     """Return [(metric_name, weight), ...] sorted by descending weight. OFF
     weights are dropped. Metrics: 'timing', 'quality', 'area', 'power'."""
     from ..utils.enums import Priority
+
     weights = {
-        "timing":  PRIORITY_WEIGHTS.get(_pstr(priorities.get("timing", Priority.HIGH)), 0.0),
-        "quality": PRIORITY_WEIGHTS.get(_pstr(priorities.get("constraint_quality", Priority.LOW)), 0.0),
-        "area":    PRIORITY_WEIGHTS.get(_pstr(priorities.get("area", Priority.MEDIUM)), 0.0),
-        "power":   PRIORITY_WEIGHTS.get(_pstr(priorities.get("power", Priority.MEDIUM)), 0.0),
+        "timing": PRIORITY_WEIGHTS.get(_pstr(priorities.get("timing", Priority.HIGH)), 0.0),
+        "quality": PRIORITY_WEIGHTS.get(
+            _pstr(priorities.get("constraint_quality", Priority.LOW)), 0.0
+        ),
+        "area": PRIORITY_WEIGHTS.get(_pstr(priorities.get("area", Priority.MEDIUM)), 0.0),
+        "power": PRIORITY_WEIGHTS.get(_pstr(priorities.get("power", Priority.MEDIUM)), 0.0),
     }
     items = sorted([(w, name) for name, w in weights.items()], key=lambda x: -x[0])
     return [(name, w) for w, name in items if w > 0]
 
 
 def _cmp_metric_by_name(name, qa, qb) -> int | None:
-    if name == "timing":  return _cmp_timing(qa, qb)
-    if name == "quality": return _cmp_quality(qa, qb)
-    if name == "area":    return _cmp_area(qa, qb)
-    if name == "power":   return _cmp_power(qa, qb)
+    if name == "timing":
+        return _cmp_timing(qa, qb)
+    if name == "quality":
+        return _cmp_quality(qa, qb)
+    if name == "area":
+        return _cmp_area(qa, qb)
+    if name == "power":
+        return _cmp_power(qa, qb)
     return None
 
 
@@ -539,14 +582,18 @@ def _priority_compare(a, b, baseline, priorities) -> int:
       4. Deterministic candidate-id tie-break.
     """
     qa, qb = a.qor, b.qor
-    fa = (qa is not None and _feasible_bool(a) and not _is_unsafe(a))
-    fb = (qb is not None and _feasible_bool(b) and not _is_unsafe(b))
-    if fa and not fb: return 1
-    if fb and not fa: return -1
+    fa = qa is not None and _feasible_bool(a) and not _is_unsafe(a)
+    fb = qb is not None and _feasible_bool(b) and not _is_unsafe(b)
+    if fa and not fb:
+        return 1
+    if fb and not fa:
+        return -1
     if not fa and not fb:
         ia, ib = getattr(a, "id", ""), getattr(b, "id", "")
-        if ia < ib: return 1
-        if ia > ib: return -1
+        if ia < ib:
+            return 1
+        if ia > ib:
+            return -1
         return 0
 
     for name, _w in _ordered_buckets(priorities):
@@ -563,18 +610,25 @@ def _priority_compare(a, b, baseline, priorities) -> int:
     # Deterministic id tie-break: smaller id wins (prefer first-issued/baseline).
     # cmp returns +1 when `a` is preferred; if ia < ib then a is preferred.
     ia, ib = getattr(a, "id", ""), getattr(b, "id", "")
-    if ia < ib: return 1
-    if ia > ib: return -1
+    if ia < ib:
+        return 1
+    if ia > ib:
+        return -1
     return 0
 
 
 def select_final(front, baseline, priorities):
     from functools import cmp_to_key
+
     if not front:
         return None
     pool = list(front)
-    if baseline is not None and baseline not in pool and _feasible_bool(baseline) \
-            and not _is_unsafe(baseline):
+    if (
+        baseline is not None
+        and baseline not in pool
+        and _feasible_bool(baseline)
+        and not _is_unsafe(baseline)
+    ):
         pool.append(baseline)
     safe = [c for c in pool if not _is_unsafe(c) and _feasible_bool(c)]
     if not safe:
@@ -600,10 +654,13 @@ def scalar_score(c, baseline, priorities) -> float:
         # Power contributes only when known on both sides (conservative).
         # UNKNOWN power is not zero and not a free win.
         usable_power_statuses = {PowerStatus.AVAILABLE.value, PowerStatus.ESTIMATED.value}
-        if (q.power is not None and bq.power is not None
-                and getattr(q, "power_status", None) in usable_power_statuses
-                and getattr(bq, "power_status", None) in usable_power_statuses
-                and bq.power != 0):
+        if (
+            q.power is not None
+            and bq.power is not None
+            and getattr(q, "power_status", None) in usable_power_statuses
+            and getattr(bq, "power_status", None) in usable_power_statuses
+            and bq.power != 0
+        ):
             s += pw * (1.0 - q.power / bq.power)
     # NOTE: margin_utilization is deliberately NOT added to scalar_score —
     # consuming slack is not a benefit. It is a diagnostic, consulted only as
@@ -615,25 +672,39 @@ def explanation_for(final, baseline, front, all_candidates, priorities) -> dict[
     q = final.qor
     bq = baseline.qor if baseline and getattr(baseline, "qor", None) else None
 
-    def _ns(v): return round(v*1e9, 4) if v is not None else None
+    def _ns(v):
+        return round(v * 1e9, 4) if v is not None else None
+
     delta: dict[str, Any] = {}
     if bq is not None and q is not None:
-        for k in ("setup_wns","hold_wns","area","power","margin_headroom_ns",
-                  "margin_utilization","constraint_quality"):
-            bv = getattr(bq, k, None); fv = getattr(q, k, None)
+        for k in (
+            "setup_wns",
+            "hold_wns",
+            "area",
+            "power",
+            "margin_headroom_ns",
+            "margin_utilization",
+            "constraint_quality",
+        ):
+            bv = getattr(bq, k, None)
+            fv = getattr(q, k, None)
             if k.endswith("_wns") or k == "margin_headroom_ns":
-                bv_ns = _ns(bv); fv_ns = _ns(fv)
+                bv_ns = _ns(bv)
+                fv_ns = _ns(fv)
                 if bv_ns is None or fv_ns is None:
                     delta[k] = {"final": fv_ns, "baseline": bv_ns}
                 else:
-                    delta[k] = {"final": fv_ns, "baseline": bv_ns, "delta_ns": round(fv_ns-bv_ns, 4)}
+                    delta[k] = {
+                        "final": fv_ns,
+                        "baseline": bv_ns,
+                        "delta_ns": round(fv_ns - bv_ns, 4),
+                    }
             else:
                 if bv is None or fv is None:
                     delta[k] = {"final": fv, "baseline": bv}
                 else:
-                    delta[k] = {"final": fv, "baseline": bv, "delta": round(fv-bv, 6)}
-        delta["area_source"] = {"final": _area_value(q).source,
-                                "baseline": _area_value(bq).source}
+                    delta[k] = {"final": fv, "baseline": bv, "delta": round(fv - bv, 6)}
+        delta["area_source"] = {"final": _area_value(q).source, "baseline": _area_value(bq).source}
     safety = "UNSAFE (exploratory only — NOT eligible for final)" if _is_unsafe(final) else "safe"
     reasons: list[str] = [
         f"timing feasibility: setup_wns={_ns(q.setup_wns) if q else None}ns, "
@@ -641,25 +712,33 @@ def explanation_for(final, baseline, front, all_candidates, priorities) -> dict[
         f"safety status: {safety}",
     ]
     if baseline is not None and final is baseline:
-        reasons.append("baseline already optimal under current policy (no dominating Pareto candidate)")
+        reasons.append(
+            "baseline already optimal under current policy (no dominating Pareto candidate)"
+        )
     else:
         reasons.append("candidate passes hard feasibility gates (timing/hold/validation/safety)")
         reasons.append("candidate is on the Pareto front")
-        reasons.append("lexicographic priority ordering (timing -> quality -> area -> power) selected it over other Pareto members; margin_utilization used only as a residual-slack tie-break")
+        reasons.append(
+            "lexicographic priority ordering (timing -> quality -> area -> power) selected it over other Pareto members; margin_utilization used only as a residual-slack tie-break"
+        )
         if q is not None and q.margin_utilization is not None:
             reasons.append(f"margin_utilization={q.margin_utilization:.2f}")
     rejected = []
     for c in all_candidates:
-        if c is final: continue
+        if c is final:
+            continue
         if c in front:
-            rejected.append({"id": c.id, "reason": "pareto_front_but_not_selected"}); continue
+            rejected.append({"id": c.id, "reason": "pareto_front_but_not_selected"})
+            continue
         if not _feasible_bool(c):
             r = c.infeasible_reason or "infeasible"
             if r == "unsafe_exceptions":
                 r = "unsafe_exceptions (blocked under safe policy)"
-            rejected.append({"id": c.id, "reason": r}); continue
+            rejected.append({"id": c.id, "reason": r})
+            continue
         if _is_unsafe(c):
-            rejected.append({"id": c.id, "reason": "unsafe_exceptions"}); continue
+            rejected.append({"id": c.id, "reason": "unsafe_exceptions"})
+            continue
         rejected.append({"id": c.id, "reason": "dominated"})
     return {
         "selected_id": getattr(final, "id", None),
