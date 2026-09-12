@@ -222,3 +222,22 @@ def test_candidate_json_is_stably_ordered_and_marks_not_accepted():
     decoded = json.loads(encoded)
     assert all(item["acceptance_state"] == "NOT_ACCEPTED" for item in decoded["candidates"])
     assert decoded["candidates"] == sorted(decoded["candidates"], key=lambda item: item["id"])
+
+
+def test_advanced_ambiguous_hypotheses_are_deterministic_and_never_selected():
+    source = ("module m(input clk_a, clk_b, output reg qa, qb); "
+              "always_ff @(posedge clk_a) qa<=1'b0; always_ff @(posedge clk_b) qb<=1'b0; endmodule")
+    design, timing, config = _context(source)
+    cset = ConstraintSet(name="m")
+    report = InferenceEngine().infer_candidates(design, timing, config, cset, AssumptionLedger(),
+                                                run_ts="2000-01-01T00:00:00+00:00")
+    ambiguous = [item for item in report.candidates if item.status == InferenceStatus.AMBIGUOUS]
+    assert ambiguous
+    for candidate in ambiguous:
+        assert candidate.decision == InferenceDecision.REJECTED
+        assert all(item["status"] == "UNCONFIRMED" for item in candidate.hypotheses)
+    repeated = InferenceEngine().infer_candidates(design, timing, config, cset, AssumptionLedger(),
+                                                   run_ts="2000-01-01T00:00:00+00:00")
+    assert [item.to_dict().get("hypotheses") for item in report.candidates] == [
+        item.to_dict().get("hypotheses") for item in repeated.candidates
+    ]

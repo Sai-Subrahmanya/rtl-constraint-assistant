@@ -1251,7 +1251,20 @@ the API, CLI, policy, package, and verification contract.
 
 ---
 
-## 19. Known Gaps and Roadmap
+## 19. Steps 33–46 governed lifecycle extension
+
+The Step-33 through Step-46 extension preserves one canonical UCM and the
+existing lifecycle owners. `rca handoff` consumes a verified release package;
+`rca run` is a read-only lifecycle projection; `rca replay-evidence` is a
+read-only identity/integrity assessment. Neither makes a review/release/tool
+transition. Optional dashboard projection artifacts are bounded to configured
+output and rendered as escaped data. See:
+
+- `docs/STEP33_CONSTRAINT_HANDOFF.md` through `docs/STEP46_PRODUCTION_AUDIT.md`
+- `examples/governed_workflow/` and `docs/STEP45_OFFLINE_E2E_DEMO.md`
+- `TEST_PLAN.md` for the final lifecycle/replay/UX test map.
+
+## 20. Known Gaps and Roadmap
 
 Implemented as alpha-grade:
 - Yosys/OpenSTA: real execution is guarded by typed preflight and requires
@@ -1280,7 +1293,7 @@ unit tests passing.
 
 ---
 
-## 20. Troubleshooting / FAQ
+## 21. Troubleshooting / FAQ
 
 **Q: `pyslang` fails to import?**
 A: `pip install pyslang>=11.0` (binary wheels on PyPI for Linux/macOS

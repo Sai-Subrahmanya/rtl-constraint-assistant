@@ -29,6 +29,8 @@ format; JSON is YAML-compatible where existing `yaml.safe_load` is used.
 `ProjectConfig.engineering_dict()` is a portable deterministic projection used
 by release/handoff identities. Paths below the configured project root become
 relative, optional nulls are normalized, and load-location-specific absolute
-paths do not change engineering identity. Runtime path resolution for actual
-I/O remains unchanged. `write_config()` omits nulls so its YAML round-trips
-through the existing strict schema.
+paths do not change engineering identity. `identity_dict()` preserves the
+legacy source-evidence shape while omitting an all-default optional workflow
+block, so old advisory/readiness/lineage identities remain stable. Runtime path
+resolution for actual I/O remains unchanged. `write_config()` omits nulls so
+its YAML round-trips through the existing strict schema.

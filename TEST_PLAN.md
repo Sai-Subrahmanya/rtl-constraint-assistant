@@ -325,3 +325,18 @@ formal unavailable/unresolved, SQLite advisory failures, cache hash corruption,
 incomplete MCMM data, budget/deadline behavior, invalid workers, executor and
 worker failures. Run manifests/artifacts remain the evidence authority and
 SQLite remains an advisory query/index sidecar.
+
+## Steps 33–46 lifecycle, safety and UX coverage
+
+| Area | Tests | Core assertion |
+|---|---|---|
+| Controlled handoff | `tests/unit/test_constraint_handoff.py`, `tests/integration/test_cli_constraint_handoff.py` | Package/release integrity and target support are checked; `--execute` remains an explicit unavailable boundary. |
+| Workflow/configuration | `tests/unit/test_workflow_configuration.py`, `tests/integration/test_complete_governed_workflow.py`, `tests/integration/test_cli_complete_governed_workflow.py` | Composition is deterministic and read-only; defaults stop at required review/EDA unavailable; workflow config is strict and portable. |
+| Advanced inference/knowledge | `tests/unit/test_inference_candidates.py`, `tests/unit/test_knowledge.py` | Hypotheses stay unconfirmed/rejected; verified package reuse is advisory `VALIDATED`, never proof. |
+| Formal/replay evidence | `tests/unit/test_symbiyosys.py`, `tests/unit/test_replay_evidence.py` | Formal result binds to current canonical semantics; stale proof/artifact evidence fails closed; replay never executes automatically. |
+| Offline E2E | `tests/integration/test_governed_workflow_demo.py` | The copied canonical demo runs without real tools, labels mock/unavailable/signoff boundaries, and writes only its local output. |
+
+The dashboard projection integration test also checks opt-in report-root
+containment and escaped browser rendering. Optional real EDA tests remain
+opt-in and must skip/unavailable when installed executable/collateral evidence
+is absent.

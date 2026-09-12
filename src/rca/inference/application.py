@@ -276,7 +276,7 @@ def apply_intent_decision(
         return result(ApplicationStatus.STALE, blocking=(
             "Timing-graph snapshot differs from candidate source; explicit reinference is required.",
         ))
-    if config is not None and "config" in source and stable_hash(config.model_dump()) != source["config"]:
+    if config is not None and "config" in source and stable_hash(config.identity_dict() if hasattr(config, "identity_dict") else config.model_dump()) != source["config"]:
         return result(ApplicationStatus.STALE, blocking=(
             "Project configuration differs from candidate source; explicit reinference is required.",
         ))

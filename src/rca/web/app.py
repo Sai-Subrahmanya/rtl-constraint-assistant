@@ -64,6 +64,20 @@ def create_app(results_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(404, "No optimizer_state.json; run `rca optimize` first.")
         return json.loads(p.read_text(encoding="utf-8"))
 
+    @app.get("/api/workflow")
+    def workflow() -> dict[str, Any]:
+        p = results_dir / "workflow_report.json"
+        if not p.is_file():
+            raise HTTPException(404, "No workflow_report.json found; use `rca run --report workflow_report.json`.")
+        return _read_dashboard_json(p, "workflow report")
+
+    @app.get("/api/replay-evidence")
+    def replay_evidence() -> dict[str, Any]:
+        p = results_dir / "replay_evidence.json"
+        if not p.is_file():
+            raise HTTPException(404, "No replay_evidence.json found; use `rca replay-evidence --report replay_evidence.json`.")
+        return _read_dashboard_json(p, "replay evidence")
+
     @app.get("/api/sdc")
     def sdc() -> dict[str, Any]:
         for name in ("design.sdc", "design.generic.sdc"):
@@ -73,6 +87,17 @@ def create_app(results_dir: str | Path | None = None) -> FastAPI:
         raise HTTPException(404, "No design.sdc found; run `rca generate` first.")
 
     return app
+
+
+def _read_dashboard_json(path: Path, label: str) -> dict[str, Any]:
+    """Read a user-created presentation artifact without evaluating its content."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(422, f"Stored {label} is not valid JSON: {type(exc).__name__}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(422, f"Stored {label} must be a JSON object.")
+    return data
 
 
 _DASHBOARD_HTML = """
@@ -107,15 +132,18 @@ async function get(url){ const r = await fetch(url); if(!r.ok) return null; retu
 async function refresh() {
   const root = document.getElementById('content');
   root.innerHTML = '<p>Loading…</p>';
-  const [design, constraints, val, cov, opt] = await Promise.all([
+  const [design, constraints, val, cov, opt, workflow, replay] = await Promise.all([
     get('/api/design'), get('/api/constraints'), get('/api/validation'),
-    get('/api/coverage'), get('/api/optimization')
+    get('/api/coverage'), get('/api/optimization'), get('/api/workflow'), get('/api/replay-evidence')
   ]);
+  const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  const json = value => esc(JSON.stringify(value));
   let html = '';
   if(design) {
     const s = design;
     html += '<h2>Design</h2><div class="grid">';
-    html += `<div class="metric"><div class="v">${s.top||'-'}</div><div class="l">top module</div></div>`;
+    html += `<div class="metric"><div class="v">${esc(s.top||'-')}</div><div class="l">top module</div></div>`;
     html += `<div class="metric"><div class="v">${(s.modules&&Object.keys(s.modules).length)||0}</div><div class="l">modules</div></div>`;
     html += `<div class="metric"><div class="v">${Object.keys(s.registers||{}).length}</div><div class="l">registers</div></div>`;
     html += `<div class="metric"><div class="v">${s.clock_candidates?.length||0}</div><div class="l">clock candidates</div></div>`;
@@ -132,7 +160,7 @@ async function refresh() {
     html += '</div>';
     if(cov.uncovered && cov.uncovered.length) {
       html += '<div class="card"><strong>Uncovered:</strong><ul>';
-      for(const u of cov.uncovered) html += `<li>${u.category}: ${u.message}</li>`;
+      for(const u of cov.uncovered) html += `<li>${esc(u.category)}: ${esc(u.message)}</li>`;
       html += '</ul></div>';
     }
   }
@@ -140,13 +168,13 @@ async function refresh() {
     html += '<h2>Constraints</h2>';
     const cs = constraints.constraints || constraints;
     const entries = Object.entries(cs);
-    html += `<p>${entries.length} constraints in model.</p>`;
+    html += `<p>${esc(entries.length)} constraints in model.</p>`;
     html += '<table><tr><th>ID</th><th>Type</th><th>Status</th><th>Source</th><th>Values</th></tr>';
     for(const [id,c] of entries.slice(0,200)){
       const status = c.status || '?';
       const cls = status==='FIXED'||status==='CONFIRMED' ? 'ok' :
                   status==='PROPOSED' ? 'warn' : 'err';
-      html += `<tr><td>${id}</td><td>${c.type}</td><td class="${cls}">${status}</td><td>${c.source||c.source_kind||''}</td><td><code>${JSON.stringify(c.values||{})}</code></td></tr>`;
+      html += `<tr><td>${esc(id)}</td><td>${esc(c.type)}</td><td class="${cls}">${esc(status)}</td><td>${esc(c.source||c.source_kind||'')}</td><td><code>${json(c.values||{})}</code></td></tr>`;
     }
     html += '</table>';
   }
@@ -160,21 +188,35 @@ async function refresh() {
       for(const i of sum.issues){
         const cls = i.severity==='ERROR'||i.severity==='CRITICAL' ? 'err' :
                     i.severity==='WARNING' ? 'warn' : '';
-        html += `<tr><td class="${cls}">${i.severity}</td><td>${i.code}</td><td>${i.message}</td></tr>`;
+        html += `<tr><td class="${cls}">${esc(i.severity)}</td><td>${esc(i.code)}</td><td>${esc(i.message)}</td></tr>`;
       }
       html += '</table>';
     }
   }
   if(opt) {
     html += '<h2>Optimization</h2>';
-    html += `<div class="card">Stop reason: <strong>${opt.stop_reason||'-'}</strong>, `;
-    html += `iterations=${opt.iterations||0}, eda_runs=${opt.eda_runs||0}, elapsed=${(opt.elapsed_s||0).toFixed(1)}s</div>`;
+    html += `<div class="card">Stop reason: <strong>${esc(opt.stop_reason||'-')}</strong>, `;
+    html += `iterations=${esc(opt.iterations||0)}, eda_runs=${esc(opt.eda_runs||0)}, elapsed=${esc((opt.elapsed_s||0).toFixed(1))}s</div>`;
     if(opt.final) {
       const q = opt.final.qor||{};
       html += '<h3>Final candidate</h3>';
       html += `<table><tr><th>Setup WNS</th><th>Hold WNS</th><th>Area</th><th>Power</th><th>ID</th></tr>`;
-      html += `<tr><td>${q.setup_wns_ns??'-'} ns</td><td>${q.hold_wns_ns??'-'} ns</td><td>${q.area_total??'-'}</td><td>${q.power_total??'-'}</td><td>${opt.final.id}</td></tr></table>`;
+      html += `<tr><td>${esc(q.setup_wns_ns??'-')} ns</td><td>${esc(q.hold_wns_ns??'-')} ns</td><td>${esc(q.area_total??'-')}</td><td>${esc(q.power_total??'-')}</td><td>${esc(opt.final.id)}</td></tr></table>`;
     }
+  }
+  if(workflow) {
+    html += '<h2>Governed workflow</h2><div class="card">';
+    html += `<strong>${esc(workflow.id)}</strong> — next action: <strong>${esc(workflow.summary?.next_action||'UNKNOWN')}</strong>`;
+    html += '<table><tr><th>Stage</th><th>Status</th><th>Message</th></tr>';
+    for(const stage of workflow.stages||[]) html += `<tr><td>${esc(stage.name)}</td><td>${esc(stage.status)}</td><td>${esc(stage.message)}</td></tr>`;
+    html += '</table></div>';
+  }
+  if(replay) {
+    html += '<h2>Replay evidence</h2><div class="card">';
+    html += `Readiness: <strong>${esc(replay.replay_readiness)}</strong>; automatic replay: <strong>${esc(replay.automatic_replay_supported)}</strong>`;
+    html += '<table><tr><th>Component</th><th>Status</th><th>Identity</th></tr>';
+    for(const item of replay.components||[]) html += `<tr><td>${esc(item.name)}</td><td>${esc(item.status)}</td><td><code>${esc(item.identity||'-')}</code></td></tr>`;
+    html += '</table></div>';
   }
   root.innerHTML = html || '<p>Run RCA commands to populate results.</p>';
 }

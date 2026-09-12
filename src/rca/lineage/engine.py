@@ -257,7 +257,7 @@ def _input_identities(cset: ConstraintSet, config: Any | None, design: Design | 
                       timing_graph: TimingGraph | None) -> dict[str, str]:
     return {
         "constraint_set": stable_hash_cset(cset),
-        "config": (stable_hash(config.model_dump()) if config is not None and hasattr(config, "model_dump")
+        "config": (stable_hash(config.identity_dict() if hasattr(config, "identity_dict") else config.model_dump()) if config is not None and hasattr(config, "model_dump")
                    else stable_hash(config) if config is not None else ""),
         "design": stable_hash(design.snapshot()) if design is not None else "",
         "timing_graph": (stable_hash(timing_graph.model_dump()) if timing_graph is not None else ""),

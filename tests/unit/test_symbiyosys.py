@@ -330,3 +330,18 @@ def test_14_11_formal_config_rejects_duplicate_constraint_mappings() -> None:
                 ),
             ],
         )
+
+
+def test_41_formal_result_is_bound_to_current_canonical_exception_semantics(tmp_path: Path) -> None:
+    from rca.exceptions import formal_result_is_current
+
+    backend = _backend(tmp_path, _write_fake_sby(tmp_path))
+    cset, design, tg = _exception_context()
+    report = verify_exceptions(cset, design=design, tg=tg, backend=backend)
+    constraint = cset.get("FP1")
+    result = report.results[0].verification
+    assert result is not None and result.formal_evidence_identity
+    assert result.constraint_semantic_identity
+    assert formal_result_is_current(result, constraint)
+    constraint.values["comment"] = "semantics changed after proof"
+    assert not formal_result_is_current(result, constraint)

@@ -101,9 +101,12 @@ class InferenceCandidate:
     warnings: tuple[str, ...] = ()
     missing_information: tuple[dict[str, Any], ...] = ()
     existing_constraint_ids: tuple[str, ...] = ()
+    # Mutually possible structural interpretations are retained as hypotheses,
+    # never collapsed into a probability or silently selected timing intent.
+    hypotheses: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "id": self.id,
             "kind": self.kind,
             "constraint_type": self.constraint_type,
@@ -134,6 +137,12 @@ class InferenceCandidate:
             "existing_constraint_ids": sorted(self.existing_constraint_ids),
             "acceptance_state": "NOT_ACCEPTED",
         }
+        # Preserve established wire format for candidates with no new
+        # ambiguity material, while exposing all nonempty hypotheses.
+        if self.hypotheses:
+            data["hypotheses"] = [copy.deepcopy(item) for item in sorted(
+                self.hypotheses, key=lambda item: str(item.get("id", "")))]
+        return data
 
 
 @dataclass(frozen=True)

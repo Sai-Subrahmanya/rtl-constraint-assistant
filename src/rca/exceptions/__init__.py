@@ -9,6 +9,8 @@ from .formal_backend import (
     FormalBackend,
     MockFormalBackend,
     VerificationResult,
+    bind_verification_result,
+    formal_result_is_current,
 )
 from .symbiyosys import (
     SymbiYosysFormalBackend,
@@ -28,7 +30,9 @@ __all__ = [
     "SymbiYosysProofSpec",
     "VerificationResult",
     "analyze_exceptions",
+    "bind_verification_result",
     "emittable_exceptions",
     "formal_backend_from_config",
+    "formal_result_is_current",
     "verify_exceptions",
 ]

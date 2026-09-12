@@ -73,3 +73,14 @@ def test_workflow_config_json_yaml_round_trip_is_deterministic(tmp_path: Path):
     out = tmp_path / "out.yaml"; write_config(config, out)
     loaded = load_config(out)
     assert json.dumps(loaded.engineering_dict(), sort_keys=True) == json.dumps(config.engineering_dict(), sort_keys=True)
+
+
+def test_default_workflow_is_identity_neutral_for_legacy_evidence():
+    legacy = ProjectConfig(project={"name": "workflow", "top": "top"})
+    explicit_default = ProjectConfig.model_validate({
+        "project": {"name": "workflow", "top": "top"}, "workflow": {},
+    })
+    assert legacy.identity_dict() == explicit_default.identity_dict()
+    assert "workflow" not in legacy.identity_dict()
+    configured = ProjectConfig.model_validate(_raw(Path(".")))
+    assert configured.identity_dict()["workflow"]["handoff_target"] == "OPENSTA_OPENROAD"

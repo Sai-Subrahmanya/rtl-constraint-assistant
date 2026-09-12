@@ -43,6 +43,17 @@ outcomes and never treats structural analysis as a proof.
 > auto-releases, generates SDC, or claims external EDA/STA/physical/commercial
 > signoff. See [`docs/STEP32_CONSTRAINT_RELEASE.md`](docs/STEP32_CONSTRAINT_RELEASE.md).
 
+> **Governed lifecycle view**: `rca run` composes existing analysis, advisory
+> inference, validation, readiness, lineage, review/release/package/handoff,
+> EDA, and formal evidence into a deterministic **read-only** projection. It
+> never applies, approves, releases, executes EDA, or hides unavailable
+> evidence. [`docs/STEP34_E2E_ORCHESTRATION.md`](docs/STEP34_E2E_ORCHESTRATION.md)
+>
+> **Replay evidence**: `rca replay-evidence` binds current UCM/configuration,
+> supplied manifest/package integrity, and formal evidence for investigation.
+> It explicitly does not execute or promise automatic replay.
+> [`docs/STEP43_REPRODUCIBILITY_REPLAY.md`](docs/STEP43_REPRODUCIBILITY_REPLAY.md)
+
 ## Quick start
 
 ```bash
@@ -87,38 +98,50 @@ rca release project.yaml --ucm reviewed-ucm.json --review approved-review.json \
   --decision RELEASE --releaser "release-owner" --package-dir artifacts/release-r1 --json
 rca release-verify artifacts/release-r1 --json
 
-# 9. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
+# 9. Assess the complete governed lifecycle or create opt-in dashboard reports.
+#    These projections do not apply, approve, release, handoff, or run a tool.
+rca run project.yaml --ucm reviewed-ucm.json --json
+rca run project.yaml --ucm reviewed-ucm.json --report workflow_report.json --json
+rca replay-evidence project.yaml --ucm reviewed-ucm.json --report replay_evidence.json --json
+
+# 10. Prepare a downstream handoff only from an existing verified package.
+#     --execute deliberately reports the external boundary as unavailable;
+#     it does not secretly invoke a tool or claim signoff.
+rca handoff project.yaml --release artifacts/release-r1 --target OPENSTA_OPENROAD --prepare --json > handoff.json
+rca handoff-verify handoff.json --release artifacts/release-r1 --json
+
+# 11. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
 rca generate project.yaml --backend generic
 rca generate project.yaml --backend opensta
 
-# 10. Validate generated constraints
+# 12. Validate generated constraints
 #    (also runs mapped SymbiYosys jobs when formal.backend: symbiyosys is configured)
 rca validate project.yaml
 
-# 11. Show coverage
+# 13. Show coverage
 rca coverage project.yaml
 
-# 12. Inspect real-EDA prerequisites without executing synthesis or STA
+# 14. Inspect real-EDA prerequisites without executing synthesis or STA
 rca doctor project.yaml --json
 
-# 13. Run Yosys + OpenSTA only when doctor reports the real boundary ready
+# 15. Run Yosys + OpenSTA only when doctor reports the real boundary ready
 #     and flow.liberty names your readable Liberty collateral.
 rca run-sta project.yaml --backend yosys_opensta
 
-# 14. Multi-objective optimization (mock EDA backend works without tools)
+# 16. Multi-objective optimization (mock EDA backend works without tools)
 rca optimize project.yaml --backend mock
 
-# 15. Query the local historical QoR repository (never executes EDA)
+# 17. Query the local historical QoR repository (never executes EDA)
 rca history --config project.yaml --best setup_wns
 
-# 16. Search offline vendor-neutral constraint knowledge (advisory only)
+# 18. Search offline vendor-neutral constraint knowledge (advisory only)
 rca knowledge search "false path" --json
 rca knowledge suggest project.yaml --json
 
-# 17. Full human-readable report
+# 19. Full human-readable report
 rca report project.yaml
 
-# 18. Launch the web dashboard
+# 20. Launch the web dashboard
 rca dashboard project.yaml
 ```
 
@@ -143,6 +166,23 @@ GENERATED CONSTRAINTS (3)
   [INP0002] set_input_delay     2.000 -clock clk [get_ports en]
   [OUT0003] set_output_delay    2.000 -clock clk [get_ports q]
 ```
+
+---
+
+## Offline governed workflow demo
+
+The canonical no-tool demonstration is
+[`examples/governed_workflow`](examples/governed_workflow). It performs a
+read-only lifecycle/replay projection, an explicitly labelled mock flow, and
+real-tool preflight only—never a silent application, approval, release, or
+signoff claim.
+
+```bash
+PYTHONPATH=src python examples/governed_workflow/demo.py
+```
+
+See [`docs/STEP45_OFFLINE_E2E_DEMO.md`](docs/STEP45_OFFLINE_E2E_DEMO.md) and
+[`docs/STEP46_PRODUCTION_AUDIT.md`](docs/STEP46_PRODUCTION_AUDIT.md).
 
 ---
 
@@ -171,6 +211,10 @@ GENERATED CONSTRAINTS (3)
                                                      ▼
                     QoR artifacts + local SQLite history sidecar
                     (artifacts/provenance and filesystem cache remain authoritative)
+                                                     │
+                                                     ▼
+                            Read-only governed workflow / replay-evidence view
+                         (human review/release/handoff remain explicit authorities)
                                                      │
                                                      ▼
                                    Pareto multi-objective Optimizer
@@ -220,7 +264,9 @@ rtl-constraint-assistant/
 │   ├── optimizer/       # Budget, candidate generation, closed-loop optimizer
 │   ├── scenarios/       # MCMM scenario handling
 │   ├── explanation/     # Human/machine-readable explanation generator
-│   ├── web/             # FastAPI dashboard
+│   ├── workflow/        # Read-only governed lifecycle projection
+│   ├── reproducibility/ # Read-only replay-evidence identity projection
+│   ├── web/             # FastAPI dashboard (including opt-in workflow/replay views)
 │   ├── artifacts/       # Output/run manifest management
 │   └── utils/           # Enums, units, hashing, logging
 ├── tests/               # pytest unit/integration/golden/stress/regression
@@ -249,6 +295,10 @@ rtl-constraint-assistant/
 | `rca review CONFIG --ucm SNAPSHOT.json [--decision APPROVE\|APPROVE_WITH_WARNINGS\|REJECT\|DEFER\|REVOKE] [--json]` | Deterministic governance review of an exact canonical snapshot. Assessment never auto-approves; explicit approval remains separate from external EDA signoff and never writes UCM/SDC/artifacts/history/SQLite or executes EDA/formal. |
 | `rca release CONFIG --ucm REVIEWED.json --review APPROVED-REVIEW.json [--decision RELEASE\|REVOKE] [--package-dir DIR] [--json]` | Deterministic release assessment or explicit RCA release over an exact reviewed UCM. It consumes rather than creates Step-31 review, preserves exact MCMM scope, never auto-releases or generates SDC, and remains distinct from external EDA/STA/physical/commercial signoff. A package is written only with explicit `--package-dir`. |
 | `rca release-verify PACKAGE [--json]` | Stateless release-package integrity verification of hashes, canonical/semantic UCM identity, review/evidence identity, exact scope, consistency, and revoked/stale state. Never runs EDA/formal, mutates, repairs, or regenerates package contents. |
+| `rca handoff CONFIG --release PACKAGE --target TARGET [--prepare] [--execute] [--json]` | Controlled downstream projection from an existing verified release package. `--execute` is only an explicit unavailable boundary, never a hidden tool run or signoff claim. |
+| `rca handoff-verify HANDOFF [--release PACKAGE] [--json]` | Stateless handoff/package integrity and target-compatibility verification. |
+| `rca run CONFIG [--ucm SNAPSHOT] [--review REVIEW] [--release-package PACKAGE] [--report workflow_report.json] [--json]` | Read-only complete lifecycle projection. It has no implicit application, approval, release, handoff, EDA, or formal execution. |
+| `rca replay-evidence CONFIG [--ucm SNAPSHOT] [--manifest MANIFEST] [--report replay_evidence.json] [--json]` | Read-only portable identity/integrity assessment; automatic replay remains explicitly unsupported. |
 | `rca generate`     | Emit SDC (generic/opensta/synopsys/cadence backend). |
 | `rca validate`     | Validate generated or imported SDC; runs configured SymbiYosys exception proofs if opted in. |
 | `rca coverage`     | Per-category coverage report with uncovered objects. |

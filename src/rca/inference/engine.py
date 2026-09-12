@@ -24,7 +24,7 @@ import copy
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from ..config.model import ProjectConfig
+from ..config.model import ProjectConfig, WorkflowConfig
 from ..constraint_model import Constraint, ConstraintSet, stable_hash_cset
 from ..design_model import Design
 from ..equivalence.normalize import (
@@ -423,11 +423,16 @@ class InferenceEngine:
         candidates are not accepted UCM constraints.
         """
         baseline = cset if cset is not None else ConstraintSet(name=config.project.name)
+        config_identity_data = config.model_dump()
+        if config_identity_data.get("workflow") == WorkflowConfig().model_dump():
+            # Optional all-default Step-35 config must not invalidate
+            # pre-existing advisory identities or evidence.
+            config_identity_data.pop("workflow", None)
         source_identity = {
             "design": stable_hash(design.snapshot()),
             "timing_graph": stable_hash(tg.model_dump()),
             "constraint_set": stable_hash_cset(baseline),
-            "config": stable_hash(config.model_dump()),
+            "config": stable_hash(config_identity_data),
             "engine": "step27-candidate-v1",
         }
         # Legacy rules may enrich a timing graph with user values. Isolate all
@@ -655,6 +660,11 @@ class InferenceEngine:
                 assumptions=(),
                 warnings=("Numeric or semantic timing intent was not invented.",),
                 missing_information=(dict(missing),),
+                hypotheses=tuple(
+                    {"id": "HYP-" + stable_hash((candidate_id, value))[:16], "value": value,
+                     "status": "UNCONFIRMED", "reason": "Retained possible value; no selection was made."}
+                    for value in possible
+                ),
             ))
         return output
 
@@ -699,6 +709,9 @@ class InferenceEngine:
                 rationale=message,
                 source_snapshot_identity=dict(source_identity),
                 warnings=("Name-only evidence is never enough to infer a clock or period.",),
+                hypotheses=({"id": "HYP-" + stable_hash((candidate_id, object_name, "clock"))[:16],
+                             "value": "clock", "status": "UNCONFIRMED",
+                             "reason": "Name-only clock hypothesis requires structural/user confirmation."},),
             ))
         return output
 

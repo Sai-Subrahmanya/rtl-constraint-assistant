@@ -246,3 +246,25 @@ def test_history_without_canonical_snapshot_is_diagnostic_not_guessed(tmp_path):
     engine = KnowledgeEngine(include_builtins=False)
     assert engine.index_history(repo) == []
     assert "no canonical UCM snapshot locator" in engine.diagnostics[0]
+
+
+def test_verified_release_package_is_advisory_validated_knowledge_not_a_proof(tmp_path):
+    from rca.release import create_release_package
+    from tests.unit.test_constraint_release import _clean_inputs, _released, _ucm
+
+    cset = _ucm()
+    args = _clean_inputs(cset)
+    release = _released(cset, **args)
+    directory = tmp_path / "release"
+    create_release_package(release, cset, directory, review=args["review"], readiness=args["readiness"],
+                           validation=args["validation"], lineage=args["lineage"])
+    engine = KnowledgeEngine(include_builtins=False)
+    first = [item.to_dict() for item in engine.index_release_package(directory)]
+    assert first and {item["origin"] for item in first} == {"RELEASE_PACKAGE"}
+    assert {item["trust_level"] for item in first} == {"VALIDATED"}
+    assert "not an external proof" in first[0]["provenance"]["evidence"][-1]["description"]
+    assert first == [item.to_dict() for item in KnowledgeEngine(include_builtins=False).index_release_package(directory)]
+    (directory / "ucm_snapshot.json").write_text("{}", encoding="utf-8")
+    corrupted = KnowledgeEngine(include_builtins=False)
+    assert corrupted.index_release_package(directory) == []
+    assert "not verifiably intact" in corrupted.diagnostics[0]

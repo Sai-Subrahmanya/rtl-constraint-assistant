@@ -239,9 +239,11 @@ class SymbiYosysFormalBackend(FormalBackend):
                 "adapter": "rca-symbiyosys-v1",
                 "constraint_id": constraint_id,
                 "exception_kind": expected_kind,
-                # The source location is part of identity because an .sby file
-                # may include adjacent RTL/formal collateral by relative path.
-                "sby_file": str(sby_file),
+                # Content and basename bind the proof; host checkout paths
+                # are evidence locators, never engineering identity. The
+                # basename prevents unrelated configured proof jobs with the
+                # same boilerplate text sharing a work directory.
+                "sby_file_name": sby_file.name,
                 "sby_file_sha256": sby_hash,
                 "task": proof.task,
                 "path_spec": canonical_path_spec,

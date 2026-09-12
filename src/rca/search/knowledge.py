@@ -49,6 +49,7 @@ class KnowledgeOrigin(str, Enum):
     PROJECT_UCM = "PROJECT_UCM"
     HISTORY = "HISTORY"
     USER_FILE = "USER_FILE"
+    RELEASE_PACKAGE = "RELEASE_PACKAGE"
 
 
 class TrustLevel(str, Enum):
@@ -400,6 +401,46 @@ class KnowledgeEngine:
                 projection_evidence=evidence,
             ))
         return added
+
+    def index_release_package(self, package_dir: str | Path) -> list[KnowledgePattern]:
+        """Project an existing verified Step-32 package into advisory knowledge.
+
+        Release/package verification establishes package integrity, not formal
+        proof or cross-project correctness. Therefore this source is retained
+        as ``VALIDATED`` and never promoted automatically to ``VERIFIED``.
+        """
+        from ..release import PackageVerificationStatus, verify_release_package
+
+        root = Path(package_dir)
+        verification = verify_release_package(root)
+        if verification.status != PackageVerificationStatus.VERIFIED:
+            self.diagnostics.append("Release package is not verifiably intact; no knowledge was indexed.")
+            return []
+        try:
+            raw = json.loads((root / "ucm_snapshot.json").read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise KnowledgeError("canonical UCM snapshot is not an object")
+            cset = ConstraintSet.from_snapshot_dict(raw, unknown_field_policy="error")
+        except (OSError, ValueError, SnapshotFormatError, json.JSONDecodeError) as exc:
+            self.diagnostics.append(f"Verified release package UCM cannot be restored safely: {type(exc).__name__}: {exc}")
+            return []
+        package_id = verification.package_id
+        evidence = Evidence(
+            id="KN-RELEASE-" + stable_hash((package_id, verification.snapshot_identity))[:16],
+            kind="release_package",
+            description="Verified RCA release package projection; not an external proof or signoff.",
+            detail={"package_id": package_id, "release_id": verification.release_id,
+                    "snapshot_identity": verification.snapshot_identity},
+            confidence=Confidence.MEDIUM,
+            rule_id="KNOWLEDGE-RELEASE-PACKAGE",
+            created_by="rca.knowledge",
+            created_at=_EPOCH,
+        )
+        return self.index_constraint_set(
+            cset, origin=KnowledgeOrigin.RELEASE_PACKAGE,
+            source_constraint_set_hash=verification.snapshot_identity,
+            trust_level=TrustLevel.VALIDATED, projection_evidence=evidence,
+        )
 
     def search(self, *, text: str | None = None, constraint: Constraint | None = None,
                limit: int | None = None, include_origins: Iterable[KnowledgeOrigin] | None = None) -> KnowledgeSearchResult:

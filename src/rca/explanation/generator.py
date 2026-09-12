@@ -63,6 +63,10 @@ def explain_inference_candidate(candidate: InferenceCandidate) -> str:
         lines.append(f"    evidence[{evidence.kind}]: {evidence.description}")
     for missing in candidate.missing_information:
         lines.append(f"  Missing: [{missing.get('id', '?')}] {missing.get('message', '')}")
+    for hypothesis in candidate.hypotheses:
+        lines.append("  Hypothesis: [" + str(hypothesis.get("id", "?")) + "] "
+                     + str(hypothesis.get("value", "UNKNOWN")) + " — "
+                     + str(hypothesis.get("status", "UNCONFIRMED")))
     for warning in candidate.warnings:
         lines.append(f"  Warning: {warning}")
     for reference in candidate.knowledge_references:

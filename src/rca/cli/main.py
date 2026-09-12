@@ -88,6 +88,7 @@ from ..release import (
 from ..release import (
     ReleasePolicy as ConstraintReleasePolicy,
 )
+from ..reproducibility import assess_replay_evidence
 from ..review import (
     ConstraintReview,
     ReviewActor,
@@ -1279,12 +1280,32 @@ def _release_cli_error(json_out: bool, message: str) -> None:
     raise typer.Exit(code=2)
 
 
+def _write_projection_report(cfg: ProjectConfig, requested_path: str | None, default_name: str,
+                             data: dict[str, Any]) -> Path | None:
+    """Explicitly persist a presentation report below configured output only."""
+    if requested_path is None:
+        return None
+    root = Path(cfg.flow.output_dir).resolve()
+    raw = Path(requested_path)
+    destination = (root / raw if not raw.is_absolute() else raw).resolve()
+    try:
+        destination.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Projection report path must stay below configured flow.output_dir.") from exc
+    if destination.name != default_name:
+        raise ValueError(f"Projection report file must be named {default_name!r}.")
+    relative = str(destination.relative_to(root))
+    ArtifactManager(root).write_json_atomic(relative, data)
+    return destination
+
+
 @app.command(name="run")
 def run_workflow(
     config: str = typer.Argument(..., help="Path to project YAML"),
     ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM snapshot; defaults to workflow.ucm_snapshot"),
     review: str | None = typer.Option(None, "--review", help="Optional existing Step-31 review JSON"),
     release_package: str | None = typer.Option(None, "--release-package", help="Optional existing Step-32 package directory"),
+    report_path: str | None = typer.Option(None, "--report", help="Explicit workflow_report.json below flow.output_dir"),
     json_out: bool = typer.Option(False, "--json", help="Output deterministic workflow JSON only"),
 ):
     """Project the complete RCA workflow without bypassing any governance stage.
@@ -1335,10 +1356,51 @@ def run_workflow(
                               readiness=readiness_report, lineage=lineage_report, review=review_assessment,
                               package_verification=package_verification, handoff=handoff_assessment),
     )
+    try:
+        written = _write_projection_report(cfg, report_path, "workflow_report.json", report.to_dict())
+    except ValueError as exc:
+        _release_cli_error(json_out, str(exc))
     if json_out:
         typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
         return
+    if written:
+        console.print(f"[green]Workflow presentation report written: {written}[/green]")
     console.print(explain_complete_workflow(report))
+
+
+@app.command(name="replay-evidence")
+def replay_evidence(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM snapshot; defaults to workflow.ucm_snapshot"),
+    manifest: str | None = typer.Option(None, "--manifest", help="Existing run_manifest.json; read only"),
+    release_package: str | None = typer.Option(None, "--release-package", help="Existing release package to verify; read only"),
+    report_path: str | None = typer.Option(None, "--report", help="Explicit replay_evidence.json below flow.output_dir"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic replay-evidence JSON"),
+):
+    """Assess retained replay identity without rerunning tools or changing lifecycle state."""
+    cfg = _load(config)
+    cset = _load_canonical_ucm(ucm or cfg.workflow.ucm_snapshot, cfg)
+    manifest_data = None
+    if manifest:
+        try:
+            loaded = json.loads(Path(manifest).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _release_cli_error(json_out, f"Cannot load manifest evidence: {type(exc).__name__}: {exc}")
+        if not isinstance(loaded, dict):
+            _release_cli_error(json_out, "Manifest evidence must be a JSON object.")
+        manifest_data = RunManifest.from_dict(loaded)
+    package = verify_release_package(release_package) if release_package else None
+    report = assess_replay_evidence(cset, config=cfg, manifest=manifest_data, package_verification=package)
+    try:
+        written = _write_projection_report(cfg, report_path, "replay_evidence.json", report.to_dict())
+    except ValueError as exc:
+        _release_cli_error(json_out, str(exc))
+    if json_out:
+        typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
+        return
+    if written:
+        console.print(f"[green]Replay-evidence presentation report written: {written}[/green]")
+    console.print_json(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
 
 
 @app.command()

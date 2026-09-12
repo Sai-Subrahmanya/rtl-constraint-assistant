@@ -29,6 +29,7 @@ from .formal_backend import (
     ConservativeFormalBackend,
     FormalBackend,
     VerificationResult,
+    bind_verification_result,
 )
 
 
@@ -101,7 +102,7 @@ def verify_exceptions(cset: ConstraintSet,
                 tool=backend.name,
                 message=f"Formal backend raised {type(exc).__name__}: {exc}",
             )
-        r.verification = vr
+        r.verification = bind_verification_result(vr, c)
 
     return report
 

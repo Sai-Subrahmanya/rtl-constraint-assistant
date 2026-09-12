@@ -1103,7 +1103,7 @@ def _source_evidence(value: Any, source: str, snapshot_identity: str) -> tuple[R
 def _source_identity(config: Any, cset: ConstraintSet, design: Design | None,
                      timing_graph: TimingGraph | None, matrix: ScenarioMatrix) -> dict[str, str]:
     return {
-        "config": stable_hash(config.model_dump()) if hasattr(config, "model_dump") else stable_hash(config),
+        "config": stable_hash(config.identity_dict() if hasattr(config, "identity_dict") else config.model_dump()) if hasattr(config, "model_dump") else stable_hash(config),
         "constraint_set": stable_hash_cset(cset),
         "design": stable_hash(design.snapshot()) if design is not None else "",
         "timing_graph": stable_hash(timing_graph.model_dump()) if timing_graph is not None else "",

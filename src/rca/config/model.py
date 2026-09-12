@@ -462,6 +462,18 @@ class ProjectConfig(BaseModel):
         if self.workflow.release_package_dir and not Path(self.workflow.release_package_dir).is_absolute():
             self.workflow.release_package_dir = str((root / self.workflow.release_package_dir).resolve())
 
+    def identity_dict(self) -> dict[str, Any]:
+        """Backwards-compatible semantic config projection for evidence links.
+
+        This is intentionally distinct from :meth:`engineering_dict`: it
+        preserves legacy config shape while treating an omitted/all-default
+        optional Step-35 workflow block as no semantic change.
+        """
+        value = self.model_dump()
+        if value.get("workflow") == WorkflowConfig().model_dump():
+            value.pop("workflow", None)
+        return value
+
     def engineering_dict(self) -> dict[str, Any]:
         """Portable deterministic config projection used by engineering IDs.
 
@@ -470,6 +482,12 @@ class ProjectConfig(BaseModel):
         or handoff identity merely because a config was loaded elsewhere.
         """
         value = self.model_dump(mode="json", exclude={"config_path", "project_root"}, exclude_none=True)
+        # The optional workflow extension has no engineering effect when it is
+        # wholly defaulted. Omitting it preserves identity compatibility for
+        # pre-Step-35 projects while explicit non-default workflow policy is
+        # still identity-bearing.
+        if value.get("workflow") == WorkflowConfig().model_dump(mode="json", exclude_none=True):
+            value.pop("workflow", None)
         # `resolve_paths` represents no Liberty configuration as an empty list;
         # normalize the pre-load model the same way for portable identity.
         if isinstance(value.get("flow"), dict):
