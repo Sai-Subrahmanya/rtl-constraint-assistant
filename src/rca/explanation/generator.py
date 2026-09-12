@@ -12,6 +12,7 @@ from typing import Any
 from ..constraint_model import Constraint, ConstraintSet
 from ..inference.application import ConstraintApplicationResult
 from ..inference.rules import InferenceCandidate
+from ..lineage.models import ConstraintLineageReport, LineageChangeKind
 from ..optimizer import Candidate
 from ..readiness.models import ConstraintReadinessReport, ReadinessSeverity
 
@@ -153,6 +154,59 @@ def explain_constraint_readiness(report: ConstraintReadinessReport) -> str:
         lines.append("  Next actions:")
         lines.extend(f"    - {action}" for action in report.next_actions)
     lines.append("  Boundary: report-only; no UCM, SDC, coverage, history, proof, or EDA state changed.")
+    return "\n".join(lines)
+
+
+def explain_constraint_lineage(report: ConstraintLineageReport) -> str:
+    """Render Step-30 traceability without asserting new lifecycle facts.
+
+    The typed lineage report remains a read-only projection of UCM and its
+    existing evidence. This renderer neither changes canonical intent nor
+    turns temporal snapshot correlation into causality.
+    """
+    lines = [
+        f"Constraint lineage: {report.snapshot.name}",
+        f"  Snapshot: {report.snapshot.snapshot_identity}",
+        f"  Current canonical constraints: {len(report.constraints)}",
+        f"  Application attempts: {len(report.application_attempts)}",
+        f"  Advisory candidates: {len(report.advisory_candidates)}",
+    ]
+    for entry in sorted(report.constraints, key=lambda item: item.constraint_id):
+        lines.append(f"  [{entry.constraint_id}] {entry.constraint_type}")
+        lines.append(f"    Source: {entry.source.value} (origin: {entry.origin_source.value})")
+        lines.append(f"    Scenario scope: {entry.scenario_scope.scope_kind} "
+                     f"{list(entry.scenario_scope.scenario_ids)}")
+        if entry.candidate_id:
+            lines.append(f"    Candidate: {entry.candidate_id}")
+        if entry.application_id:
+            lines.append(f"    Explicit application: {entry.application_id}")
+        if entry.knowledge_references:
+            knowledge_ids = [str(item.get("knowledge_item_id", "?")) for item in entry.knowledge_references]
+            lines.append("    Knowledge references (advisory): " + ", ".join(sorted(knowledge_ids)))
+        if entry.validation_events:
+            lines.append("    Validation evidence: " + ", ".join(
+                sorted(event.kind.value for event in entry.validation_events)
+            ))
+        if entry.formal_events:
+            lines.append("    Formal verification evidence: " + ", ".join(
+                sorted(str(event.details.get("verification_status", "UNVERIFIED"))
+                       for event in entry.formal_events)
+            ))
+        if entry.events:
+            stale = [event for event in entry.events if event.stale]
+            if stale:
+                lines.append("    Stale evidence: " + "; ".join(event.message for event in stale))
+        for gap in entry.linkage_gaps:
+            lines.append(f"    Linkage gap: {gap}")
+    if report.change_set is not None:
+        changes = report.change_set.changes
+        counts = {kind.value: sum(1 for item in changes if item.kind == kind) for kind in LineageChangeKind}
+        lines.append("  Semantic snapshot changes: " + ", ".join(
+            f"{kind}={counts[kind]}" for kind in sorted(counts)
+        ))
+        for event in report.change_set.readiness_events:
+            lines.append(f"  Readiness: {event.message}")
+    lines.append("  Boundary: lineage is a read-only traceability projection, not a second canonical history or provenance authority.")
     return "\n".join(lines)
 
 

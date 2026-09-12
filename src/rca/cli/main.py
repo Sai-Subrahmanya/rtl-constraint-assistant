@@ -37,7 +37,12 @@ from ..eda import (
 )
 from ..equivalence import compare_sdc_text
 from ..exceptions import SymbiYosysFormalBackend, formal_backend_from_config
-from ..explanation import design_report, explain_constraint, explain_constraint_readiness
+from ..explanation import (
+    design_report,
+    explain_constraint,
+    explain_constraint_lineage,
+    explain_constraint_readiness,
+)
 from ..inference import (
     ApplicationStatus,
     ConstraintApplication,
@@ -46,6 +51,7 @@ from ..inference import (
     IntentDecisionKind,
     apply_intent_decision,
 )
+from ..lineage import build_constraint_lineage
 from ..mcmm import (
     MCMMResult,
     build_scenario_matrix,
@@ -745,6 +751,81 @@ def generate(config: str = typer.Argument(..., help="Path to project YAML"),
     # Exit non-zero on BLOCKED/ERROR so CI scripts don't mistake it for success.
     if status_str in ("BLOCKED", "ERROR"):
         raise typer.Exit(code=2)
+
+
+@app.command()
+def lineage(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    ucm: str | None = typer.Option(None, "--ucm", help="Current canonical UCM JSON snapshot"),
+    before: str | None = typer.Option(None, "--before", help="Explicit canonical UCM snapshot A"),
+    after: str | None = typer.Option(None, "--after", help="Explicit canonical UCM snapshot B"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic lineage JSON only"),
+):
+    """Trace canonical constraint lineage and optionally diff two UCM snapshots.
+
+    This command is report-only. It loads explicitly supplied canonical UCM
+    snapshot(s), produces advisory context only in memory, and never applies a
+    candidate, writes UCM/SDC/artifacts/history/SQLite, or executes EDA/proofs.
+    Choose exactly one current ``--ucm`` report or a complete ``--before`` /
+    ``--after`` semantic-comparison pair.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    current_mode = ucm is not None
+    comparison_mode = before is not None or after is not None
+    if current_mode == comparison_mode or (comparison_mode and (before is None or after is None)):
+        message = "Provide exactly one --ucm, or provide both --before and --after canonical UCM snapshots."
+        if json_out:
+            typer.echo(json.dumps({"status": "INVALID", "message": message}, indent=2, sort_keys=True))
+        else:
+            console.print(f"[red]{message}[/red]")
+        raise typer.Exit(code=2)
+    cfg = _load(config)
+    design, _ = _do_parse(cfg)
+    timing_graph = _do_timing(cfg, design)
+
+    def conservative_validation(cset: ConstraintSet):
+        matrix = _mcmm_matrix(cfg, cset)
+        active = set(matrix.active_ids) if matrix.is_enabled else None
+        return run_validation(design, timing_graph, cset, backend="generic", active_scenarios=active)
+
+    if current_mode:
+        cset = _load_canonical_ucm(ucm, cfg)
+        advisory = InferenceEngine().infer_candidates(
+            design, timing_graph, cfg, cset, AssumptionLedger(), knowledge=KnowledgeEngine(),
+        )
+        validation = conservative_validation(cset)
+        readiness_report = assess_constraint_readiness(
+            cfg, cset, design, timing_graph, validation=validation, inference_report=advisory,
+        )
+        report = build_constraint_lineage(
+            cset, config=cfg, design=design, timing_graph=timing_graph,
+            inference_report=advisory, validation=validation, readiness=readiness_report,
+        )
+    else:
+        before_ucm = _load_canonical_ucm(before, cfg)
+        after_ucm = _load_canonical_ucm(after, cfg)
+        before_validation = conservative_validation(before_ucm)
+        after_validation = conservative_validation(after_ucm)
+        before_readiness = assess_constraint_readiness(
+            cfg, before_ucm, design, timing_graph, validation=before_validation,
+        )
+        after_readiness = assess_constraint_readiness(
+            cfg, after_ucm, design, timing_graph, validation=after_validation,
+        )
+        report = build_constraint_lineage(
+            after_ucm, config=cfg, design=design, timing_graph=timing_graph,
+            validation=after_validation, readiness=after_readiness, before=before_ucm,
+            before_readiness=before_readiness,
+        )
+    if json_out:
+        typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
+        return
+    console.print(Panel(
+        "[cyan]Read-only traceability projection; canonical UCM unchanged[/cyan]",
+        title="Constraint lineage & audit trail",
+        border_style="cyan",
+    ))
+    console.print(explain_constraint_lineage(report))
 
 
 @app.command()
