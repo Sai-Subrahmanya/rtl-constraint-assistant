@@ -20,36 +20,46 @@ import copy
 import re
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ..config.model import ProjectConfig
 from ..constraint_model import ConstraintSet, stable_hash_cset
-from ..eda.base import ToolBackend
-from ..qor.model import QoRResult
-from ..qor.objectives import (
-    FeasibilityResult, classify_feasibility, compare_objectives,
-    compute_margin, explanation_for, is_dominating, objective_vector,
-    pareto_front, scalar_score, select_final,
-)
 from ..mcmm.aggregate import (
     mcmm_explanation_for,
-    mcmm_is_dominating,
     mcmm_pareto_front,
     mcmm_scalar_score,
     mcmm_select_final,
 )
+from ..qor.model import QoRResult
+from ..qor.objectives import (
+    classify_feasibility,
+    compute_margin,
+    explanation_for,
+    pareto_front,
+    scalar_score,
+    select_final,
+)
 from ..utils.enums import (
     CandidateDecision,
-    OptimizationStatus,
-    Priority,
     StopReason,
 )
 from ..utils.logging import get_logger
 from .budget import OptimizationBudget
 from .candidate import Candidate
+from .execution import (
+    CacheObservation,
+    ExecutionLedgerEntry,
+    ExecutionStatus,
+    FailureClassification,
+    OptimizationExecutionLedger,
+    OptimizationExecutionStopReason,
+    SubmissionStatus,
+    TaskResultClassification,
+)
 from .search import generate_candidates
 
 log = get_logger("optimizer")
@@ -73,6 +83,10 @@ class OptimizationResult:
     # Coordinator-only execution diagnostics.  They never influence QoR,
     # feasibility, cache identity, or candidate/Pareto selection.
     diagnostics: list[str] = field(default_factory=list)
+    # The typed ledger is an observability projection of this existing result,
+    # not a second optimizer state authority.
+    execution_ledger: OptimizationExecutionLedger | None = None
+    execution_stop_reason: OptimizationExecutionStopReason | None = None
 
     # Convenience counts --------------------------------------------------
     @property
@@ -114,6 +128,12 @@ class OptimizationResult:
             "candidates": [c.to_dict() for c in self.all_candidates],
             "explanation": self.explanation,
             "diagnostics": list(self.diagnostics),
+            "execution_stop_reason": (
+                self.execution_stop_reason.value if self.execution_stop_reason else None
+            ),
+            "execution_ledger": (
+                self.execution_ledger.to_dict() if self.execution_ledger else None
+            ),
         }
 
 
@@ -127,6 +147,7 @@ class _EvaluationTask:
     """
 
     ordinal: int
+    task_id: str
     # Coordinator-owned record that receives outcome classification.
     candidate: Candidate
     # Isolated callback input; a worker never receives the coordinator's
@@ -142,6 +163,9 @@ class _EvaluationOutcome:
     task: _EvaluationTask
     value: Any = None
     error: Exception | None = None
+    worker_started: bool = False
+    worker_identity: str = ""
+    failure_classification: FailureClassification = FailureClassification.NONE
 
 
 class Optimizer:
@@ -165,6 +189,20 @@ class Optimizer:
         self._next_task_ordinal = 0
         self._executor: ThreadPoolExecutor | None = None
         self._deferred_history_evidence: list[dict[str, Any]] = []
+        # This stable-per-invocation identifier is observability evidence only;
+        # it is never a candidate, QoR, or cache identity.
+        self._execution_invocation_id = f"opt_{uuid.uuid4().hex}"
+        self._execution_ledger: OptimizationExecutionLedger | None = None
+        self._active_result: OptimizationResult | None = None
+        self._application_counter = 0
+
+    def request_stop(self) -> None:
+        """Request a cooperative stop before the next optimizer boundary.
+
+        This retains the existing ``StopReason.USER_STOP`` representation;
+        ledger finalization additionally records ``explicit_optimizer_stop``.
+        """
+        self.budget.stop_reason = StopReason.USER_STOP
 
     @property
     def deferred_history_evidence(self) -> tuple[dict[str, Any], ...]:
@@ -176,6 +214,48 @@ class Optimizer:
         """
         return tuple(self._deferred_history_evidence)
 
+    def _reserve_task_context(self, candidate: Candidate, *, parallel: bool) -> tuple[int, str, Path]:
+        """Assign an ordinal and task identity before admission/submission."""
+        self._next_task_ordinal += 1
+        ordinal = self._next_task_ordinal
+        candidate_component = (
+            re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate.id).strip(".-") or "candidate"
+        )
+        if parallel:
+            if self._invocation_token is None:
+                self._invocation_token = uuid.uuid4().hex[:16]
+            task_id = f"task_{self._invocation_token}_{ordinal:04d}_{candidate_component}"
+            return ordinal, task_id, self.work_dir / "tasks" / task_id
+        task_id = f"serial_{ordinal:04d}_{candidate_component}"
+        return ordinal, task_id, self.work_dir
+
+    def _plan_ledger_entry(self, candidate: Candidate, *, ordinal: int, task_id: str,
+                           work_dir: Path, worker_identity: str) -> ExecutionLedgerEntry:
+        """Record immutable candidate planning facts before a dispatch decision."""
+        if self._execution_ledger is None:
+            raise RuntimeError("execution ledger is not initialized")
+        constraint_hash = candidate.constraint_model_hash
+        if not constraint_hash and candidate.constraint_set is not None:
+            constraint_hash = stable_hash_cset(candidate.constraint_set)
+        return self._execution_ledger.add_entry(ExecutionLedgerEntry(
+            task_ordinal=ordinal,
+            task_id=task_id,
+            candidate_id=candidate.id,
+            parent_candidate_id=candidate.parent_id,
+            generation=candidate.generation,
+            constraint_set_hash=constraint_hash,
+            mutation_identity=constraint_hash,
+            mutation_ids=list(candidate.mutated_constraint_ids),
+            mutation_labels=list(candidate.generated_changes),
+            task_work_dir=str(work_dir),
+            worker_identity=worker_identity,
+        ))
+
+    def _ledger_entry_for_task(self, task: _EvaluationTask) -> ExecutionLedgerEntry:
+        if self._execution_ledger is None:
+            raise RuntimeError("execution ledger is not initialized")
+        return self._execution_ledger.entry_for_ordinal(task.ordinal)
+
     # ------------------------------------------------------------------
     # Main entry
     # ------------------------------------------------------------------
@@ -183,8 +263,38 @@ class Optimizer:
             baseline_qor: QoRResult | None = None,
             baseline_sdc: str = "") -> OptimizationResult:
         """Run optimization and always release a parallel executor if one exists."""
+        # Do not let a failed later invocation accidentally reuse a prior
+        # result/ledger as its partial-failure artifact.
+        self._active_result = None
+        self._execution_ledger = None
         try:
-            return self._run_impl(baseline_cset, baseline_qor, baseline_sdc)
+            result = self._run_impl(baseline_cset, baseline_qor, baseline_sdc)
+            self._finalize_execution_ledger(result)
+            return result
+        except Exception as exc:
+            # Evaluation failures are isolated in worker outcomes. This is the
+            # remaining coordinator-failure boundary: preserve a partial,
+            # explicitly failed result/ledger when construction progressed far
+            # enough to have one, rather than falsely representing completion.
+            if self._active_result is None:
+                raise
+            result = self._active_result
+            message = f"OPTIMIZATION_COORDINATOR_ERROR: {type(exc).__name__}: {exc}"
+            result.diagnostics.append(message)
+            result.stop_reason = StopReason.ERROR
+            result.execution_stop_reason = OptimizationExecutionStopReason.FATAL_COORDINATOR_ERROR
+            if self._execution_ledger is not None:
+                self._execution_ledger.diagnostics.append(message)
+                for entry in self._execution_ledger.entries:
+                    if entry.execution_status in {
+                        ExecutionStatus.PLANNED,
+                        ExecutionStatus.ADMITTED,
+                        ExecutionStatus.SUBMITTED,
+                        ExecutionStatus.RUNNING,
+                    }:
+                        entry.mark_blocked(FailureClassification.COORDINATOR, message)
+            self._finalize_execution_ledger(result)
+            return result
         finally:
             # Covers coordinator exceptions as well as normal and early exits.
             # The serial path never constructs an executor.
@@ -193,7 +303,27 @@ class Optimizer:
     def _run_impl(self, baseline_cset: ConstraintSet,
                   baseline_qor: QoRResult | None = None,
                   baseline_sdc: str = "") -> OptimizationResult:
+        # An Optimizer instance can be reused programmatically. Reset only
+        # invocation-local accounting/locator state; configuration and callback
+        # remain unchanged, and each call receives a fresh ledger identity.
+        # Preserve an explicit caller stop request across that reset.
+        explicit_stop_requested = self.budget.stop_reason == StopReason.USER_STOP
+        self.budget = OptimizationBudget.from_config(self.cfg)
+        if explicit_stop_requested:
+            self.budget.stop_reason = StopReason.USER_STOP
+        self._invocation_token = None
+        self._next_task_ordinal = 0
+        self._deferred_history_evidence = []
+        self._execution_invocation_id = f"opt_{uuid.uuid4().hex}"
         result = OptimizationResult()
+        self._active_result = result
+        self._application_counter = 0
+        self._execution_ledger = OptimizationExecutionLedger(
+            invocation_id=self._execution_invocation_id,
+            workers=self.workers,
+            baseline_constraint_set_hash=stable_hash_cset(baseline_cset),
+        )
+        result.execution_ledger = self._execution_ledger
         t0 = time.time()
         opt = self.cfg.optimization
 
@@ -210,30 +340,50 @@ class Optimizer:
             mode=getattr(opt, "mode", "default"),
         )
         result.baseline = baseline
+        baseline_entry = self._plan_ledger_entry(
+            baseline, ordinal=0, task_id="baseline", work_dir=self.work_dir,
+            worker_identity="coordinator-direct",
+        )
 
         if not opt.enabled or self.evaluate_fn is None:
             baseline.qor = baseline_qor
             self._classify(baseline)
+            baseline_entry.mark_blocked(
+                FailureClassification.BLOCKED_CONFIGURATION,
+                "optimization_disabled" if not opt.enabled else "missing_evaluate_fn",
+            )
+            self._record_ledger_application(baseline, baseline_entry)
             baseline.decision = CandidateDecision.FINAL
             result.final = baseline
             result.all_candidates.append(baseline)
             result.stop_reason = StopReason.USER_STOP
+            result.execution_stop_reason = OptimizationExecutionStopReason.BLOCKED_CONFIGURATION
             result.elapsed_seconds = time.time() - t0
             result.explanation = explanation_for(baseline, baseline,
                                                  [baseline], [baseline],
                                                  self._priorities)
             return result
 
-        # Evaluate baseline if needed
+        # Evaluate baseline if needed. It remains a direct coordinator call,
+        # including with workers>1, but is recorded as task ordinal zero.
+        baseline_entry.mark_admitted()
+        baseline_entry.mark_submitted()
+        baseline_entry.mark_running()
         if baseline.qor is None or baseline.run_id == "":
             self._evaluate(baseline)
             self._classify(baseline)
+            if baseline.validity_status == "ERROR":
+                baseline_entry.mark_failed(
+                    FailureClassification.WORKER_EVALUATION,
+                    baseline.infeasible_reason,
+                )
             baseline_eda_runs = _eda_run_count(baseline)
             self.budget.tick_eda_run(baseline_eda_runs)
             result.eda_runs += baseline_eda_runs
             self._count_cache(baseline, result)
         else:
             self._classify(baseline)
+        self._record_ledger_application(baseline, baseline_entry)
 
         result.all_candidates.append(baseline)
         if baseline.blocked:
@@ -397,9 +547,25 @@ class Optimizer:
             for candidate in cands:
                 if candidate.constraint_model_hash in explored_hashes:
                     continue
+                ordinal, task_id, task_work_dir = self._reserve_task_context(
+                    candidate, parallel=False
+                )
+                entry = self._plan_ledger_entry(
+                    candidate, ordinal=ordinal, task_id=task_id, work_dir=task_work_dir,
+                    worker_identity="coordinator-direct",
+                )
+                entry.mark_admitted()
+                entry.mark_submitted()
+                entry.mark_running()
                 explored_hashes.add(candidate.constraint_model_hash)
                 self._evaluate(candidate)
                 self._finalize_candidate(candidate, baseline, result, round_candidates)
+                if candidate.validity_status == "ERROR":
+                    entry.mark_failed(
+                        FailureClassification.WORKER_EVALUATION,
+                        candidate.infeasible_reason,
+                    )
+                self._record_ledger_application(candidate, entry)
                 if self.budget.should_stop():
                     break
             if self.budget.should_stop():
@@ -417,22 +583,36 @@ class Optimizer:
         Worker completion order is intentionally ignored; outcomes are applied
         in the planned task order by this coordinator thread.
         """
-        candidates = self._plan_parallel_candidates(
+        tasks = self._plan_parallel_tasks(
             frontier_parents, baseline_cset, result, explored_hashes, mcmm_enabled
         )
-        tasks = [self._make_task(candidate) for candidate in candidates]
-        outcomes, concurrency_error, deadline_reached = self._run_parallel_tasks(tasks)
+        outcomes, concurrency_failure, deadline_reached = self._run_parallel_tasks(tasks)
         round_candidates: list[Candidate] = []
         for outcome in outcomes:
             candidate = outcome.task.candidate
+            entry = self._ledger_entry_for_task(outcome.task)
+            self._observe_parallel_outcome(entry, outcome)
             self._apply_evaluation_outcome(candidate, outcome)
             self._finalize_candidate(candidate, baseline, result, round_candidates)
+            self._record_ledger_application(candidate, entry)
+        concurrency_error = None
+        if concurrency_failure is not None:
+            detail = (
+                "executor construction failed"
+                if concurrency_failure == FailureClassification.EXECUTOR_CREATION
+                else "task submission failed"
+            )
+            concurrency_error = (
+                f"OPTIMIZATION_CONCURRENCY_ERROR: {detail} "
+                f"({concurrency_failure.value})"
+            )
+            result.execution_stop_reason = _execution_stop_from_failure(concurrency_failure)
         return round_candidates, concurrency_error, deadline_reached
 
-    def _plan_parallel_candidates(
+    def _plan_parallel_tasks(
         self, frontier_parents: list[Candidate], baseline_cset: ConstraintSet,
         result: OptimizationResult, explored_hashes: set[str], mcmm_enabled: bool,
-    ) -> list[Candidate]:
+    ) -> list[_EvaluationTask]:
         """Return the serial-order candidate prefix permitted by EDA budget.
 
         The existing serial loop accounts each complete MCMM candidate as one
@@ -440,7 +620,7 @@ class Optimizer:
         active matrix before dispatch, so a parallel batch does not oversubscribe
         ``max_eda_runs`` merely because several tasks are in flight.
         """
-        planned: list[Candidate] = []
+        planned: list[_EvaluationTask] = []
         next_id_start = len(result.all_candidates)
         projected_eda_runs = self.budget.eda_runs
         task_cost = self._planned_eda_run_cost(mcmm_enabled)
@@ -460,20 +640,37 @@ class Optimizer:
             for candidate in candidates:
                 if candidate.constraint_model_hash in explored_hashes:
                     continue
+                ordinal, task_id, task_work_dir = self._reserve_task_context(
+                    candidate, parallel=True
+                )
+                entry = self._plan_ledger_entry(
+                    candidate, ordinal=ordinal, task_id=task_id, work_dir=task_work_dir,
+                    worker_identity=f"candidate-task:{task_id}",
+                )
                 # Do not dispatch a candidate whose complete MCMM task would
                 # exceed the configured physical EDA-run budget. This check is
                 # performed before submission, not when worker completions
                 # arrive, so parallelism cannot oversubscribe the budget.
                 if projected_eda_runs + task_cost > self.budget.max_eda_runs:
+                    entry.mark_skipped(OptimizationExecutionStopReason.EDA_RUN_BUDGET.value)
                     self.budget.stop_reason = StopReason.MAX_EDA_RUNS
                     return planned
+                entry.mark_admitted()
                 explored_hashes.add(candidate.constraint_model_hash)
-                planned.append(candidate)
+                planned.append(_EvaluationTask(
+                    ordinal=ordinal,
+                    task_id=task_id,
+                    candidate=candidate,
+                    worker_candidate=_worker_candidate_snapshot(candidate),
+                    work_dir=task_work_dir,
+                ))
                 next_id_start += 1
                 projected_eda_runs += task_cost
                 if projected_eda_runs == self.budget.max_eda_runs:
+                    # Keep planning only long enough to make the next
+                    # non-admitted candidate auditable as a budget skip; it is
+                    # never submitted and does not alter scheduler semantics.
                     self.budget.stop_reason = StopReason.MAX_EDA_RUNS
-                    return planned
                 if last_permitted_iteration:
                     return planned
         return planned
@@ -484,30 +681,15 @@ class Optimizer:
         try:
             from ..mcmm import build_scenario_matrix
             return max(1, len(build_scenario_matrix(self.cfg).active_ids))
-        except Exception:
+        except Exception:  # noqa: BLE001 - boundary captures are intentional.
             # Matrix construction is already guarded by _mcmm_enabled; retain
             # safe single-task accounting if an external config-like caller
             # cannot expose the matrix.
             return 1
 
-    def _make_task(self, candidate: Candidate) -> _EvaluationTask:
-        if self._invocation_token is None:
-            self._invocation_token = uuid.uuid4().hex[:16]
-        self._next_task_ordinal += 1
-        candidate_component = (
-            re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate.id).strip(".-") or "candidate"
-        )
-        name = f"task_{self._invocation_token}_{self._next_task_ordinal:04d}_{candidate_component}"
-        return _EvaluationTask(
-            ordinal=self._next_task_ordinal,
-            candidate=candidate,
-            worker_candidate=_worker_candidate_snapshot(candidate),
-            work_dir=self.work_dir / "tasks" / name,
-        )
-
     def _run_parallel_tasks(
         self, tasks: list[_EvaluationTask],
-    ) -> tuple[list[_EvaluationOutcome], str | None, bool]:
+    ) -> tuple[list[_EvaluationOutcome], FailureClassification | None, bool]:
         """Run bounded waves and return outcomes in planned order.
 
         No ``as_completed`` ordering is used.  A construction/submission error
@@ -523,11 +705,17 @@ class Optimizer:
                     max_workers=self.workers,
                     thread_name_prefix="rca-candidate",
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
+            for task in tasks:
+                self._ledger_entry_for_task(task).mark_blocked(
+                    FailureClassification.EXECUTOR_CREATION,
+                    f"{type(exc).__name__}: {exc}",
+                )
             return (
-                [self._concurrency_error_outcome(task, "executor", exc) for task in tasks],
-                "OPTIMIZATION_CONCURRENCY_ERROR: executor construction failed "
-                f"({type(exc).__name__})",
+                [self._concurrency_error_outcome(
+                    task, FailureClassification.EXECUTOR_CREATION, exc
+                ) for task in tasks],
+                FailureClassification.EXECUTOR_CREATION,
                 False,
             )
 
@@ -537,38 +725,53 @@ class Optimizer:
         for wave_start in range(0, len(tasks), self.workers):
             if time.time() >= deadline:
                 deadline_reached = True
+                for task in tasks[wave_start:]:
+                    self._ledger_entry_for_task(task).mark_skipped(
+                        OptimizationExecutionStopReason.ELAPSED_TIME_LIMIT.value,
+                        admitted=True,
+                    )
                 break
             wave = tasks[wave_start:wave_start + self.workers]
             futures: list[tuple[_EvaluationTask, Future[_EvaluationOutcome]]] = []
             submission_error: Exception | None = None
             for task in wave:
                 try:
-                    futures.append((task, self._executor.submit(self._worker_evaluate, task)))
-                except Exception as exc:
+                    future = self._executor.submit(self._worker_evaluate, task)
+                    self._ledger_entry_for_task(task).mark_submitted()
+                    futures.append((task, future))
+                except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
                     submission_error = exc
+                    failed_entry = self._ledger_entry_for_task(task)
+                    failed_entry.submission_status = SubmissionStatus.FAILED
+                    failed_entry.mark_blocked(
+                        FailureClassification.EXECUTOR_SUBMISSION,
+                        f"{type(exc).__name__}: {exc}",
+                    )
                     break
             # Preserve planned semantic order even where a task unexpectedly
             # fails outside the worker wrapper.
             for task, future in futures:
                 try:
                     outcomes.append(future.result())
-                except Exception as exc:
-                    outcomes.append(self._concurrency_error_outcome(task, "future", exc))
+                except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
+                    outcomes.append(self._concurrency_error_outcome(
+                        task, FailureClassification.FUTURE_RETRIEVAL, exc
+                    ))
             if submission_error is not None:
                 submitted = {task.ordinal for task, _ in futures}
                 for task in tasks[wave_start:]:
-                    if task.ordinal not in submitted:
-                        outcomes.append(
-                            self._concurrency_error_outcome(
-                                task, "submission", submission_error
-                            )
+                    if task.ordinal in submitted:
+                        continue
+                    entry = self._ledger_entry_for_task(task)
+                    if entry.submission_status != SubmissionStatus.FAILED:
+                        entry.mark_cancelled(
+                            OptimizationExecutionStopReason.EXECUTOR_SUBMISSION_FAILURE.value,
+                            FailureClassification.EXECUTOR_SUBMISSION,
                         )
-                return (
-                    outcomes,
-                    "OPTIMIZATION_CONCURRENCY_ERROR: task submission failed "
-                    f"({type(submission_error).__name__})",
-                    False,
-                )
+                    outcomes.append(self._concurrency_error_outcome(
+                        task, FailureClassification.EXECUTOR_SUBMISSION, submission_error
+                    ))
+                return outcomes, FailureClassification.EXECUTOR_SUBMISSION, False
         return outcomes, None, deadline_reached
 
     def _worker_evaluate(self, task: _EvaluationTask) -> _EvaluationOutcome:
@@ -579,18 +782,52 @@ class Optimizer:
             return _EvaluationOutcome(
                 task=task,
                 value=self.evaluate_fn(task.worker_candidate, task.work_dir),
+                worker_started=True,
+                worker_identity=f"candidate-task:{task.task_id}",
             )
-        except Exception as exc:
-            return _EvaluationOutcome(task=task, error=exc)
+        except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
+            return _EvaluationOutcome(
+                task=task,
+                error=exc,
+                worker_started=True,
+                worker_identity=f"candidate-task:{task.task_id}",
+                failure_classification=FailureClassification.WORKER_EVALUATION,
+            )
 
     @staticmethod
     def _concurrency_error_outcome(
-        task: _EvaluationTask, phase: str, error: Exception,
+        task: _EvaluationTask, failure: FailureClassification, error: Exception,
     ) -> _EvaluationOutcome:
         return _EvaluationOutcome(
             task=task,
-            error=RuntimeError(f"concurrency_{phase}_error:{type(error).__name__}:{error}"),
+            error=RuntimeError(f"concurrency_{failure.value}:{type(error).__name__}:{error}"),
+            failure_classification=failure,
         )
+
+    @staticmethod
+    def _observe_parallel_outcome(entry: ExecutionLedgerEntry,
+                                  outcome: _EvaluationOutcome) -> None:
+        """Apply worker lifecycle evidence only on the coordinator thread."""
+        if entry.execution_status in {
+            ExecutionStatus.BLOCKED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.SKIPPED,
+        }:
+            return
+        if outcome.worker_started:
+            entry.worker_identity = outcome.worker_identity or entry.worker_identity
+            entry.mark_running()
+        if outcome.error is not None:
+            failure = outcome.failure_classification
+            if failure == FailureClassification.NONE:
+                failure = FailureClassification.WORKER_EVALUATION
+            if failure in {
+                FailureClassification.EXECUTOR_CREATION,
+                FailureClassification.EXECUTOR_SUBMISSION,
+            }:
+                entry.mark_blocked(failure, str(outcome.error))
+            else:
+                entry.mark_failed(failure, str(outcome.error))
 
     def _finalize_candidate(
         self, candidate: Candidate, baseline: Candidate, result: OptimizationResult,
@@ -615,6 +852,91 @@ class Optimizer:
         else:
             round_candidates.append(candidate)
 
+    def _record_ledger_application(self, candidate: Candidate,
+                                   entry: ExecutionLedgerEntry) -> None:
+        """Attach a coordinator-owned candidate outcome in application order."""
+        if self._execution_ledger is None:
+            return
+        self._application_counter += 1
+        application_order = self._application_counter
+        self._execution_ledger.coordinator_application_order.append(candidate.id)
+        cache_observation = _cache_observation(candidate.cache_status)
+        run_ids = _physical_run_ids(candidate.run_id)
+        scenario_ids = _mcmm_scenario_ids(candidate)
+        locators = [entry.task_work_dir] if entry.task_work_dir else []
+        locators.extend(f"runs/{run_id}" for run_id in run_ids)
+        eda_runs = _eda_run_count(candidate)
+        if entry.execution_status in {
+            ExecutionStatus.BLOCKED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.SKIPPED,
+            ExecutionStatus.FAILED,
+        }:
+            # A lifecycle failure is retained rather than re-labelled as a
+            # successful callback completion. Submission failures consume no
+            # EDA work even though the existing optimizer records a rejected
+            # candidate for deterministic outcome accounting.
+            if entry.submission_status != SubmissionStatus.SUBMITTED:
+                eda_runs = 0
+            entry.attach_application(
+                cache_observation=cache_observation, cache_key=candidate.cache_key,
+                cache_status=candidate.cache_status, eda_runs=eda_runs,
+                mcmm_scenario_ids=scenario_ids,
+                physical_run_ids=run_ids, artifact_locators=locators,
+                application_order=application_order,
+            )
+            return
+        if candidate.blocked:
+            classification = TaskResultClassification.BLOCKED
+            if entry.failure_classification == FailureClassification.NONE:
+                entry.failure_classification = FailureClassification.EDA_FAILURE
+                entry.failure_detail = candidate.infeasible_reason
+        elif candidate.hard_feasible:
+            classification = TaskResultClassification.FEASIBLE
+        else:
+            classification = TaskResultClassification.INFEASIBLE
+        entry.mark_completed(
+            result=classification, cache_observation=cache_observation,
+            cache_key=candidate.cache_key, cache_status=candidate.cache_status,
+            eda_runs=eda_runs,
+            mcmm_scenario_ids=scenario_ids, physical_run_ids=run_ids,
+            artifact_locators=locators, application_order=application_order,
+        )
+
+    def _finalize_execution_ledger(self, result: OptimizationResult) -> None:
+        """Freeze run-level observability fields after deterministic selection."""
+        ledger = self._execution_ledger
+        if ledger is None:
+            return
+        execution_stop = result.execution_stop_reason or self._execution_stop_reason(result)
+        result.execution_stop_reason = execution_stop
+        ledger.finalize(
+            stop_reason=execution_stop,
+            legacy_stop_reason=(result.stop_reason.value if result.stop_reason else ""),
+            final_candidate_id=result.final.id if result.final else None,
+            pareto_candidate_ids=[candidate.id for candidate in result.pareto],
+            total_eda_runs=result.eda_runs,
+        )
+        result.execution_ledger = ledger
+
+    def _execution_stop_reason(self, result: OptimizationResult) -> OptimizationExecutionStopReason:
+        """Map existing stopping semantics to a more operationally precise enum."""
+        if result.stop_reason == StopReason.ERROR:
+            return OptimizationExecutionStopReason.FATAL_COORDINATOR_ERROR
+        if result.stop_reason == StopReason.MAX_EDA_RUNS:
+            return OptimizationExecutionStopReason.EDA_RUN_BUDGET
+        if result.stop_reason == StopReason.MAX_TIME:
+            return OptimizationExecutionStopReason.ELAPSED_TIME_LIMIT
+        if result.stop_reason == StopReason.USER_STOP:
+            return OptimizationExecutionStopReason.EXPLICIT_OPTIMIZER_STOP
+        if not self._execution_ledger or len(self._execution_ledger.entries) <= 1:
+            # No generated candidate reached admission. This operational fact
+            # is distinct from normal configured budget/iteration exhaustion.
+            return OptimizationExecutionStopReason.NO_ADMISSIBLE_CANDIDATES
+        if result.stop_reason == StopReason.MAX_ITERATIONS:
+            return OptimizationExecutionStopReason.ITERATION_LIMIT
+        return OptimizationExecutionStopReason.COMPLETED_SEARCH
+
     def _shutdown_executor(self) -> None:
         if self._executor is not None:
             self._executor.shutdown(wait=True)
@@ -637,7 +959,7 @@ class Optimizer:
             from ..mcmm import build_scenario_matrix
             mat = build_scenario_matrix(self.cfg)
             return bool(mat.is_enabled and mat.scenario_count > 1)
-        except Exception:
+        except Exception:  # noqa: BLE001 - boundary captures are intentional.
             return False
 
     @staticmethod
@@ -651,7 +973,7 @@ class Optimizer:
         cand.decision = CandidateDecision.EDA_PENDING
         try:
             self._apply_evaluation_value(cand, self.evaluate_fn(cand, self.work_dir))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
             self._apply_evaluation_error(cand, exc)
 
     def _apply_evaluation_outcome(self, cand: Candidate, outcome: _EvaluationOutcome) -> None:
@@ -662,7 +984,7 @@ class Optimizer:
             return
         try:
             self._apply_evaluation_value(cand, outcome.value)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
             self._apply_evaluation_error(cand, exc)
 
     def _apply_evaluation_value(self, cand: Candidate, qor_out: Any) -> None:
@@ -829,6 +1151,38 @@ def _normalize_eval(out: Any) -> tuple[QoRResult | None, str, str, str]:
     return None, "", "", ""
 
 
+def _cache_observation(status: str) -> CacheObservation:
+    normalized = (status or "").upper()
+    if normalized in {"HIT", "CACHE_HIT"}:
+        return CacheObservation.HIT
+    if normalized in {"MISS", "CACHE_MISS"}:
+        return CacheObservation.MISS
+    if normalized in {"N_A", "NOT_APPLICABLE"}:
+        return CacheObservation.NOT_APPLICABLE
+    return CacheObservation.UNKNOWN
+
+
+def _physical_run_ids(run_id: str) -> list[str]:
+    return [item for item in (run_id or "").split(";") if item]
+
+
+def _mcmm_scenario_ids(candidate: Candidate) -> list[str]:
+    mcmm = getattr(candidate, "mcmm", None)
+    if mcmm is None:
+        return []
+    return list(getattr(mcmm, "active_scenario_ids", []) or [])
+
+
+def _execution_stop_from_failure(
+    failure: FailureClassification,
+) -> OptimizationExecutionStopReason:
+    if failure == FailureClassification.EXECUTOR_CREATION:
+        return OptimizationExecutionStopReason.EXECUTOR_CREATION_FAILURE
+    if failure == FailureClassification.EXECUTOR_SUBMISSION:
+        return OptimizationExecutionStopReason.EXECUTOR_SUBMISSION_FAILURE
+    return OptimizationExecutionStopReason.FATAL_COORDINATOR_ERROR
+
+
 def _worker_candidate_snapshot(candidate: Candidate) -> Candidate:
     """Copy the callback input so worker-side mutation cannot race coordinator state.
 
@@ -862,11 +1216,11 @@ def _clone_cset(cset: ConstraintSet) -> ConstraintSet:
     when pydantic deepcopy fails due to transient locks."""
     try:
         return cset.model_copy(deep=True)
-    except Exception:
+    except Exception:  # noqa: BLE001 - boundary captures are intentional.
         new_cs = ConstraintSet(name=getattr(cset, "name", ""))
         for c in cset:
             try:
                 new_cs.add(copy.deepcopy(c))
-            except Exception:
+            except Exception:  # noqa: BLE001 - boundary captures are intentional.
                 new_cs.add(c)
         return new_cs

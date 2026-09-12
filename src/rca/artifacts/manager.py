@@ -9,6 +9,8 @@ of inputs, tool versions, and the configuration used.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +63,7 @@ class RunManifest:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "RunManifest":
+    def from_dict(cls, d: dict[str, Any]) -> RunManifest:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
@@ -92,6 +94,32 @@ class ArtifactManager:
             encoding="utf-8",
         )
         log.debug("Wrote JSON artifact %s", p)
+        return p
+
+    def write_json_atomic(self, rel: str, data: Any) -> Path:
+        """Atomically replace one JSON artifact after fully serializing it.
+
+        Existing run artifacts remain authoritative. This is used by the
+        optimizer execution ledger so an interrupted coordinator cannot leave
+        a partially-written ledger that appears complete.
+        """
+        p = self.path(rel)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        serialized = json.dumps(data, indent=2, sort_keys=False, default=str) + "\n"
+        fd, temporary_name = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".tmp", dir=p.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as temporary:
+                temporary.write(serialized)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_name, p)
+        except Exception:
+            try:
+                os.unlink(temporary_name)
+            except OSError:
+                pass
+            raise
+        log.debug("Atomically wrote JSON artifact %s", p)
         return p
 
     def read_json(self, rel: str) -> Any:

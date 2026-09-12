@@ -12,7 +12,7 @@ import re
 import sys
 import webbrowser
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 import typer
 import uvicorn
@@ -30,33 +30,29 @@ from ..eda import (
     MockEDA,
     OpenSTABackend,
     YosysBackend,
-    get_tool,
     index_deferred_history_evidence,
     run_flow,
 )
 from ..equivalence import compare_sdc_text
-from ..exceptions import analyze_exceptions, formal_backend_from_config, verify_exceptions
-from ..explanation import design_report, explain_candidate, explain_constraint
+from ..exceptions import formal_backend_from_config
+from ..explanation import design_report, explain_constraint
 from ..inference import InferenceEngine
 from ..mcmm import (
     MCMMResult,
     build_scenario_matrix,
     mock_mcmm_evaluator,
-    scenario_cache_key,
-    scenario_semantic_key,
 )
 from ..optimizer import Optimizer
 from ..parser import SlangAdapter
 from ..provenance import AssumptionLedger
-from ..qor.model import QoRResult
 from ..qor.repository import QoRRepositoryError, SQLiteQoRRepository
-from ..scenarios import build_scenarios
 from ..sdc import SDCParser, get_backend
 from ..sdc_importer import SdcImporter
 from ..source.manifest import resolve_include_dirs, resolve_sources
 from ..timing_model import TimingGraph
 from ..utils import configure_logging, get_logger
 from ..utils.enums import SafeMode
+from ..utils.hashing import hash_file, stable_hash
 from ..validation import validate as run_validation
 from ..web import create_app
 
@@ -136,7 +132,6 @@ def _formal_backend(cfg: ProjectConfig):
 
 def _mcmm_matrix(cfg: ProjectConfig, cset: ConstraintSet):
     """Build the active scenario matrix from config + UCM (MCMM-aware)."""
-    from ..mcmm import build_scenario_matrix
     return build_scenario_matrix(cfg, cset)
 
 
@@ -193,6 +188,112 @@ def _parallel_task_flow_id(work_dir: Path, candidate_id: str, scenario_id: str) 
     return f"run_{task_component}_{candidate_component}_{scenario_component}"
 
 
+def _persist_optimizer_execution_artifacts(am: ArtifactManager, cfg: ProjectConfig,
+                                           result, *, candidates_path: Path,
+                                           pareto_path: Path, final_sdc_path: Path | None) -> dict[str, str]:
+    """Write authoritative optimizer observability artifacts before SQLite advice.
+
+    The ledger is a deterministic projection of the existing optimizer result,
+    not an alternate cache, QoR model, or database record. A small RunManifest
+    binds it to the established root optimizer artifacts without entering the
+    physical-flow cache namespace under ``runs/``.
+    """
+    if result.execution_ledger is None:
+        raise RuntimeError("optimizer returned without an execution ledger")
+    ledger_path = am.write_json_atomic(
+        result.execution_ledger.artifact_path,
+        result.execution_ledger.to_dict(),
+    )
+    state_path = am.write_json_atomic("optimizer_state.json", result.to_dict())
+    artifacts: dict[str, Path] = {
+        "optimizer_state": state_path,
+        "execution_ledger": ledger_path,
+        "candidates": candidates_path,
+        "pareto_frontier": pareto_path,
+    }
+    if final_sdc_path is not None and final_sdc_path.is_file():
+        artifacts["final_sdc"] = final_sdc_path
+    relative_artifacts = {name: path.name for name, path in artifacts.items() if path.is_file()}
+    artifact_hashes = {name: hash_file(path) for name, path in artifacts.items() if path.is_file()}
+    baseline = result.baseline
+    baseline_hash = ""
+    if baseline is not None:
+        baseline_hash = baseline.constraint_model_hash
+        if not baseline_hash and baseline.constraint_set is not None:
+            from ..constraint_model import stable_hash_cset
+            baseline_hash = stable_hash_cset(baseline.constraint_set)
+    manifest = RunManifest(
+        candidate_id=result.final.id if result.final else "",
+        config_hash=stable_hash(cfg.model_dump(mode="json")),
+        tool="rca_optimizer",
+        tool_version=__version__,
+        flow_stage="optimization",
+        artifacts=relative_artifacts,
+        artifact_hashes=artifact_hashes,
+        input_hashes={"baseline_constraint_set": baseline_hash},
+        extra={
+            "kind": "optimizer_execution",
+            "invocation_id": result.execution_ledger.invocation_id,
+            "execution_stop_reason": result.execution_stop_reason.value
+            if result.execution_stop_reason else None,
+            "legacy_stop_reason": result.stop_reason.value if result.stop_reason else None,
+            "workers": result.execution_ledger.workers,
+            "ledger_schema_version": result.execution_ledger.schema_version,
+        },
+    )
+    manifest_path = am.write_json_atomic("optimizer_execution_manifest.json", manifest.to_dict())
+    return {
+        "ledger": str(ledger_path),
+        "state": str(state_path),
+        "manifest": str(manifest_path),
+    }
+
+
+def _read_optimizer_execution_ledger(output_dir: str | Path) -> dict[str, Any] | None:
+    """Read the authoritative execution ledger without consulting SQLite."""
+    path = Path(output_dir) / "optimizer_execution_ledger.json"
+    if not path.is_file():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read optimizer execution ledger at {path}: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise TypeError(f"Optimizer execution ledger at {path} is not a JSON object.")
+    # Keep the persisted path deterministic and relative while exposing the
+    # resolved inspection location for this CLI invocation.
+    loaded["artifact_path"] = str(path)
+    return loaded
+
+
+def _print_optimizer_execution_ledger(data: dict[str, Any]) -> None:
+    """Render a concise execution ledger summary for the existing history CLI."""
+    counts = data.get("counts") or {}
+    console.print(Panel("[cyan]Optimizer execution ledger[/cyan] — artifacts remain authoritative"))
+    console.print(f"  Invocation: {data.get('invocation_id', '-')}")
+    console.print(f"  Workers: {data.get('workers', '-')}  Stop: {data.get('stop_reason', '-')}")
+    console.print(f"  Ledger: {data.get('artifact_path', '-')}")
+    console.print(
+        "  Planned: {planned}  Admitted: {admitted}  Submitted: {submitted}  "
+        "Completed: {completed}  Failed: {failed}  Skipped: {skipped}  "
+        "Cancelled: {cancelled}  Blocked: {blocked}".format(
+            planned=counts.get("planned_total", 0),
+            admitted=counts.get("admitted_total", 0),
+            submitted=counts.get("submitted_total", 0),
+            completed=counts.get("completed", 0),
+            failed=counts.get("failed", 0),
+            skipped=counts.get("skipped", 0),
+            cancelled=counts.get("cancelled", 0),
+            blocked=counts.get("blocked", 0),
+        )
+    )
+    console.print(
+        f"  EDA runs: {data.get('total_eda_runs', 0)}  "
+        f"Final: {data.get('final_candidate_id', '-') or '-'}  "
+        f"Pareto: {', '.join(data.get('pareto_candidate_ids') or []) or '-'}"
+    )
+
+
 def _print_power_summary(console, q: dict, *, indent: str = "  ") -> None:
     """Render report-derived power without implying a live/silicon measurement."""
     status = q.get("power_status", "UNAVAILABLE")
@@ -246,7 +347,7 @@ def _latest_qor_summary(cfg: ProjectConfig) -> dict | None:
     return None
 
 
-def _print_mcmm_result(console, m: "MCMMResult", matrix) -> None:
+def _print_mcmm_result(console, m: MCMMResult, matrix) -> None:
     """Print an MCMMResult with full per-scenario auditability (Step 12 §14)."""
     from rich.table import Table
     _print_scenario_matrix(console, matrix)
@@ -313,7 +414,7 @@ def _record_standalone_mcmm_history(cfg: ProjectConfig, cset: ConstraintSet,
             session, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
         )
         return session_id, None
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
         return None, f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
 
 
@@ -492,7 +593,7 @@ def generate(config: str = typer.Argument(..., help="Path to project YAML"),
 
 @app.command()
 def validate(config: str = typer.Argument(..., help="Path to project YAML"),
-             sdc: Optional[str] = typer.Option(None, help="Path to existing SDC to validate"),
+             sdc: str | None = typer.Option(None, help="Path to existing SDC to validate"),
              backend: str = typer.Option("generic", help="SDC backend name")):
     """Validate generated (or imported) SDC against design model."""
     configure_logging(level="INFO")
@@ -611,7 +712,6 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
         raise typer.Exit(code=2) from exc
     result = compare_sdc_text(text_a, text_b, source_a=a, source_b=b)
     if json_out:
-        import json as _json
         console.print_json(data=result.to_dict())
         return
     status_color = {
@@ -644,8 +744,7 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
             console.print(f"      {escape(finding.explanation)}")
     if result.different_constraints:
         console.print("\n[bold]Top semantic differences:[/bold]")
-        shown = 0
-        for p in result.different_constraints:
+        for shown, p in enumerate(result.different_constraints):
             if shown >= 10:
                 console.print(f"  … and {len(result.different_constraints)-shown} more")
                 break
@@ -665,7 +764,6 @@ def compare(config: str = typer.Argument(..., help="Path to project YAML"),
                 provenance.append(f"B={p.b_provenance!r}")
             if provenance:
                 console.print(f"      Provenance: {escape('; '.join(provenance))}")
-            shown += 1
     if result.only_in_left:
         console.print("\n[bold]Only in A:[/bold]")
         for p in result.only_in_left[:10]:
@@ -709,7 +807,6 @@ def explain_cmd(config: str = typer.Argument(..., help="Path to project YAML"),
         if not cset_path.is_file():
             console.print("[red]Run `rca generate` first to produce a constraint model.[/red]")
             raise typer.Exit(1)
-        from ..constraint_model import ConstraintSet as _CS  # not used directly
         # Load and rebuild
         design, _ = _do_parse(cfg); tg = _do_timing(cfg, design)
         ledger = AssumptionLedger()
@@ -721,7 +818,6 @@ def explain_cmd(config: str = typer.Argument(..., help="Path to project YAML"),
         console.print(explain_constraint(c))
         return
     if candidate_id:
-        p = am.path("candidates.jsonl")
         console.print("[yellow]Candidate explanation requires the optimizer DB; load candidates.jsonl.[/yellow]")
         return
     console.print("Specify --constraint ID to explain a constraint.")
@@ -730,17 +826,17 @@ def explain_cmd(config: str = typer.Argument(..., help="Path to project YAML"),
 @app.command(name="run-sta")
 def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
             backend: str = typer.Option("yosys_opensta", help="EDA flow: yosys_opensta|mock"),
-            sdc: Optional[str] = typer.Option(None, help="SDC file to use (defaults to generated)"),
+            sdc: str | None = typer.Option(None, help="SDC file to use (defaults to generated)"),
             force: bool = typer.Option(False, "--force", help="Bypass cache and rerun"),
             allow_partial_sdc: bool = typer.Option(False, "--allow-partial-sdc",
                                                   help="Exploratory: allow PARTIAL SDC to reach STA")):
     """Run synthesis + STA on the design and collect QoR (Step 10)."""
     configure_logging(level="INFO")
     cfg = _load(config)
-    design, parse_diags = _do_parse(cfg)
+    design, _parse_diags = _do_parse(cfg)
     tg = _do_timing(cfg, design)
     ledger = AssumptionLedger()
-    cset, inf_report = _do_inference(cfg, design, tg, ledger)
+    cset, _inf_report = _do_inference(cfg, design, tg, ledger)
     sdc_backend = get_backend("opensta" if "opensta" in backend else "generic")
     am = _am(cfg)
 
@@ -790,7 +886,14 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
         })
         # Keep the established mcmm_report.json layout untouched, then build
         # the existing MCMM model solely for relational aggregate indexing.
-        from ..mcmm import BLOCKED, ScenarioQoR, aggregate_objectives, finalize_limiting, global_feasibility, global_margin
+        from ..mcmm import (
+            BLOCKED,
+            ScenarioQoR,
+            aggregate_objectives,
+            finalize_limiting,
+            global_feasibility,
+            global_margin,
+        )
         aggregate = MCMMResult(candidate_id="baseline", active_scenario_ids=list(matrix.active_ids))
         for sid in matrix.active_ids:
             scenario = matrix.scenario(sid)
@@ -936,7 +1039,6 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
     runs_dir = am.path("runs") / "opt"
     runs_dir.mkdir(parents=True, exist_ok=True)
     sdc_backend = get_backend("opensta" if "opensta" in backend else "generic")
-    libs = [Path(p) for p in cfg.flow.liberty_files()]
     sources = resolve_sources(cfg)
 
     # ---- MCMM (Step 12 §13) ----
@@ -1004,47 +1106,47 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
 
     opt = Optimizer(cfg, evaluate_fn=evaluate, work_dir=runs_dir)
     result = opt.run(cset)
-    am.write_json("optimizer_state.json", result.to_dict())
-    # Candidates JSONL
+    # Candidates JSONL remains the established interoperable candidate record.
     cj_path = am.path("candidates.jsonl")
     with cj_path.open("w") as f:
         for c in result.all_candidates:
             f.write(json.dumps(c.to_dict(), default=str) + "\n")
-    # Pareto
-    am.write_json("pareto_frontier.json", [c.to_dict() for c in result.pareto])
-    # Final SDC
+    pareto_path = am.write_json("pareto_frontier.json", [c.to_dict() for c in result.pareto])
+    final_sdc_path = None
     if result.final and result.final.constraint_set:
         final_sdc = sdc_backend.render(result.final.constraint_set, design_name=cfg.project.name)
-        am.write_text("design.final.sdc", final_sdc)
-    # The existing optimizer JSON/JSONL artifacts remain canonical. Parallel
-    # workers return completed physical-flow evidence rather than writing
-    # SQLite; consume it here in task-list order before session persistence.
-    # A database issue only emits a warning and never changes candidate, EDA,
-    # artifact, QoR, or cache semantics; ``rca history --import-legacy`` can
-    # later reconcile the authoritative manifests.
+        final_sdc_path = am.write_text("design.final.sdc", final_sdc)
+    # Persist existing optimizer state plus the new deterministic ledger and
+    # its normal RunManifest before advisory SQLite work begins.
+    execution_artifacts = _persist_optimizer_execution_artifacts(
+        am, cfg, result, candidates_path=cj_path, pareto_path=pareto_path,
+        final_sdc_path=final_sdc_path,
+    )
+    # Parallel workers return completed physical-flow evidence rather than
+    # writing SQLite. The coordinator consumes it in deterministic task order.
+    # Database warnings are advisory and intentionally do not rewrite the
+    # authoritative optimizer state/ledger/manifest artifacts.
     for evidence in opt.deferred_history_evidence:
         warning = index_deferred_history_evidence(evidence)
         if warning:
-            result.diagnostics.append(warning)
             console.print(f"[yellow]{warning}[/yellow]")
-    # Preserve coordinator persistence diagnostics in the already-established
-    # optimizer state artifact without creating a separate concurrency record.
-    am.write_json("optimizer_state.json", result.to_dict())
 
     history_session_id = None
     try:
         history_session_id = SQLiteQoRRepository.for_output_dir(cfg.flow.output_dir).record_optimizer_session(
             result, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - boundary captures are intentional.
         warning = f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
-        result.diagnostics.append(warning)
-        am.write_json("optimizer_state.json", result.to_dict())
         console.print(f"[yellow]{warning}[/yellow]")
     console.print(Panel("[cyan bold]Optimization complete[/cyan bold]"))
     if history_session_id:
         console.print(f"  Historical QoR session: {history_session_id}")
     console.print(f"  Stop reason: {result.stop_reason.value if result.stop_reason else 'n/a'}")
+    console.print(
+        f"  Execution stop: {result.execution_stop_reason.value if result.execution_stop_reason else 'n/a'}"
+    )
+    console.print(f"  Execution ledger: {execution_artifacts['ledger']}")
     console.print(f"  Iterations:  {result.iterations}  EDA runs: {result.eda_runs}  Elapsed: {result.elapsed_seconds:.1f}s")
     console.print(f"  Pareto size: {len(result.pareto)}")
     if mcmm_enabled:
@@ -1062,9 +1164,9 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
                     continue
                 s_wns = (f"{sq.qor.setup_wns * 1e9:.3f}" if sq.qor and sq.qor.setup_wns is not None else "-")
                 h_wns = (f"{sq.qor.hold_wns * 1e9:.3f}" if sq.qor and sq.qor.hold_wns is not None else "-")
+                utilization = f"{sq.margin_utilization:.2f}" if sq.margin_utilization is not None else "-"
                 console.print(f"    [{sid} {sq.mode}/{sq.corner}] {sq.status}  "
-                              f"setup={s_wns}ns  hold={h_wns}ns  "
-                              f"util={('%.2f' % sq.margin_utilization) if sq.margin_utilization is not None else '-'}")
+                              f"setup={s_wns}ns  hold={h_wns}ns  util={utilization}")
                 if sq.qor:
                     _print_power_summary(console, sq.qor.summary(), indent="      ")
         elif q:
@@ -1083,7 +1185,7 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
     """Print a full human-readable report."""
     configure_logging(level="WARNING")
     cfg = _load(config)
-    design, diag = _do_parse(cfg)
+    design, _diag = _do_parse(cfg)
     tg = _do_timing(cfg, design)
     ledger = AssumptionLedger()
     cset, _ = _do_inference(cfg, design, tg, ledger)
@@ -1114,9 +1216,16 @@ def history(
     constraint_set_hash: str | None = typer.Option(None, "--constraint-set", help="Constraint-set hash"),
     best: str | None = typer.Option(None, "--best", help="setup_wns|area|power"),
     import_legacy: bool = typer.Option(False, "--import-legacy", help="Explicitly index existing run artifacts"),
+    optimization_ledger: bool = typer.Option(
+        False, "--optimization-ledger",
+        help="Read the authoritative optimizer execution ledger (no SQLite query)",
+    ),
     include_mock: bool = typer.Option(False, "--include-mock", help="Include mock evidence in best queries"),
     area_source: str | None = typer.Option(None, "--area-source", help="real|proxy for --best area"),
-    output_dir: str = typer.Option("output", "--output-dir", help="Flow output directory containing qor.sqlite3"),
+    output_dir: str = typer.Option(
+        "output", "--output-dir",
+        help="Flow output directory containing optimizer artifacts and/or qor.sqlite3",
+    ),
     config: str | None = typer.Option(None, "--config", help="Project YAML; supplies flow.output_dir"),
     json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
 ):
@@ -1125,16 +1234,33 @@ def history(
         output_dir = str(_load(config).flow.output_dir)
     selectors = sum(value is not None for value in (
         run_id, candidate_id, scenario_id, constraint_set_hash, best,
-    ))
+    )) + int(optimization_ledger)
     if import_legacy and selectors:
         console.print("[red]--import-legacy cannot be combined with a query selector.[/red]")
         raise typer.Exit(code=2)
     if selectors > 1:
-        console.print("[red]Choose one of --run-id, --candidate, --scenario, --constraint-set, or --best.[/red]")
+        console.print(
+            "[red]Choose one of --run-id, --candidate, --scenario, --constraint-set, "
+            "--best, or --optimization-ledger.[/red]"
+        )
         raise typer.Exit(code=2)
     if session_id and not candidate_id:
         console.print("[red]--session requires --candidate.[/red]")
         raise typer.Exit(code=2)
+    if optimization_ledger:
+        try:
+            data = _read_optimizer_execution_ledger(output_dir)
+        except (TypeError, ValueError) as exc:
+            console.print(f"[red]Optimizer execution ledger error: {exc}[/red]")
+            raise typer.Exit(code=2) from exc
+        if json_out:
+            sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+            return
+        if data is None:
+            console.print("[yellow]No optimizer execution ledger artifact found.[/yellow]")
+            return
+        _print_optimizer_execution_ledger(data)
+        return
     repo = SQLiteQoRRepository.for_output_dir(output_dir)
     try:
         if import_legacy:
@@ -1201,7 +1327,7 @@ def inspect(config: str = typer.Argument(..., help="Path to project YAML"),
 
 
 @app.command()
-def dashboard(config: Optional[str] = typer.Argument(None, help="Path to project YAML (optional)"),
+def dashboard(config: str | None = typer.Argument(None, help="Path to project YAML (optional)"),
               host: str = typer.Option("127.0.0.1"), port: int = typer.Option(8765),
               open_browser: bool = typer.Option(True)):
     """Launch the RCA web dashboard."""
@@ -1222,13 +1348,13 @@ def _run_dashboard(cfg=None, host="127.0.0.1", port=8765, open_browser=True, res
         try:
             webbrowser.open(url)
         except Exception:
-            pass
+            log.debug("Could not open dashboard browser", exc_info=True)
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 @app.command(name="import")
 def import_sdc(sdc: str = typer.Argument(..., help="Path to SDC file to import"),
-               config: Optional[str] = typer.Option(None, "--config", "-c", help="Project config (enables design-aware resolution)"),
+               config: str | None = typer.Option(None, "--config", "-c", help="Project config (enables design-aware resolution)"),
                verbose: bool = typer.Option(False, "--verbose", "-v")):
     """Import an existing SDC file into the UCM and print a summary."""
     configure_logging(level="WARNING" if not verbose else "INFO")
@@ -1271,10 +1397,9 @@ def version():
 
 
 @app.command()
-def doctor(config: Optional[str] = typer.Argument(None, help="Optional project YAML for library/tool config")):
+def doctor(config: str | None = typer.Argument(None, help="Optional project YAML for library/tool config")):
     """Report environment / tool availability (Step 10 §32)."""
     import platform as _platform
-    import shutil as _shutil
     console.print(Panel("[cyan]RCA DIAGNOSTICS[/cyan]"))
     t = Table(); t.add_column("Item"); t.add_column("Value")
     t.add_row("Python", sys.version.split()[0])
@@ -1284,23 +1409,23 @@ def doctor(config: Optional[str] = typer.Argument(None, help="Optional project Y
     try:
         import pyslang  # type: ignore
         t.add_row("pyslang", f"available ({getattr(pyslang, '__version__', 'unknown')})")
-    except Exception:
+    except Exception:  # noqa: BLE001 - boundary captures are intentional.
         t.add_row("pyslang", "[yellow]unavailable[/yellow]")
     # Yosys
     try:
         y = YosysBackend()
         yi = y.discover()
-        avail = f"[green]available[/green]" if yi.available else "[yellow]unavailable[/yellow]"
+        avail = "[green]available[/green]" if yi.available else "[yellow]unavailable[/yellow]"
         t.add_row("yosys", f"{avail}  {yi.executable}  {yi.version}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - boundary captures are intentional.
         t.add_row("yosys", f"[red]error: {e}[/red]")
     # OpenSTA
     try:
         o = OpenSTABackend()
         oi = o.discover()
-        avail = f"[green]available[/green]" if oi.available else "[yellow]unavailable[/yellow]"
+        avail = "[green]available[/green]" if oi.available else "[yellow]unavailable[/yellow]"
         t.add_row("opensta", f"{avail}  {oi.executable}  {oi.version}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - boundary captures are intentional.
         t.add_row("opensta", f"[red]error: {e}[/red]")
     # Liberty config
     if config:
@@ -1310,7 +1435,7 @@ def doctor(config: Optional[str] = typer.Argument(None, help="Optional project Y
             t.add_row("Liberty files", "; ".join(libs) if libs else "[yellow]none configured[/yellow]")
             t.add_row("Project top", cfg.top_module())
             t.add_row("Output dir", cfg.flow.output_dir)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - boundary captures are intentional.
             t.add_row("config", f"[red]failed to load: {e}[/red]")
     else:
         t.add_row("Liberty files", "[dim](pass project.yaml to see)[/dim]")

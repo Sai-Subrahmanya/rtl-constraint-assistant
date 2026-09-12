@@ -440,8 +440,9 @@ The repository preserves run/candidate/session/scenario/cache/tool/constraint id
 | `__init__.py` | — | Re-exports. |
 | `candidate.py` | ~90 | `Candidate`: wraps a `ConstraintSet` with an `id` (C000, C001…), a `parent_id`, `mutations_applied`, `feasible`, `qr: QoRResult | None`, and a `score`. |
 | `budget.py` | ~80 | `TimingBudgetAllocator`: apportions available slack across input/output delays and clock uncertainty as the optimizer tightens/loosens budgets (Manual §122 — timing-margin utilization). |
-| `base.py` | ~60 | Abstract `Optimizer` ABC with `step(...)` interface. |
-| `search.py` | ~220 | `ParetoSearchOptimizer`: closed-loop driver. Iterates: (1) score current candidates, (2) reject infeasible (WNS<0 or hold<0), (3) filter Pareto front, (4) mutate the best candidates (tune I/O delays, uncertainty, design rules within bounds and **only for TUNABLE constraints — FIXED/FORMAL/USER are never touched**), (5) invoke the EDA backend on each, (6) record QoR, (7) stop on `max_iterations`, `convergence` (front stable for N iterations), `no_improvement`, or `timeout`. Produces `OptimizationResult` (pareto_front, history, best, stop_reason, n_eda_runs, elapsed). |
+| `base.py` | — | Closed-loop optimizer, bounded candidate scheduling, candidate/QoR/Pareto selection, and the coordinator-owned execution-ledger projection attached to `OptimizationResult`. |
+| `execution.py` | — | **Step 23.** Typed execution/admission/submission/result/failure/cache/stop enums plus the deterministic per-invocation ledger. It is observability only, never a cache or QoR authority. |
+| `search.py` | ~220 | Candidate generation/mutation helpers. Only TUNABLE constraints are changed; FIXED/FORMAL/USER constraints are never touched. |
 
 ### 5.18 `src/rca/scenarios/` — MCMM scenario helpers (WP-P)
 
@@ -760,8 +761,8 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca coverage [CONFIG]` | Print only the coverage metrics (clock/in/out %). |  |
 | `rca explain [CONFIG] [CONSTRAINT_ID]` | Print natural-language explanation(s) of one or all constraints (evidence, assumptions, source). |  |
 | `rca run-sta [CONFIG]` | Synthesize with Yosys and/or run OpenSTA with current SDC; print timing report. | `--eda {yosys,opensta,mock}`, `--sdc FILE` |
-| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization; after its established files are written, records a session-scoped local historical index. Candidate concurrency is configured only with `optimization.workers` (1–8; default 1). | `--backend`, `--dashboard` |
-| `rca history` | Query the local `<flow.output_dir>/qor.sqlite3` sidecar or explicitly import existing run artifacts. Never executes EDA, optimization, or cache reuse. | `--config`, `--output-dir`, `--run-id`, `--candidate --session`, `--scenario`, `--constraint-set`, `--best {setup_wns,area,power}`, `--area-source {real,proxy}`, `--import-legacy`, `--json` |
+| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization. It atomically persists an authoritative execution ledger and normal manifest before recording advisory history. Candidate concurrency is configured only with `optimization.workers` (1–8; default 1). | `--backend`, `--dashboard` |
+| `rca history` | Query the local `<flow.output_dir>/qor.sqlite3` sidecar, explicitly import existing run artifacts, or read the authoritative optimizer ledger without SQLite. Never executes EDA, optimization, or cache reuse. | `--config`, `--output-dir`, `--run-id`, `--candidate --session`, `--scenario`, `--constraint-set`, `--best {setup_wns,area,power}`, `--area-source {real,proxy}`, `--import-legacy`, `--optimization-ledger`, `--json` |
 | `rca inspect [CONFIG] {module,port,net,register,clock,path}` | Structured inspection sub-tables of the design model (e.g. `rca inspect project.yaml port` prints all ports). |  |
 | `rca report [CONFIG]` | Human-readable design report (clocks, resets, domains, missing info, validation, constraint list) — Rich formatted. |  |
 | `rca dashboard [CONFIG]` | Start the FastAPI web dashboard (uvicorn). | `--port 8765`, `--open-browser/--no-open-browser`, `--host 0.0.0.0` |
@@ -1050,6 +1051,21 @@ observe completed in-flight work; it does not promise a performance gain. Run
 `python scripts/benchmark_candidate_concurrency.py --workers 1,2,4` for the
 small controlled fake-evaluator measurement harness. See
 `STEP22_CANDIDATE_CONCURRENCY.md` and ADR-005 for the full contract.
+
+### Optimizer execution ledger
+
+Every `Optimizer.run()` now attaches an `OptimizationExecutionLedger` to the
+existing `OptimizationResult`. It records deterministic task ordinals, candidate
+lineage, typed planned/admitted/submitted/running/completed/failed/skipped/
+cancelled/blocked lifecycle evidence, ordered coordinator application, observed
+cache/EDA/MCMM/run/artifact facts, and a typed execution stop classification.
+It does not alter candidate semantics, cache keys, MCMM behavior, or Step 22
+scheduler ordering. `rca optimize` atomically writes
+`optimizer_execution_ledger.json`, `optimizer_state.json`, and
+`optimizer_execution_manifest.json` before advisory SQLite indexing. Inspect it
+without SQLite using `rca history --optimization-ledger [--json] --output-dir
+<dir>`. See `STEP23_OPTIMIZATION_OBSERVABILITY.md` and ADR-006 for the full
+contract and real-EDA reproducibility limits.
 
 ---
 
