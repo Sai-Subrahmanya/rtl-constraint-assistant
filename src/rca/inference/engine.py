@@ -47,7 +47,6 @@ from ..utils.enums import (
 from ..utils.hashing import stable_hash
 from ..utils.logging import get_logger
 from ..utils.units import parse_time_string
-from ..validation import validate as run_validation
 from . import clock_rules, generated_clock_rules, io_rules, relationship_rules, reset_rules
 from .rules import (
     InferenceAcceptanceResult,
@@ -595,6 +594,9 @@ class InferenceEngine:
             provenance=copy.deepcopy(constraint.provenance),
             rationale=constraint.provenance.explanation or f"Existing inference proposed {constraint.type.value}.",
             source_snapshot_identity=dict(source_identity),
+            candidate_semantic_identity=stable_hash((
+                (normalize_constraint(constraint), stable_hash(constraint.to_canonical_dict())),
+            )),
             constraint_template=constraint.to_canonical_dict(),
             assumptions=tuple(sorted(set(constraint.assumption_ids) | set(constraint.provenance.assumption_ids))),
             warnings=tuple(sorted(warnings)),
@@ -998,150 +1000,37 @@ class InferenceEngine:
         design: Design | None = None,
         tg: TimingGraph | None = None,
     ) -> InferenceAcceptanceResult:
-        """Explicitly add a valid advisory candidate to canonical UCM.
+        """Backward-compatible Step-27 acceptance adapter.
 
-        Acceptance is intentionally narrow: only structurally-supported,
-        complete candidates classified ``INFERRED``/``ACCEPTABLE`` may enter
-        UCM.  This prevents a display-order choice, missing numeric input,
-        knowledge-only suggestion, or conflicting fixed user intent from being
-        materialized. Existing UCM constraints are never edited or removed.
+        Step 28 centralizes every candidate-to-UCM transition in
+        :func:`apply_intent_decision`. This legacy return shape is retained for
+        callers that have not yet adopted the richer application receipt.
         """
-        if candidate.status != InferenceStatus.INFERRED or candidate.decision != InferenceDecision.ACCEPTABLE:
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=((f"Candidate is {candidate.status.value}/{candidate.decision.value}; "
-                           "only INFERRED/ACCEPTABLE candidates can be explicitly accepted."),),
-            )
-        if candidate.constraint_template is None or candidate.missing_information:
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=("Candidate lacks a complete canonical UCM template or has unresolved information.",),
-            )
-        if design is None or tg is None:
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=("Design and timing graph snapshots are required for safe candidate acceptance.",),
-            )
-        if stable_hash_cset(cset) != candidate.source_snapshot_identity.get("constraint_set"):
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=("Candidate was created against a different UCM snapshot; reinfer before acceptance.",),
-            )
-        if stable_hash(design.snapshot()) != candidate.source_snapshot_identity.get("design"):
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=("Candidate was created against a different design snapshot; reinfer before acceptance.",),
-            )
-        if stable_hash(tg.model_dump()) != candidate.source_snapshot_identity.get("timing_graph"):
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=("Candidate was created against a different timing-graph snapshot; reinfer before acceptance.",),
-            )
-        try:
-            proposed = Constraint.from_canonical_dict(
-                copy.deepcopy(candidate.constraint_template), unknown_field_policy="error",
-            )
-        except (TypeError, ValueError) as exc:
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=(f"Candidate template is invalid: {type(exc).__name__}: {exc}",),
-            )
-        unsupported = has_unsupported_options(proposed)
-        if unsupported:
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=("Candidate semantic status is UNKNOWN: " + "; ".join(sorted(unsupported)),),
-            )
-        missing_dependencies = sorted(set(proposed.dependency_ids) - set(cset.constraints))
-        missing_assumptions = sorted(
-            (set(proposed.assumption_ids) | set(proposed.provenance.assumption_ids)) - set(cset.ledger)
+        from .application import (
+            ApplicationStatus,
+            ConstraintApplication,
+            IntentDecision,
+            IntentDecisionKind,
+            apply_intent_decision,
         )
-        if missing_dependencies or missing_assumptions:
-            parts: list[str] = []
-            if missing_dependencies:
-                parts.append("missing dependency IDs: " + ", ".join(missing_dependencies))
-            if missing_assumptions:
-                parts.append("missing assumption IDs: " + ", ".join(missing_assumptions))
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=("Cannot preserve source links safely: " + "; ".join(parts),),
-            )
-        proposed_norm = normalize_constraint(proposed)
-        proposed_match = semantic_match_key(proposed)
-        duplicates = sorted(existing.id for existing in cset
-                            if not has_unsupported_options(existing)
-                            and normalize_constraint(existing) == proposed_norm)
-        if duplicates:
-            return InferenceAcceptanceResult(
-                "DUPLICATE", candidate.id, duplicate_of=duplicates[0],
-                warnings=("Equivalent UCM intent already exists; no duplicate was added.",),
-            )
-        conflicts = sorted(existing.id for existing in cset
-                           if not has_unsupported_options(existing)
-                           and semantic_match_key(existing) == proposed_match)
-        if conflicts:
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id, conflict_ids=tuple(conflicts),
-                warnings=("Same-scope UCM intent differs; fixed user intent is authoritative and was untouched.",),
-            )
-        # Validate on a deep-cloned UCM first. The existing validation pipeline
-        # remains authoritative and no caller UCM mutation occurs on failure.
-        trial = cset.clone()
-        source_constraint_id = proposed.id
-        proposed.id = ""
-        trial_added = trial.add(proposed.clone())
-        validation = run_validation(design=design, tg=tg, cset=trial)
-        candidate_issues = tuple(
-            issue.to_dict() for issue in validation.report.issues
-            if issue.constraint_id == trial_added.id or trial_added.id in issue.related_constraint_ids
+
+        decision = IntentDecision(candidate_id=candidate.id, kind=IntentDecisionKind.ACCEPT)
+        application = ConstraintApplication(candidate=candidate, decision=decision)
+        outcome = apply_intent_decision(
+            application, cset, design, tg, _retry_duplicates_before_stale=False,
         )
-        if any(issue["severity"] in {"CRITICAL", "HIGH", "ERROR"} for issue in candidate_issues):
-            return InferenceAcceptanceResult(
-                "REJECTED", candidate.id,
-                warnings=("Existing validation rejected the candidate; caller UCM was not changed.",),
-                validation_issues=candidate_issues,
-            )
-        # Record explicit acceptance as canonical provenance evidence; all rule
-        # evidence/assumptions stay intact. The status axis is set by the human
-        # acceptance, while the source remains INFERENCE rather than being
-        # rewritten as if it originated in user syntax.
-        proposed.status = ConstraintStatus.CONFIRMED
-        proposed.provenance.add_evidence(Evidence(
-            id="INF-ACCEPT-" + stable_hash({
-                "candidate_id": candidate.id,
-                "source_constraint_id": source_constraint_id,
-                "semantic": proposed_norm,
-            })[:16],
-            kind="rule",
-            description="Explicit advisory inference acceptance into canonical UCM.",
-            detail={
-                "candidate_id": candidate.id,
-                "source_constraint_id": source_constraint_id,
-                "source_snapshot_identity": dict(candidate.source_snapshot_identity),
-                "knowledge_references": [dict(item) for item in candidate.knowledge_references],
-                "candidate_warnings": list(candidate.warnings),
-                "acceptance_state": "EXPLICIT_ACCEPTED",
-            },
-            confidence=proposed.confidence,
-            rule_id="INFERENCE-ACCEPT",
-            created_by="rca.inference",
-            created_at=_CANDIDATE_EPOCH,
-        ))
-        added = cset.add(proposed)
-        # The UCM's ordinary metadata is the durable association for advisory
-        # context that does not belong to a constraint's timing semantics.
-        accepted_metadata = cset.metadata.setdefault("accepted_inference", {})
-        accepted_metadata[added.id] = {
-            "candidate_id": candidate.id,
-            "knowledge_references": [dict(item) for item in candidate.knowledge_references],
-            "warnings": list(candidate.warnings),
-            "assumptions": list(candidate.assumptions),
-            "source_snapshot_identity": dict(candidate.source_snapshot_identity),
+        status_map = {
+            ApplicationStatus.APPLIED: "ACCEPTED",
+            ApplicationStatus.ALREADY_PRESENT: "DUPLICATE",
         }
         return InferenceAcceptanceResult(
-            "ACCEPTED", candidate.id, constraint_id=added.id,
-            warnings=("Added only after explicit acceptance; canonical provenance/evidence was preserved.",),
-            validation_issues=candidate_issues,
+            status_map.get(outcome.status, "REJECTED"),
+            candidate.id,
+            constraint_id=outcome.applied_constraint_ids[0] if outcome.applied_constraint_ids else None,
+            duplicate_of=outcome.already_present_ids[0] if outcome.already_present_ids else None,
+            conflict_ids=outcome.conflict_ids,
+            warnings=(*outcome.blocking_reasons, *outcome.warnings),
+            validation_issues=outcome.validation_issues,
         )
 
 

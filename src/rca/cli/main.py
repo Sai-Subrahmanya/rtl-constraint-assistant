@@ -24,7 +24,7 @@ from rich.table import Table
 from .. import __version__
 from ..artifacts import ArtifactManager, RunManifest
 from ..config.model import ProjectConfig, default_config, load_config, write_config
-from ..constraint_model import ConstraintSet
+from ..constraint_model import ConstraintSet, SnapshotFormatError
 from ..design_model import Design
 from ..eda import (
     MockEDA,
@@ -38,7 +38,14 @@ from ..eda import (
 from ..equivalence import compare_sdc_text
 from ..exceptions import SymbiYosysFormalBackend, formal_backend_from_config
 from ..explanation import design_report, explain_constraint
-from ..inference import InferenceEngine
+from ..inference import (
+    ApplicationStatus,
+    ConstraintApplication,
+    InferenceEngine,
+    IntentDecision,
+    IntentDecisionKind,
+    apply_intent_decision,
+)
 from ..mcmm import (
     MCMMResult,
     build_scenario_matrix,
@@ -127,6 +134,30 @@ def _do_inference(cfg: ProjectConfig, design: Design, tg: TimingGraph, ledger: A
     cset = ConstraintSet(name=cfg.project.name)
     report = engine.run(design, tg, cfg, cset, ledger)
     return cset, report
+
+
+def _load_canonical_ucm(path: str | None, cfg: ProjectConfig) -> ConstraintSet:
+    """Load an optional existing canonical UCM snapshot without repairing it."""
+    if path is None:
+        return ConstraintSet(name=cfg.project.name)
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise TypeError("canonical UCM snapshot must be a JSON object")
+        return ConstraintSet.from_snapshot_dict(payload, unknown_field_policy="error")
+    except (OSError, TypeError, ValueError, json.JSONDecodeError, SnapshotFormatError) as exc:
+        console.print(f"[red]Cannot load canonical UCM snapshot: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+def _write_canonical_ucm(cset: ConstraintSet, output: str | None, cfg: ProjectConfig) -> Path:
+    """Persist an explicitly applied UCM using its existing canonical format."""
+    if output is not None:
+        path = Path(output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(cset.to_canonical_json(), encoding="utf-8")
+        return path
+    return _am(cfg).write_json_atomic("applied_constraint_model.json", cset.to_snapshot_dict())
 
 
 def _am(cfg: ProjectConfig) -> ArtifactManager:
@@ -493,6 +524,7 @@ def analyze(config: str = typer.Argument(..., help="Path to project YAML"),
 
 @app.command()
 def infer(config: str = typer.Argument(..., help="Path to project YAML"),
+          ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM JSON snapshot"),
           json_out: bool = typer.Option(False, "--json", help="Output deterministic advisory JSON only")):
     """Report non-mutating, evidence-backed constraint candidates.
 
@@ -504,7 +536,7 @@ def infer(config: str = typer.Argument(..., help="Path to project YAML"),
     cfg = _load(config)
     design, _ = _do_parse(cfg)
     tg = _do_timing(cfg, design)
-    baseline = ConstraintSet(name=cfg.project.name)
+    baseline = _load_canonical_ucm(ucm, cfg)
     report = InferenceEngine().infer_candidates(
         design, tg, cfg, baseline, AssumptionLedger(), knowledge=KnowledgeEngine(),
     )
@@ -552,6 +584,98 @@ def infer(config: str = typer.Argument(..., help="Path to project YAML"),
         for conflict in report.conflicts[:10]:
             console.print(f"  - {conflict.get('message', conflict)}")
     _maybe_print_matrix(cfg, baseline, console)
+
+
+@app.command()
+def apply(
+    config: str = typer.Argument(..., help="Path to project YAML"),
+    candidate: str = typer.Option(..., "--candidate", help="Reviewed advisory candidate ID to resolve"),
+    decision: str = typer.Option(..., "--decision", help="Explicit ACCEPT|REJECT|DEFER|CONFIRM|ALREADY_SATISFIED"),
+    ucm: str | None = typer.Option(None, "--ucm", help="Existing canonical UCM JSON snapshot"),
+    scenario_ids: Annotated[list[str] | None, typer.Option("--scenario", help="Explicit candidate scenario scope (repeatable)")] = None,
+    output: str | None = typer.Option(None, "--output", help="Canonical UCM snapshot written only after application"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate isolated application without mutating or writing UCM"),
+    json_out: bool = typer.Option(False, "--json", help="Output deterministic application receipt JSON only"),
+):
+    """Explicitly resolve one advisory candidate into canonical UCM intent.
+
+    The command recomputes the reviewed candidate against the supplied
+    canonical UCM snapshot, requires an explicit decision, and writes a
+    canonical UCM snapshot only after the existing validation pipeline passes.
+    It never applies all candidates or emits SDC.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    cfg = _load(config)
+    design, _ = _do_parse(cfg)
+    tg = _do_timing(cfg, design)
+    cset = _load_canonical_ucm(ucm, cfg)
+    report = InferenceEngine().infer_candidates(
+        design, tg, cfg, cset, AssumptionLedger(), knowledge=KnowledgeEngine(),
+    )
+    selected = next((item for item in report.candidates if item.id == candidate), None)
+    if selected is None:
+        payload = {
+            "candidate_id": candidate,
+            "status": "INVALID",
+            "ucm_mutated": False,
+            "blocking_reasons": ["Candidate ID was not found in fresh deterministic inference output."],
+        }
+        if json_out:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            console.print("[red]Candidate ID was not found in fresh deterministic inference output.[/red]")
+        raise typer.Exit(code=2)
+    try:
+        decision_kind = IntentDecisionKind(decision.strip().upper())
+    except ValueError:
+        payload = {
+            "candidate_id": candidate,
+            "status": "INVALID",
+            "ucm_mutated": False,
+            "blocking_reasons": [f"Unsupported explicit decision: {decision!r}"],
+        }
+        if json_out:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            console.print(f"[red]Unsupported explicit decision: {decision!r}[/red]")
+        raise typer.Exit(code=2)
+    application = ConstraintApplication(
+        candidate=selected,
+        decision=IntentDecision(candidate_id=candidate, kind=decision_kind),
+        scenario_ids=tuple(scenario_ids or ()),
+        dry_run=dry_run,
+    )
+    outcome = apply_intent_decision(application, cset, design, tg, cfg)
+    output_path: Path | None = None
+    if outcome.ucm_mutated:
+        output_path = _write_canonical_ucm(cset, output, cfg)
+    payload = outcome.to_dict()
+    if output_path is not None:
+        payload["canonical_ucm_output"] = str(output_path)
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        return
+    color = {
+        ApplicationStatus.APPLIED: "green",
+        ApplicationStatus.ALREADY_PRESENT: "green",
+        ApplicationStatus.DEFERRED: "yellow",
+        ApplicationStatus.REJECTED: "yellow",
+    }.get(outcome.status, "red")
+    console.print(Panel(
+        f"[bold]{outcome.status.value}[/bold] — candidate {outcome.candidate_id}\n"
+        f"UCM mutated: {outcome.ucm_mutated}",
+        title="Controlled constraint application", border_style=color,
+    ))
+    if outcome.applied_constraint_ids:
+        console.print("Applied UCM constraints: " + ", ".join(outcome.applied_constraint_ids))
+    if outcome.already_present_ids:
+        console.print("Already present UCM constraints: " + ", ".join(outcome.already_present_ids))
+    for reason in outcome.blocking_reasons:
+        console.print(f"[yellow]Blocked: {reason}[/yellow]")
+    for warning in outcome.warnings:
+        console.print(f"[dim]{warning}[/dim]")
+    if output_path is not None:
+        console.print(f"[green]Canonical UCM snapshot written to {output_path}[/green]")
 
 
 @app.command()

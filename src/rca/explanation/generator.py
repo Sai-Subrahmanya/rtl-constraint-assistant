@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..constraint_model import Constraint, ConstraintSet
+from ..inference.application import ConstraintApplicationResult
 from ..inference.rules import InferenceCandidate
 from ..optimizer import Candidate
 
@@ -65,6 +66,51 @@ def explain_inference_candidate(candidate: InferenceCandidate) -> str:
         lines.append("  Knowledge: " + str(reference.get("knowledge_item_id", "?"))
                      + " (advisory only)")
     lines.append("  UCM state: NOT_ACCEPTED")
+    return "\n".join(lines)
+
+
+def explain_constraint_application(receipt: ConstraintApplicationResult) -> str:
+    """Explain a Step-28 application receipt without recasting advice as user intent.
+
+    The receipt remains the authoritative typed outcome. This rendering only
+    exposes its decision, validation, snapshots, and inherited evidence for a
+    reviewer; it does not write UCM, artifacts, or history.
+    """
+    lines = [
+        f"Constraint application {receipt.application_id}: {receipt.status.value}",
+        f"  Candidate: {receipt.candidate_id}",
+        f"  Explicit decision: {receipt.decision.value}",
+        f"  UCM mutated: {receipt.ucm_mutated}",
+        (
+            f"  UCM snapshot: {receipt.ucm_before_snapshot_identity} -> "
+            f"{receipt.ucm_after_snapshot_identity}"
+        ),
+    ]
+    if receipt.candidate_semantic_identity:
+        lines.append(f"  Candidate semantic identity: {receipt.candidate_semantic_identity}")
+    if receipt.scenario_ids:
+        lines.append(f"  Scenario scope: {list(receipt.scenario_ids)}")
+    if receipt.applied_constraint_ids:
+        lines.append(f"  Applied UCM constraints: {list(receipt.applied_constraint_ids)}")
+    if receipt.already_present_ids:
+        lines.append(f"  Already present UCM constraints: {list(receipt.already_present_ids)}")
+    if receipt.conflict_ids:
+        lines.append(f"  Conflicting UCM constraints: {list(receipt.conflict_ids)}")
+    if receipt.rejected_constraint_ids:
+        lines.append(f"  Rejected candidate constraints: {list(receipt.rejected_constraint_ids)}")
+    if receipt.validation_status:
+        lines.append(f"  Validation: {receipt.validation_status}")
+    if receipt.validation_summary:
+        lines.append("  Validation summary: " + str(receipt.validation_summary))
+    for issue in receipt.validation_issues:
+        lines.append("    validation: " + str(issue.get("message", issue)))
+    for reason in receipt.blocking_reasons:
+        lines.append(f"  Blocked: {reason}")
+    for warning in receipt.warnings:
+        lines.append(f"  Warning: {warning}")
+    for evidence in receipt.application_evidence:
+        lines.append(f"    evidence[{evidence.kind}/{evidence.rule_id}]: {evidence.description}")
+    lines.append("  Origin: advisory inference; application does not relabel this as user-authored intent.")
     return "\n".join(lines)
 
 

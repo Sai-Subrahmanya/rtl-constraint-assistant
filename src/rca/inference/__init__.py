@@ -1,3 +1,14 @@
+from .application import (
+    ApplicationEvidence,
+    ApplicationStatus,
+    ConstraintApplication,
+    ConstraintApplicationResult,
+    IntentDecision,
+    IntentDecisionKind,
+    apply_constraint_application,
+    apply_intent_decision,
+    candidate_semantic_identity,
+)
 from .engine import InferenceEngine, InferenceReport, accept_inference_candidate
 from .rules import (
     InferenceAcceptanceResult,
@@ -12,6 +23,10 @@ from .rules import (
 )
 
 __all__ = [
+    "ApplicationEvidence",
+    "ApplicationStatus",
+    "ConstraintApplication",
+    "ConstraintApplicationResult",
     "InferenceAcceptanceResult",
     "InferenceCandidate",
     "InferenceDecision",
@@ -20,8 +35,13 @@ __all__ = [
     "InferenceReport",
     "InferenceResult",
     "InferenceStatus",
+    "IntentDecision",
+    "IntentDecisionKind",
     "MissingInformation",
     "ProposedConstraint",
     "Rule",
     "accept_inference_candidate",
+    "apply_constraint_application",
+    "apply_intent_decision",
+    "candidate_semantic_identity",
 ]

@@ -27,9 +27,14 @@ outcomes and never treats structural analysis as a proof.
 > **Inference advice**: `rca infer` reports deterministic structural facts,
 > candidates, ambiguity, conflicts, and missing information without changing
 > UCM or coverage. It never fabricates clock periods, I/O budgets, generated
-> clock details, relationships, or timing exceptions. A complete candidate can
-> enter UCM only through explicit API acceptance and existing validation. See
-> `docs/STEP27_CONSTRAINT_INFERENCE.md`.
+> clock details, relationships, or timing exceptions.
+>
+> **Controlled application**: a complete advisory candidate enters canonical
+> UCM only through one explicit `ACCEPT`/`CONFIRM` decision, snapshot,
+> semantic/conflict, dependency/assumption, MCMM-scope, and isolated existing
+> validation checks. `rca apply` resolves one named candidate—never all of
+> them—and its dry run never writes UCM, SDC, coverage, or history. See
+> [`docs/STEP28_CONSTRAINT_APPLICATION.md`](docs/STEP28_CONSTRAINT_APPLICATION.md).
 
 ---
 
@@ -48,38 +53,47 @@ rca analyze project.yaml
 rca infer project.yaml
 rca infer project.yaml --json
 
-# 3. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
+# 3. When the advisory JSON contains an evidence-complete ACCEPTABLE candidate,
+#    review it and safely preview exactly that one candidate (this never changes UCM).
+#    Copy IC-... from the advisory JSON; --candidate and --decision are required.
+rca apply project.yaml --candidate IC-... --decision ACCEPT --dry-run --json
+
+# 4. After review, explicitly apply that one validated candidate to a canonical UCM snapshot.
+#    This writes only reviewed-ucm.json; it never applies all candidates or emits SDC.
+rca apply project.yaml --candidate IC-... --decision ACCEPT --output reviewed-ucm.json --json
+
+# 5. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
 rca generate project.yaml --backend generic
 rca generate project.yaml --backend opensta
 
-# 4. Validate generated constraints
+# 6. Validate generated constraints
 #    (also runs mapped SymbiYosys jobs when formal.backend: symbiyosys is configured)
 rca validate project.yaml
 
-# 5. Show coverage
+# 7. Show coverage
 rca coverage project.yaml
 
-# 6. Inspect real-EDA prerequisites without executing synthesis or STA
+# 8. Inspect real-EDA prerequisites without executing synthesis or STA
 rca doctor project.yaml --json
 
-# 7. Run Yosys + OpenSTA only when doctor reports the real boundary ready
+# 9. Run Yosys + OpenSTA only when doctor reports the real boundary ready
 #    and flow.liberty names your readable Liberty collateral.
 rca run-sta project.yaml --backend yosys_opensta
 
-# 8. Multi-objective optimization (mock EDA backend works without tools)
+# 10. Multi-objective optimization (mock EDA backend works without tools)
 rca optimize project.yaml --backend mock
 
-# 9. Query the local historical QoR repository (never executes EDA)
+# 11. Query the local historical QoR repository (never executes EDA)
 rca history --config project.yaml --best setup_wns
 
-# 10. Search offline vendor-neutral constraint knowledge (advisory only)
+# 12. Search offline vendor-neutral constraint knowledge (advisory only)
 rca knowledge search "false path" --json
 rca knowledge suggest project.yaml --json
 
-# 11. Full human-readable report
+# 13. Full human-readable report
 rca report project.yaml
 
-# 12. Launch the web dashboard
+# 14. Launch the web dashboard
 rca dashboard project.yaml
 ```
 
@@ -170,7 +184,7 @@ rtl-constraint-assistant/
 │   ├── timing_model/    # Clock, Reset, ClockDomain, TimingPath, TimingGraph
 │   ├── constraint_model/# Universal Constraint Model, ConstraintSet, selectors, scenarios
 │   ├── provenance/      # Evidence, AssumptionLedger, ProvenanceRecord
-│   ├── inference/       # Rule registry + clock/reset/IO/gclk rules + engine
+│   ├── inference/       # Advisory rules/engine + explicit controlled application
 │   ├── validation/      # References, conflicts, coverage, master validator
 │   ├── exceptions/      # Exception analysis + conservative/SymbiYosys formal backends
 │   ├── equivalence/     # Normalization + semantic comparison
@@ -203,7 +217,8 @@ rtl-constraint-assistant/
 |--------------------|---------|
 | `rca init`         | Scaffold a new project directory with an RTL template. |
 | `rca analyze`      | Parse/elaborate RTL, report structural findings & missing info. |
-| `rca infer`        | Report non-mutating structural facts and advisory candidates (`--json` available); no candidate is applied to UCM. |
+| `rca infer`        | Report non-mutating structural facts and advisory candidates (`--ucm SNAPSHOT.json`, `--json` available); no candidate is applied to UCM. |
+| `rca apply`        | Resolve exactly one named advisory candidate with required `--candidate` and explicit `--decision`; validates an isolated UCM projection, supports `--dry-run`, optional repeatable `--scenario`, and writes a canonical snapshot only after a mutation. Never applies all candidates or emits SDC/history. |
 | `rca generate`     | Emit SDC (generic/opensta/synopsys/cadence backend). |
 | `rca validate`     | Validate generated or imported SDC; runs configured SymbiYosys exception proofs if opted in. |
 | `rca coverage`     | Per-category coverage report with uncovered objects. |

@@ -86,7 +86,16 @@ class InferenceCandidate:
     provenance: ProvenanceRecord
     rationale: str
     source_snapshot_identity: dict[str, str]
+    # Digest of the canonical proposal(s), distinct from candidate ID and all
+    # lifecycle/validation/trust labels. Step 28 combines semantic normalization
+    # and canonical-template content in this digest before UCM mutation, so a
+    # caller cannot strip reviewed links/provenance from serialized templates.
+    candidate_semantic_identity: str | None = None
     constraint_template: dict[str, Any] | None = None
+    # A backward-compatible extension for an advisory finding that needs a
+    # coordinated set of UCM constraints. An empty tuple means use the legacy
+    # single ``constraint_template`` field. It is still advisory-only.
+    constraint_templates: tuple[dict[str, Any], ...] = ()
     knowledge_references: tuple[dict[str, Any], ...] = ()
     assumptions: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
@@ -110,7 +119,9 @@ class InferenceCandidate:
             "provenance": self.provenance.to_dict(),
             "rationale": self.rationale,
             "source_snapshot_identity": dict(sorted(self.source_snapshot_identity.items())),
+            "candidate_semantic_identity": self.candidate_semantic_identity,
             "constraint_template": copy.deepcopy(self.constraint_template),
+            "constraint_templates": [copy.deepcopy(item) for item in self.constraint_templates],
             "knowledge_references": [dict(item) for item in sorted(
                 self.knowledge_references,
                 key=lambda item: (str(item.get("knowledge_item_id", "")), str(item.get("suggestion_id", ""))),
