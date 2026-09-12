@@ -173,6 +173,9 @@ class FlowConfig(BaseModel):
     stage: str = "synthesis_sta"
     liberty: str | list[str] | None = None
     output_dir: str = "output"
+    # Per external-tool invocation. This is an execution guard/provenance
+    # setting, not a semantic QoR/cache identity input.
+    tool_timeout_seconds: int = Field(default=600, ge=1)
     power_reports: list[PowerReportConfig] = Field(default_factory=list)
 
     def flow_stage(self) -> FlowStage:

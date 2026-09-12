@@ -209,6 +209,10 @@ PROJECT_SCHEMA: dict = {
                     ],
                 },
                 "output_dir": {"type": "string", "default": "output"},
+                "tool_timeout_seconds": {
+                    "type": "integer", "minimum": 1, "default": 600,
+                    "description": "Per external Yosys/OpenSTA invocation timeout in seconds.",
+                },
                 "power_reports": {
                     "type": "array",
                     "items": {

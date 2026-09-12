@@ -6,10 +6,12 @@
 RCA parses Verilog/SystemVerilog RTL, builds a normalized design model, infers
 clocks/resets/domains, and generates vendor-portable SDC with full provenance.
 It validates constraints for correctness, coverage and conflicts, and — when
-integrated with Yosys/OpenSTA (or commercial Synopsys/Cadence tools) — runs a
+explicitly provisioned with Yosys/OpenSTA plus project collateral — runs a
 closed-loop **multi-objective Pareto optimizer** that explores legitimate
 candidate constraints while preserving fixed user intent and enforcing
-correctness before any QoR optimization (Manual §2.2, §39). For reviewed
+correctness before any QoR optimization (Manual §2.2, §39). Synopsys and
+Cadence support remains SDC dialect rendering only; RCA does not execute or
+emulate commercial tools. For reviewed
 false-path and multicycle exceptions, users can optionally map explicit
 SymbiYosys (`sby`) proof jobs to UCM constraint IDs; RCA records their formal
 outcomes and never treats structural analysis as a proof.
@@ -43,19 +45,23 @@ rca validate project.yaml
 # 5. Show coverage
 rca coverage project.yaml
 
-# 6. Run synthesis (Yosys) + STA when a Liberty library is available
+# 6. Inspect real-EDA prerequisites without executing synthesis or STA
+rca doctor project.yaml --json
+
+# 7. Run Yosys + OpenSTA only when doctor reports the real boundary ready
+#    and flow.liberty names your readable Liberty collateral.
 rca run-sta project.yaml --backend yosys_opensta
 
-# 7. Multi-objective optimization (mock EDA backend works without tools)
+# 8. Multi-objective optimization (mock EDA backend works without tools)
 rca optimize project.yaml --backend mock
 
-# 8. Query the local historical QoR repository (never executes EDA)
+# 9. Query the local historical QoR repository (never executes EDA)
 rca history --config project.yaml --best setup_wns
 
-# 9. Full human-readable report
+# 10. Full human-readable report
 rca report project.yaml
 
-# 10. Launch the web dashboard
+# 11. Launch the web dashboard
 rca dashboard project.yaml
 ```
 
@@ -103,7 +109,7 @@ GENERATED CONSTRAINTS (3)
                                             OpenSTA, Synopsys, Cadence)
                                                      │
                                                      ▼
-                                       Yosys / OpenSTA / commercial STA
+                     explicit Yosys / OpenSTA boundary (commercial execution unsupported)
                                                      │
                                                      ▼
                     QoR artifacts + local SQLite history sidecar
@@ -185,13 +191,63 @@ rtl-constraint-assistant/
 | `rca coverage`     | Per-category coverage report with uncovered objects. |
 | `rca compare --a A.sdc --b B.sdc` | Semantic UCM-level diff between two SDC files with scenario and provenance context; unsupported or unresolved intent is reported as `UNKNOWN`, never equivalent. |
 | `rca explain -c CID` | Explain why a constraint exists and its evidence. |
-| `rca run-sta`      | Run synthesis + STA and collect QoR. |
+| `rca doctor [CONFIG] --json` | Run bounded executable/collateral readiness diagnostics; never executes synthesis, STA, or proofs. |
+| `rca run-sta`      | Run the explicitly selected `mock` or `yosys_opensta` flow; real prerequisites fail closed with retained preflight evidence. |
 | `rca optimize`     | Closed-loop multi-objective optimization; `optimization.workers` is the only bounded candidate-concurrency control (1–8, default 1), and it atomically writes an authoritative execution ledger before advisory QoR history indexing. |
 | `rca history`      | Query/import the local SQLite QoR history sidecar, or inspect the artifact-authoritative optimizer ledger with `--optimization-ledger [--json]`. Never runs EDA, optimization, or cache reuse. |
 | `rca inspect`      | Inspect clocks/resets/ports/registers/modules. |
 | `rca report`       | Full human-readable design + constraints report. |
 | `rca dashboard`    | Launch the FastAPI web UI. |
 | `rca version`      | Print version. |
+
+---
+
+## Real EDA preflight and evidence (Step 25)
+
+`mock` and `yosys_opensta` are explicit, separate choices. RCA never changes a
+failed or unavailable real request into a mock result. Before a real run, it
+performs a bounded, non-executing preflight of the selected backend, safe
+Yosys/OpenSTA version probes, RTL and include collateral, Liberty files, the
+fresh generated SDC, and the run-output locations. Use the same check directly:
+
+```bash
+rca doctor project.yaml
+rca doctor project.yaml --json > doctor.json
+```
+
+The JSON document includes RCA/Python information, the project SDC backend as
+configuration context, Yosys/OpenSTA readiness, optional SymbiYosys readiness,
+Liberty/collateral findings, a deterministic non-secret environment fingerprint,
+and an explicit classification such as `executable_missing`,
+`collateral_missing`, `configuration_invalid`, or `unsupported`. A version probe
+is bounded and runs no synthesis, STA, or proof job. `run-sta` writes an
+explicit prerequisite diagnostic and exits non-zero when the real boundary is
+not ready.
+
+A real `run-sta` needs a compatible Yosys executable, OpenSTA executable, and
+at least one readable Liberty file. Set the per-tool timeout explicitly when
+needed; it is a run guard/provenance setting rather than a QoR/cache identity:
+
+```yaml
+flow:
+  liberty: /absolute/or/project-relative/path/to/cells.lib
+  tool_timeout_seconds: 600
+```
+
+Each real or mock run has exactly one authoritative run-local
+`output/runs/<run-id>/run_manifest.json`. It retains backend/tool versions,
+argv/cwd/timeout and bounded diagnostic tails, input and output hashes, QoR and
+configured power-report provenance, explicit `MOCK`/`REAL` execution mode,
+execution/failure status, and the non-secret environment fingerprint. Failed,
+timed-out, missing-output, or
+malformed-output real invocations remove prior current-run timing/power/QoR
+outputs before execution and never produce a successful QoR or cache hit.
+`QoRResult` remains canonical QoR; the manifest/hash filesystem evidence
+remains cache authority and SQLite remains an advisory history sidecar.
+
+Commercial SDC dialects (`synopsys`, `cadence`) remain serializers only. RCA
+reports commercial execution as unsupported/unavailable; it does not invent
+PrimeTime, Tempus, or signoff results.
 
 ---
 
@@ -303,6 +359,7 @@ With your permission, the following enhancements were incorporated (documented h
 4. **JSON Schema** for the project configuration (versioned).
 5. **Pytest validation taxonomy** with separate unit, golden/reference, integration, regression-runner, stress/concurrency, and opt-in real-EDA categories. The default suite uses deterministic mock/fake fixtures only; `tests/integration/test_optional_real_eda.py` is skipped unless a user explicitly provides tools and collateral. See `STEP24_VALIDATION.md` for current category counts, failure coverage, and commands.
 6. **Deterministic hashing** utilities for reproducibility/caching.
+7. **Step 25 real-EDA boundary hardening**: typed preflight, bounded argv-only subprocess evidence, stale-output protection, one authoritative run manifest, and controlled fake-tool coverage. See `STEP25_REAL_EDA_HARDENING.md`.
 
 ---
 
@@ -316,7 +373,8 @@ pytest tests/golden -q                         # reference outputs
 pytest tests/integration -q                    # parser-to-artifact workflows (real EDA tests skip by default)
 pytest tests/stress -q                         # short deterministic scheduler stress suite
 python scripts/setup/verify_environment.py     # no-install prerequisite report
-python scripts/eda/diagnose_eda.py --config project.yaml  # version-probe-only EDA diagnostic
+rca doctor project.yaml --json                 # bounded real-EDA/formal readiness evidence
+python scripts/eda/diagnose_eda.py --config project.yaml  # legacy version-probe-only EDA diagnostic
 ruff check src/ tests/                         # lint
 mypy src/rca                                   # type-check
 make example                                   # run simple_counter end-to-end
@@ -328,6 +386,26 @@ provide `RCA_REAL_EDA_LIBERTY`; missing prerequisites produce **SKIPPED**
 optional tests, never fabricated results. `AVAILABLE` in an environment
 diagnostic means only that a version probe succeeded, not that signoff or a
 complete flow is guaranteed. See `STEP24_VALIDATION.md`.
+
+## Docker local setup
+
+The default image is RCA plus its declared Python/runtime dependencies only:
+
+```bash
+docker build -t rca .
+docker run --rm -v "$PWD:/work" rca doctor /work/project.yaml --json
+```
+
+Yosys is an explicit convenience target, not a required Python dependency:
+
+```bash
+docker build --target open-source-yosys -t rca:yosys .
+```
+
+Neither image bundles OpenSTA, a Liberty/PDK, activity data, or proprietary
+software. It does not download tools at container runtime. Provision compatible
+open-source executables and project collateral deliberately, then run `rca
+doctor`; the container and RCA do not claim signoff.
 
 ## References
 

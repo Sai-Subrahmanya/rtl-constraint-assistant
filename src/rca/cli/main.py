@@ -31,10 +31,12 @@ from ..eda import (
     OpenSTABackend,
     YosysBackend,
     index_deferred_history_evidence,
+    preflight_symbiyosys,
+    preflight_yosys_opensta,
     run_flow,
 )
 from ..equivalence import compare_sdc_text
-from ..exceptions import formal_backend_from_config
+from ..exceptions import SymbiYosysFormalBackend, formal_backend_from_config
 from ..explanation import design_report, explain_constraint
 from ..inference import InferenceEngine
 from ..mcmm import (
@@ -990,6 +992,16 @@ def run_sta(config: str = typer.Argument(..., help="Path to project YAML"),
     console.print(Panel(f"[cyan]EDA RUN[/cyan]  id={result['run_id']}"))
     console.print(f"  Status: [{status_color}]{status}[/]")
     console.print(f"  Run dir: {result['run_dir']}")
+    preflight = result.get("preflight")
+    if isinstance(preflight, dict):
+        preflight_state = "READY" if preflight.get("ready") else "BLOCKED"
+        console.print(f"  Real-EDA preflight: {preflight_state}"
+                      f"  ({preflight.get('failure_classification') or 'no failure'})")
+        if not preflight.get("ready"):
+            for check in preflight.get("checks", []):
+                if check.get("required") and not check.get("ready"):
+                    console.print(f"    - {check.get('component')}: {check.get('status')} — "
+                                  f"{check.get('detail')}")
     if result.get("synth") and isinstance(result["synth"], dict):
         si = result["synth"].get("tool_info") or {}
         yinfo = si.get("yosys") if isinstance(si, dict) else None
@@ -1402,49 +1414,127 @@ def version():
 
 
 @app.command()
-def doctor(config: str | None = typer.Argument(None, help="Optional project YAML for library/tool config")):
-    """Report environment / tool availability (Step 10 §32)."""
-    import platform as _platform
-    console.print(Panel("[cyan]RCA DIAGNOSTICS[/cyan]"))
-    t = Table(); t.add_column("Item"); t.add_column("Value")
-    t.add_row("Python", sys.version.split()[0])
-    t.add_row("RCA version", __version__)
-    t.add_row("Platform", _platform.platform())
-    # pyslang availability
-    try:
-        import pyslang  # type: ignore
-        t.add_row("pyslang", f"available ({getattr(pyslang, '__version__', 'unknown')})")
-    except Exception:  # noqa: BLE001 - boundary captures are intentional.
-        t.add_row("pyslang", "[yellow]unavailable[/yellow]")
-    # Yosys
-    try:
-        y = YosysBackend()
-        yi = y.discover()
-        avail = "[green]available[/green]" if yi.available else "[yellow]unavailable[/yellow]"
-        t.add_row("yosys", f"{avail}  {yi.executable}  {yi.version}")
-    except Exception as e:  # noqa: BLE001 - boundary captures are intentional.
-        t.add_row("yosys", f"[red]error: {e}[/red]")
-    # OpenSTA
-    try:
-        o = OpenSTABackend()
-        oi = o.discover()
-        avail = "[green]available[/green]" if oi.available else "[yellow]unavailable[/yellow]"
-        t.add_row("opensta", f"{avail}  {oi.executable}  {oi.version}")
-    except Exception as e:  # noqa: BLE001 - boundary captures are intentional.
-        t.add_row("opensta", f"[red]error: {e}[/red]")
-    # Liberty config
+def doctor(
+    config: str | None = typer.Argument(None, help="Optional project YAML for collateral checks"),
+    backend: str = typer.Option("yosys_opensta", "--backend", help="EDA boundary to preflight"),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine-readable preflight evidence"),
+):
+    """Run bounded, non-executing real-EDA and formal readiness checks.
+
+    This command discovers executables and checks configured collateral only.
+    It never runs synthesis, STA, or formal proof jobs, and never falls back to
+    mock.  ``run-sta --backend mock`` remains an explicit separate choice.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    cfg = None
+    configuration_error = ""
     if config:
         try:
             cfg = _load(config)
-            libs = cfg.flow.liberty_files() or []
-            t.add_row("Liberty files", "; ".join(libs) if libs else "[yellow]none configured[/yellow]")
-            t.add_row("Project top", cfg.top_module())
-            t.add_row("Output dir", cfg.flow.output_dir)
-        except Exception as e:  # noqa: BLE001 - boundary captures are intentional.
-            t.add_row("config", f"[red]failed to load: {e}[/red]")
+        except (OSError, ValueError) as exc:
+            configuration_error = f"{type(exc).__name__}: {exc}"
+
+    selected_backend = backend
+    yinfo = YosysBackend().discover()
+    oinfo = OpenSTABackend().discover()
+    # Use configured source paths directly here: the normal resolver omits
+    # missing files for parser convenience, while doctor must report each
+    # configured missing collateral path in its typed preflight.
+    sources = [Path(item) for item in cfg.sources.files] if cfg else []
+    include_dirs = [Path(item) for item in cfg.sources.include_dirs] if cfg else []
+    liberty = [Path(item) for item in (cfg.flow.liberty_files() if cfg else [])]
+    output = Path(cfg.flow.output_dir) if cfg else Path.cwd()
+    # There is no generated SDC before a flow request. The doctor reports the
+    # expected fresh location as a non-required observation rather than
+    # pretending that a generated SDC exists.
+    expected_sdc = output / "generated.sdc"
+    config_identity = (
+        cfg.model_dump(mode="json", exclude={"config_path", "project_root"}) if cfg else {}
+    )
+    preflight = preflight_yosys_opensta(
+        backend=selected_backend, top=cfg.top_module() if cfg else "", sources=sources,
+        liberty=liberty, sdc_path=None, output_dir=output,
+        expected_outputs=[output / "top_synth.v"],
+        yosys_info=yinfo, opensta_info=oinfo,
+        liberty_hashes={str(path): hash_file(path) for path in liberty if path.is_file()},
+        config_hash=stable_hash({"config": config_identity, "backend": selected_backend}),
+        include_dirs=include_dirs,
+    )
+    # A doctor does not emit SDC, so make that expected future input explicit
+    # but non-blocking in the rendered result.
+    checks = [check.to_dict() for check in preflight.checks]
+    for check in checks:
+        if check["component"] == "generated_sdc":
+            check.update({"required": False, "ready": True, "status": "not_required",
+                          "classification": "available",
+                          "detail": "generated during a real flow before execution",
+                          "path": str(expected_sdc)})
+    preflight_data = preflight.to_dict()
+    preflight_data["checks"] = checks
+    preflight_data["ready"] = not configuration_error and all(item["ready"] for item in checks)
+    preflight_data["overall_status"] = "environment_ready" if preflight_data["ready"] else "configuration_invalid"
+    preflight_data["failure_classification"] = (
+        "configuration_invalid" if configuration_error
+        else (None if preflight_data["ready"] else preflight_data["failure_classification"])
+    )
+
+    formal_executable = ""
+    formal_version = None
+    proof_paths: list[Path] = []
+    if cfg and cfg.formal.backend == "symbiyosys":
+        formal = SymbiYosysFormalBackend(
+            executable=cfg.formal.symbiyosys_executable,
+            work_dir=Path(cfg.formal.work_dir), timeout_seconds=cfg.formal.timeout_seconds,
+        )
+        formal_executable = formal.executable
+        formal_version = formal.get_version()
+        proof_paths = [Path(proof.sby_file) for proof in cfg.formal.proofs]
     else:
-        t.add_row("Liberty files", "[dim](pass project.yaml to see)[/dim]")
-    console.print(t)
+        formal = SymbiYosysFormalBackend(work_dir=output)
+        formal_executable = formal.executable
+        formal_version = formal.get_version()
+    formal_preflight = preflight_symbiyosys(
+        executable=formal_executable, version=formal_version, proofs=proof_paths,
+        sources=sources, config_hash=preflight_data["environment_fingerprint"],
+        required=bool(cfg and cfg.formal.backend == "symbiyosys"),
+    )
+    result = {
+        "kind": "rca_doctor",
+        "rca_version": __version__,
+        "python": sys.version.split()[0],
+        "configuration": {"path": str(Path(config).resolve()) if config else None,
+                          "configured_backend": cfg.flow.backend if cfg else None,
+                          "error": configuration_error or None},
+        "preflight": preflight_data,
+        "formal_preflight": formal_preflight.to_dict(),
+        "mock_policy": "mock is available only when explicitly selected",
+        "signoff": "not claimed",
+    }
+    if json_out:
+        typer.echo(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return
+
+    console.print(Panel("[cyan]RCA REAL-EDA PREFLIGHT[/cyan] — no tools executed"))
+    console.print(f"  RCA: {result['rca_version']}  Python: {result['python']}")
+    if configuration_error:
+        console.print(f"  Configuration: [red]INVALID[/red] {configuration_error}")
+    else:
+        configured = result["configuration"]["configured_backend"]
+        suffix = f" (project SDC backend: {configured})" if configured else ""
+        console.print(f"  Backend: {selected_backend}{suffix}  Overall: "
+                      f"[{'green' if preflight_data['ready'] else 'yellow'}]"
+                      f"{preflight_data['overall_status']}[/]")
+    table = Table(title="Yosys/OpenSTA checks")
+    table.add_column("Component"); table.add_column("Status"); table.add_column("Detail")
+    for check in checks:
+        table.add_row(check["component"], check["status"], check["detail"])
+    console.print(table)
+    formal_table = Table(title="SymbiYosys checks")
+    formal_table.add_column("Component"); formal_table.add_column("Status"); formal_table.add_column("Detail")
+    for check in formal_preflight.to_dict()["checks"]:
+        formal_table.add_row(check["component"], check["status"], check["detail"])
+    console.print(formal_table)
+    console.print("[dim]Mock is not selected automatically. Tool discovery is not a successful EDA run or signoff.[/dim]")
 
 
 _DEFAULT_RTL = """// Auto-generated by `rca init`

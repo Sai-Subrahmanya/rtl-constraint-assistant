@@ -1,7 +1,8 @@
-# Test Plan — RCA Validation, Formal, Semantic Comparison, Power, and QoR History (Steps 11–15, 20–21)
+# Test Plan — RCA Validation, Formal, Semantic Comparison, Power, QoR History, and Real-EDA Boundaries (Steps 11–15, 20–25)
 
 This test plan describes validation-engine, concrete formal-adapter,
-semantic-comparison, and conservative power-report-ingestion coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
+semantic-comparison, conservative power-report-ingestion, and real-EDA
+execution-boundary coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
 `tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios),
 `tests/unit/test_symbiyosys.py` (Step 14, 11 named scenarios), and
 `tests/unit/test_equivalence.py` (Step 9 capability, Step-15 audit-hardened;
@@ -20,6 +21,7 @@ semantic-comparison, and conservative power-report-ingestion coverage. Tests are
 | Step-11 Pareto | `tests/unit/test_pareto.py` | 125 | Multi-objective Pareto/scalar/final selection. |
 | Step-20 power-report ingestion | `tests/unit/test_power_reports.py` | 38 | One representative OpenROAD/OpenSTA `report_power` fixture; parsing, units, parser classification/canonical QoR compatibility, provenance, artifact/cache, MCMM, Pareto, mock, and CLI/report regressions. |
 | Step-21 QoR history repository | `tests/unit/test_qor_repository.py` | 37 | SQLite initialization/versioning, transactional historical graph persistence, canonical QoR/power/provenance/artifact/MCMM indexing, deterministic parameterized queries, explicit legacy import, flow failure safety, cache separation, CLI history, and WAL reader behavior. |
+| Step-25 real-EDA hardening | `tests/unit/test_eda_preflight.py`, `tests/unit/test_eda_subprocess_hardening.py`, `tests/integration/test_real_eda_boundary.py`, plus established EDA boundary cases | 30 new focused cases | Typed preflight/doctor JSON, safe argv and process-group timeout cleanup, explicit mock separation, controlled fake Yosys/OpenSTA success/failure/timeout/missing/malformed/stale behavior, provenance/manifest/fingerprint/no-secret contract, power evidence, and cache reuse/invalidation. |
 
 ## Step-13 named scenarios
 
@@ -160,6 +162,47 @@ EDA tool. Its 37 named cases cover:
 23. no sidecar for ordinary mock flow unless a repository is explicitly supplied;
 24. passive cache-key indexing and proof that repository queries do not invoke filesystem cache lookup;
 25. CLI `history` query, JSON, candidate/session, selector validation, and explicit legacy-import behavior.
+
+## Step-25 real-EDA boundary scenarios
+
+Step 25 default coverage uses only controlled executable fixtures and temporary
+Liberty/RTL/report collateral. It never needs a local commercial tool, a PDK,
+or a real Yosys/OpenSTA binary.
+
+1. Typed preflight distinguishes versioned versus merely found/missing Yosys,
+   OpenSTA, and SymbiYosys executables; missing RTL/Liberty/include/SDC
+   collateral; unsupported backend; output location; and selected formal
+   collateral.
+2. Preflight fingerprint is repeatable and excludes injected environment-secret
+   values. `RunManifest` extension round-trips without disrupting prior fields.
+3. `rca doctor --json` is valid machine-readable output for valid and invalid
+   configuration and explicitly states mock is opt-in.
+4. Controlled fake real flow records non-mock QoR, fresh report/output hashes,
+   command argv/cwd/timeout tails, tool/version provenance, preflight, and one
+   authoritative `run_manifest.json` (no divergent second manifest).
+5. Nonzero Yosys/OpenSTA exits, timeouts, absent netlist/report files, and
+   malformed timing reports have typed failure classification and no successful
+   QoR/power/cache outcome.
+6. POSIX timeout testing verifies process-group descendant termination;
+   argv-injection text is retained as one argument and no command environment is
+   serialized.
+7. Reused run directories remove stale synthesis/timing/stat/QoR/power outputs
+   before a failed real attempt; only current artifacts can be manifest evidence.
+8. Configured valid power report evidence is parsed and hashed only after valid
+   STA; malformed report evidence remains canonical power-unavailable.
+9. Identical successful fake-real inputs reuse a cache entry; source or tool
+   version changes re-execute; a failed manifest cannot be a cache hit.
+
+The opt-in actual-real suite remains separate:
+
+```bash
+RCA_RUN_REAL_EDA=1 RCA_REAL_EDA_LIBERTY=/path/to/cells.lib \
+  pytest tests/integration/test_optional_real_eda.py -m optional_real_eda -q
+```
+
+It skips only when opt-in/tool/Liberty prerequisites are unavailable. Once they
+are available, unexpected real-flow failure is a test failure. The controlled
+fakes above are execution-boundary tests, not actual Yosys/OpenSTA measurements.
 
 ## Gate criteria
 

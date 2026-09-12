@@ -2,8 +2,8 @@
 Artifact management for RCA runs (Manual §57, §58).
 
 Every RCA invocation produces a deterministic output directory containing
-JSON / text / SDC artifacts and a ``manifest.json`` that records hashes
-of inputs, tool versions, and the configuration used.
+JSON / text / SDC artifacts and a run-local ``run_manifest.json`` that records
+hashes of inputs, tool versions, and the configuration used.
 """
 
 from __future__ import annotations
@@ -40,6 +40,12 @@ class RunManifest:
     artifact_hashes: dict[str, str] = field(default_factory=dict)
     tool_identity: dict[str, Any] = field(default_factory=dict)
     input_hashes: dict[str, Any] = field(default_factory=dict)
+    # Execution evidence is descriptive only. It never replaces manifest
+    # hashes as cache authority, QoR as QoR authority, or the execution ledger.
+    execution_mode: str = ""  # explicit MOCK or REAL boundary label
+    execution_status: str = ""
+    failure_classification: str = ""
+    environment_fingerprint: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -59,6 +65,10 @@ class RunManifest:
             "artifact_hashes": self.artifact_hashes,
             "tool_identity": self.tool_identity,
             "input_hashes": self.input_hashes,
+            "execution_mode": self.execution_mode,
+            "execution_status": self.execution_status,
+            "failure_classification": self.failure_classification,
+            "environment_fingerprint": self.environment_fingerprint,
             "extra": self.extra,
         }
 
@@ -126,7 +136,19 @@ class ArtifactManager:
         return json.loads(self.path(rel).read_text(encoding="utf-8"))
 
     def write_manifest(self, manifest: RunManifest) -> Path:
+        """Write a non-run-scoped manifest for legacy callers."""
         return self.write_json("manifest.json", manifest.to_dict())
+
+    def write_manifest_to(self, run_id: str, manifest: RunManifest) -> Path:
+        """Atomically write the sole authoritative manifest for one EDA run.
+
+        Run artifacts and the cache read ``run_manifest.json``.  Keeping one
+        evidence file prevents a partially updated compatibility copy from
+        diverging from the cache/provenance authority.
+        """
+        return self.write_json_atomic(
+            str(Path("runs") / run_id / "run_manifest.json"), manifest.to_dict()
+        )
 
     def candidate_dir(self, candidate_id: str) -> Path:
         d = self.runs_dir / candidate_id

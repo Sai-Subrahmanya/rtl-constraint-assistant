@@ -59,8 +59,10 @@ retries or masks a failure.
 ```bash
 python scripts/setup/verify_environment.py
 python scripts/setup/verify_environment.py --json
+rca doctor project.yaml
+rca doctor project.yaml --json
+# Legacy version-probe diagnostic:
 python scripts/eda/diagnose_eda.py --config project.yaml
-python scripts/eda/diagnose_eda.py --json
 ```
 
 Setup verification checks the declared Python/runtime packages and Python

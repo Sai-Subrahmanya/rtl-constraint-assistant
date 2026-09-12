@@ -24,8 +24,6 @@ Correction-pass additions:
 from __future__ import annotations
 
 import json
-import os
-import platform
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,11 +38,12 @@ from ..reports.power import (
     parse_openroad_power_report,
     unavailable_power_result,
 )
-from ..utils.enums import BackendKind, PowerStatus, RunStatus
-from ..utils.hashing import hash_file, hash_source_set, hash_text, stable_hash
+from ..utils.enums import PowerStatus, RunStatus
+from ..utils.hashing import hash_file, hash_text, stable_hash
 from ..utils.logging import get_logger
 from .common.mock import MockEDA
 from .opensta.backend import OpenSTABackend, STAResult
+from .preflight import EDAPreflight, preflight_yosys_opensta
 from .yosys.backend import SynthResult, YosysBackend
 
 log = get_logger("eda.flow")
@@ -54,7 +53,8 @@ _PROJECT_LOCAL_TOOL_DIRS = ("tools", ".tools", "eda_tools", "bin")
 # Artifacts whose content we hash for integrity tracking.  Very large
 # logs can be skipped — policy documented in STEP10_REPORT.
 _HASHED_ARTIFACTS = {"sdc", "netlist", "synth_script", "synth_stats",
-                     "sta_tcl", "sta_checks", "sta_setup_rpt", "sta_hold_rpt",
+                     "sta_tcl", "sta_checks", "sta_setup", "sta_hold",
+                     "sta_setup_wns", "sta_setup_tns", "sta_hold_wns", "sta_hold_tns",
                      "power_report", "qor"}
 _LOG_ARTIFACTS = {"synth_log", "sta_log"}  # recorded but not integrity-hashed
 
@@ -116,6 +116,7 @@ def _extract_cfg(cfg: Any) -> dict[str, Any]:
         "stage": stage,
         "liberty": sorted(libs),
         "safe_mode": safe_mode,
+        "tool_timeout_seconds": int(getattr(flow, "tool_timeout_seconds", 600) or 600),
     }
 
 
@@ -124,7 +125,7 @@ def _rel(run_dir: Path, p: Path | str | None) -> str:
         return ""
     try:
         return str(Path(p).resolve().relative_to(run_dir.resolve()))
-    except Exception:
+    except (OSError, ValueError):
         return str(p)
 
 
@@ -143,13 +144,13 @@ def _hash_artifacts(run_dir: Path, artifacts: dict[str, Any]) -> dict[str, str]:
         if k in _HASHED_ARTIFACTS:
             try:
                 hashes[k] = hash_file(p)
-            except Exception:
+            except OSError:
                 hashes[k] = ""
         elif k in _LOG_ARTIFACTS:
             # Record existence + size only (logs can be large / vary by version)
             try:
                 hashes[k] = f"size={p.stat().st_size}"
-            except Exception:
+            except OSError:
                 hashes[k] = ""
     return hashes
 
@@ -159,6 +160,26 @@ def _resolve_rel(run_dir: Path, rel: str) -> Path:
     if p.is_absolute():
         return p
     return (run_dir / p).resolve()
+
+
+def _clear_stale_execution_outputs(paths: list[Path]) -> str:
+    """Remove prior current-run outputs before a new real-tool attempt.
+
+    A forced/reused run directory is permissible, but only after old netlist,
+    QoR, power, report, stats, and log files have been removed.  A failure to
+    do so blocks execution rather than allowing stale evidence to survive a
+    failed command.  All paths are caller-derived run-local output paths.
+    """
+    try:
+        for path in paths:
+            if not path.exists():
+                continue
+            if not path.is_file():
+                return f"expected fresh output path is not a file: {path}"
+            path.unlink()
+    except OSError as exc:
+        return f"cannot remove stale real-EDA output: {exc}"
+    return ""
 
 
 def _power_report_input(cfg: Any, scenario: str) -> dict[str, Any]:
@@ -305,7 +326,7 @@ def _index_qor_history(*, output_dir: Path, cset: ConstraintSet | None,
             constraint_set=cset,
         )
         return None
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - advisory persistence boundary.
         message = f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
         log.warning(message)
         return message
@@ -344,7 +365,7 @@ def index_deferred_history_evidence(evidence: dict[str, Any]) -> str | None:
             run_id=str(evidence["run_id"]), run_dir=Path(evidence["run_dir"]),
             run_status=str(evidence["run_status"]), repository=evidence.get("repository"),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - advisory persistence boundary.
         message = f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
         log.warning(message)
         return message
@@ -405,7 +426,10 @@ def run_flow(cfg: Any,
     sdc_path = run_dir / "generated.sdc"
     sdc_path.write_text(sdc_text, encoding="utf-8")
 
-    rtl_hashes = hash_source_set(sources)
+    # Missing inputs are represented with an empty digest until preflight
+    # returns the deterministic collateral failure; never raise before an
+    # auditable failed/blocked manifest can be written.
+    rtl_hashes = {str(path): hash_file(path) if path.is_file() else "" for path in sources}
     # Hash the set of files inside include directories so that adding/
     # removing/modifying a header invalidates the cache.
     inc_hashes = {str(d): _hash_dir_if_exists(Path(d)) for d in cfg_bits["include_dirs"]}
@@ -421,7 +445,7 @@ def run_flow(cfg: Any,
         try:
             from ..optimizer import Candidate
             cand = Candidate(id=candidate_id, constraint_set=cset)
-        except Exception:
+        except Exception:  # noqa: BLE001 - mock candidate-adapter boundary.
             cand = None
         qor = tool.evaluate_candidate(cand, run_dir) if cand else tool.run_sta(
             run_dir / "netlist.v", sdc_path, libs, run_dir, top)
@@ -457,6 +481,8 @@ def run_flow(cfg: Any,
             artifacts=rel_artifacts, artifact_hashes=artifact_hashes,
             tool_identity={"backend": "mock"},
             input_hashes={"rtl": rtl_hashes, "includes": inc_hashes},
+            execution_mode="MOCK", execution_status=RunStatus.MOCK.value,
+            failure_classification="",
             extra={"cache_key": "mock", "scenario": scenario, "diagnostics": diagnostics},
         )
         am.write_manifest_to(run_id, manifest)
@@ -483,7 +509,7 @@ def run_flow(cfg: Any,
                 "qor": qor.summary(), "qor_result": qor, "diagnostics": result_diagnostics,
                 "persistence_warning": persistence_warning,
                 "_deferred_history_evidence": evidence,
-                "synth": None, "sta": None}
+                "preflight": None, "synth": None, "sta": None}
 
     # ---------- REAL backends ----------
     yosys = YosysBackend(executable=yosys_bin, project_local_dirs=local_dirs)
@@ -493,7 +519,7 @@ def run_flow(cfg: Any,
 
     # Build scripts NOW (before cache check) so their identity is part of
     # the cache key — scripts are deterministic and cheap to write.
-    synth_script_text, synth_script_path, netlist_path = yosys._build_script(
+    synth_script_text, _synth_script_path, netlist_path = yosys._build_script(
         sources, top, libs, run_dir,
         defines=defines_map, include_dirs=[str(p) for p in include_dirs_paths],
         parameters=params_map,
@@ -528,7 +554,6 @@ def run_flow(cfg: Any,
                   "available": yinfo.available},
         "opensta": {"executable": opensta.executable, "version": oinfo.version,
                     "available": oinfo.available},
-        "host": platform.node(), "platform": platform.platform(),
     }
 
     cfg_for_hash = {
@@ -563,31 +588,70 @@ def run_flow(cfg: Any,
     }
     cache_key = stable_hash(cache_key_data)
 
-    # Check cache
+    # Check cache before a fresh execution preflight. A verified cache hit is
+    # existing manifest/hash evidence, not an implicit mock fallback or a new
+    # real-tool invocation.
     if not force:
         cached = _find_cached_run(am, cache_key, run_dir_parent=am.runs_dir)
         if cached is not None:
             log.info("Cache hit: %s", cached["run_id"])
             return {**cached, "status": RunStatus.CACHE_HIT.value}
 
-    if not yinfo.available:
-        diagnostics.append(f"Yosys unavailable: {yinfo.error}")
-    if not oinfo.available:
-        diagnostics.append(f"OpenSTA unavailable: {oinfo.error}")
-    if not yinfo.available or not oinfo.available:
-        return _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash,
-                        lib_hashes, diagnostics, run_dir, reason="; ".join(diagnostics),
-                        tool_identity=tool_identity, cache_key=cache_key,
-                        inc_hashes=inc_hashes, cset=cset, qor_repository=qor_repository,
-                        defer_history_indexing=defer_history_indexing)
+    environment_config_hash = stable_hash({
+        "flow_identity": cfg_for_hash,
+        "tool_timeout_seconds": cfg_bits["tool_timeout_seconds"],
+    })
+    preflight = preflight_yosys_opensta(
+        backend=backend, top=top, sources=sources, liberty=libs, sdc_path=sdc_path,
+        output_dir=run_dir,
+        expected_outputs=[netlist_path, *sta_report_map.values(),
+                          run_dir / "synthesis_stats.json", run_dir / "qor.json",
+                          run_dir / "configured_power_report.rpt"],
+        yosys_info=yinfo, opensta_info=oinfo, liberty_hashes=lib_hashes,
+        config_hash=environment_config_hash, include_dirs=include_dirs_paths,
+    )
+    if not preflight.ready:
+        diagnostics.extend(
+            f"PREFLIGHT {check.component}: {check.status.value}: {check.detail}"
+            for check in preflight.checks if check.required and not check.ready
+        )
+        return _blocked(
+            am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashes,
+            diagnostics, run_dir, reason=preflight.failure_classification,
+            tool_identity=tool_identity, cache_key=cache_key, inc_hashes=inc_hashes,
+            cset=cset, qor_repository=qor_repository,
+            defer_history_indexing=defer_history_indexing, preflight=preflight,
+            environment_fingerprint=preflight.environment_fingerprint,
+            failure_classification=preflight.failure_classification,
+            execution_backend=backend,
+        )
+    # Freshness is established before either real executable is allowed to
+    # start.  This covers forced/reused run directories as well as a later
+    # non-zero, timeout, missing-output, or malformed-output result.
+    stale_error = _clear_stale_execution_outputs([
+        netlist_path, *sta_report_map.values(), run_dir / "synthesis_stats.json",
+        run_dir / "qor.json", run_dir / "configured_power_report.rpt",
+        run_dir / "yosys.log", run_dir / "sta.log",
+    ])
+    if stale_error:
+        diagnostics.append(f"PREFLIGHT expected_outputs: configuration_invalid: {stale_error}")
+        return _blocked(
+            am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashes,
+            diagnostics, run_dir, reason="configuration_invalid", tool_identity=tool_identity,
+            status=RunStatus.BLOCKED.value, cache_key=cache_key, inc_hashes=inc_hashes,
+            cset=cset, qor_repository=qor_repository,
+            defer_history_indexing=defer_history_indexing, preflight=preflight,
+            environment_fingerprint=preflight.environment_fingerprint,
+            failure_classification="configuration_invalid",
+        )
 
     extra_synth = {"defines": defines_map,
                    "include_dirs": [str(p) for p in include_dirs_paths],
-                   "parameters": params_map, "timeout": 600}
+                   "parameters": params_map, "timeout": cfg_bits["tool_timeout_seconds"]}
     try:
         synth_res: SynthResult = yosys.synthesize(
             sources, top, libs, run_dir, extra_args=extra_synth)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - external synthesis boundary.
         diagnostics.append(f"yosys raised {type(e).__name__}: {e}")
         return _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash,
                         lib_hashes, diagnostics, run_dir,
@@ -596,7 +660,9 @@ def run_flow(cfg: Any,
                         status=RunStatus.SYNTHESIS_FAILED.value,
                         cache_key=cache_key, inc_hashes=inc_hashes, cset=cset,
                         qor_repository=qor_repository,
-                        defer_history_indexing=defer_history_indexing)
+                        defer_history_indexing=defer_history_indexing, preflight=preflight,
+                        environment_fingerprint=preflight.environment_fingerprint,
+                        failure_classification="execution_failed")
     if not synth_res.success:
         diagnostics.append(synth_res.error)
         return _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash,
@@ -605,7 +671,9 @@ def run_flow(cfg: Any,
                         status=RunStatus.SYNTHESIS_FAILED.value,
                         cache_key=cache_key, inc_hashes=inc_hashes,
                         synth_res=synth_res, cset=cset, qor_repository=qor_repository,
-                        defer_history_indexing=defer_history_indexing)
+                        defer_history_indexing=defer_history_indexing, preflight=preflight,
+                        environment_fingerprint=preflight.environment_fingerprint,
+                        failure_classification=synth_res.failure_classification or "execution_failed")
     netlist = synth_res.netlist
     netlist_hash = hash_file(netlist)
 
@@ -624,7 +692,8 @@ def run_flow(cfg: Any,
     else:
         sta_res: STAResult = opensta.run_sta(
             netlist, sdc_path, libs, run_dir, top, corner=corner,
-            extra_args={"timeout": 600, "allow_partial_sdc": allow_partial_sdc,
+            extra_args={"timeout": cfg_bits["tool_timeout_seconds"],
+                        "allow_partial_sdc": allow_partial_sdc,
                         "sdc_status": sdc_generation_status},
             prebuilt_script=(sta_tcl_text, sta_tcl_path, sta_report_map))
         sta_result = sta_res.to_dict()
@@ -690,11 +759,12 @@ def run_flow(cfg: Any,
         artifacts["power_report"] = power_artifact
     if qor_path:
         artifacts["qor"] = qor_path
-    artifacts = {k: v for k, v in artifacts.items() if v}
+    # A manifest references only current files. Expected-but-missing outputs
+    # remain in the typed preflight/STA diagnostics, never as dangling evidence.
+    artifacts = {k: v for k, v in artifacts.items() if v and Path(v).is_file()}
     rel_artifacts = _artifacts_to_rel(run_dir, artifacts)
     artifact_hashes = _hash_artifacts(run_dir, artifacts)
 
-    post_sta_cache_key_data = dict(cache_key_data)  # kept for diagnostics only
     # NOTE: netlist_hash is an OUTPUT hash; it MUST NOT be mixed into the
     # experiment cache key. The cache key represents experiment IDENTITY
     # (inputs/configuration) only. Netlist integrity is verified via
@@ -703,6 +773,9 @@ def run_flow(cfg: Any,
                     "libs": lib_hashes, "sdc": sdc_hash,
                     "synth_script": synth_script_hash,
                     "power_report": power_input}
+    failure_classification = ""
+    if status not in {RunStatus.SUCCESS.value, RunStatus.TIMING_FAIL.value}:
+        failure_classification = str(sta_result.get("failure_classification") or "execution_failed")
     manifest = RunManifest(
         candidate_id=candidate_id, rtl_hash=rtl_hashes, sdc_hash=sdc_hash,
         config_hash=cfg_hash, tool="yosys_opensta",
@@ -711,6 +784,9 @@ def run_flow(cfg: Any,
         library=",".join(str(p) for p in libs),
         artifacts=rel_artifacts, artifact_hashes=artifact_hashes,
         tool_identity=tool_identity, input_hashes=input_hashes,
+        execution_mode="REAL", execution_status=status,
+        failure_classification=failure_classification,
+        environment_fingerprint=preflight.environment_fingerprint,
         extra={"cache_key": cache_key,
                "scenario": scenario,
                "cache_key_data": cache_key_data,
@@ -719,6 +795,7 @@ def run_flow(cfg: Any,
                    "yosys": synth_res.command.to_dict() if synth_res.command else None,
                    "opensta": sta_result.get("command"),
                },
+               "preflight": preflight.to_dict(),
                "diagnostics": diagnostics + sta_diag},
     )
     am.write_manifest_to(run_id, manifest)
@@ -749,6 +826,7 @@ def run_flow(cfg: Any,
         "diagnostics": result_diagnostics,
         "persistence_warning": persistence_warning,
         "_deferred_history_evidence": evidence,
+        "preflight": preflight.to_dict(),
         "synth": synth_res.to_dict(), "sta": sta_result,
         "cache_key": cache_key,
     }
@@ -761,38 +839,67 @@ def _hash_dir_if_exists(d: Path) -> str:
     try:
         from ..utils.hashing import hash_directory
         return hash_directory(d, pattern="*")
-    except Exception:
+    except (ImportError, OSError):
         return ""
 
 
 def _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashes,
              diagnostics, run_dir, reason, tool_identity=None,
              status=RunStatus.BLOCKED.value, cache_key=None,
-             inc_hashes=None, synth_res=None, cset: ConstraintSet | None = None,
-             qor_repository: Any | None = None,
-             defer_history_indexing: bool = False):
-    artifacts: dict[str, Any] = {}
+             inc_hashes=None, synth_res=None, sta_res: STAResult | None = None,
+             cset: ConstraintSet | None = None, qor_repository: Any | None = None,
+             defer_history_indexing: bool = False,
+             preflight: EDAPreflight | None = None,
+             environment_fingerprint: str = "",
+             failure_classification: str = "configuration_invalid",
+             execution_backend: str = "yosys_opensta"):
+    # Retain only current, run-local evidence.  In particular, we do not list
+    # a historical QoR/power file after a failed new invocation.
+    artifacts: dict[str, Any] = {"sdc": run_dir / "generated.sdc"}
     if synth_res is not None:
-        artifacts = {
+        artifacts.update({
             "synth_script": getattr(synth_res, "script_path", None),
             "synth_log": getattr(synth_res, "log_path", None),
-        }
+            "synth_stats": getattr(synth_res, "stats_path", None),
+        })
+    if sta_res is not None:
+        artifacts.update({
+            "sta_tcl": sta_res.tcl_path,
+            "sta_log": sta_res.log_path,
+        })
+        artifacts.update({f"sta_{name}": path for name, path in sta_res.report_paths.items()})
+    artifacts = {key: path for key, path in artifacts.items() if path and Path(path).is_file()}
     rel_artifacts = _artifacts_to_rel(run_dir, artifacts)
     artifact_hashes = _hash_artifacts(run_dir, artifacts)
+    commands = {
+        "yosys": synth_res.command.to_dict() if synth_res and synth_res.command else None,
+        "opensta": sta_res.command.to_dict() if sta_res and sta_res.command else None,
+    }
+    yosys_version = (tool_identity or {}).get("yosys", {}).get("version", "")
+    opensta_version = (tool_identity or {}).get("opensta", {}).get("version", "")
     manifest = RunManifest(
         candidate_id=candidate_id, rtl_hash=rtl_hashes, sdc_hash=sdc_hash,
-        config_hash=cfg_hash, tool="yosys_opensta", flow_stage="synthesis_sta",
-        library=",".join(lib_hashes.keys()),
+        config_hash=cfg_hash, tool=execution_backend,
+        tool_version=f"yosys:{yosys_version}|opensta:{opensta_version}",
+        flow_stage="synthesis_sta", library=",".join(lib_hashes.keys()),
         artifacts=rel_artifacts, artifact_hashes=artifact_hashes,
         tool_identity=tool_identity or {},
         input_hashes={"rtl": rtl_hashes, "includes": inc_hashes or {},
                       "libs": lib_hashes, "sdc": sdc_hash},
-        extra={"diagnostics": diagnostics, "cache_key": cache_key or ""},
+        execution_mode="REAL", execution_status=status,
+        failure_classification=failure_classification,
+        environment_fingerprint=environment_fingerprint,
+        extra={"diagnostics": diagnostics, "cache_key": cache_key or "",
+               "commands": commands,
+               "preflight": preflight.to_dict() if preflight else None},
     )
     try:
         am.write_manifest_to(run_id, manifest)
-    except Exception:
-        pass
+    except OSError as exc:
+        # Preserve the original EDA/preflight outcome; manifest storage failure
+        # is an additional diagnostic, not a reason to fabricate a result.
+        diagnostics.append(f"RUN_MANIFEST_WRITE_WARNING: {type(exc).__name__}: {exc}")
+        log.warning("Failed to persist blocked run manifest %s: %s", run_id, exc)
     # A blocked/failed manifest is still historical evidence. Index it only
     # after the manifest write attempt; a parallel worker returns it for the
     # coordinator rather than touching SQLite.
@@ -812,12 +919,13 @@ def _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashe
     if persistence_warning:
         result_diagnostics.append(persistence_warning)
     return {"status": status, "run_id": run_id, "run_dir": str(run_dir),
-            "manifest": manifest.to_dict(), "qor": None,
+            "manifest": manifest.to_dict(), "qor": None, "qor_result": None,
             "diagnostics": result_diagnostics,
             "persistence_warning": persistence_warning,
             "_deferred_history_evidence": evidence,
+            "preflight": preflight.to_dict() if preflight else None,
             "synth": synth_res.to_dict() if synth_res else None,
-            "sta": None, "blocked_reason": reason}
+            "sta": sta_res.to_dict() if sta_res else None, "blocked_reason": reason}
 
 
 def _find_cached_run(am: ArtifactManager, cache_key: str,
@@ -834,7 +942,8 @@ def _find_cached_run(am: ArtifactManager, cache_key: str,
             continue
         try:
             m = json.loads(mpath.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("Ignoring unreadable cache manifest %s: %s", mpath, exc)
             continue
         extra = m.get("extra", {}) or {}
         if extra.get("cache_key") != cache_key:
@@ -854,17 +963,20 @@ def _find_cached_run(am: ArtifactManager, cache_key: str,
                 want = recorded_hashes[k]
                 if want and want != hash_file(p):
                     hash_mismatch.append(k)
-        # Tool identity must also match
-        tool_id = m.get("tool_identity", {}) or {}
-        # (Cache key already encodes bin+ver; skip extra check.)
+        # Tool executable/version identity is already encoded in the cache key.
         if missing or hash_mismatch:
             log.warning("cache entry %s invalid (missing=%s, hash_mismatch=%s)",
                         d.name, missing, hash_mismatch)
             continue
         # Required artifacts for a *usable* cache hit (i.e. a completed run
-        # whose results can be reused). BLOCKED/FAILED manifests are recorded
-        # with cache_key for diagnostics but lack qor and/or netlist, so they
-        # naturally fail this check and are not reused as hits.
+        # whose results can be reused). New manifests also carry an explicit
+        # execution state: a tool/preflight failure is never a hit, even if a
+        # caller left a stale QoR file in the run directory. Empty state is
+        # accepted only for pre-Step-25 manifests that have no failure record.
+        execution_status = str(m.get("execution_status") or "")
+        reusable_statuses = {RunStatus.SUCCESS.value, RunStatus.TIMING_FAIL.value}
+        if execution_status and execution_status not in reusable_statuses:
+            continue
         required = {"sdc", "netlist", "qor"}
         if not required.issubset(rel_artifacts.keys()):
             continue
@@ -873,27 +985,13 @@ def _find_cached_run(am: ArtifactManager, cache_key: str,
         if qpath.is_file():
             try:
                 qor = json.loads(qpath.read_text(encoding="utf-8"))
-            except Exception:
+            except (OSError, json.JSONDecodeError) as exc:
+                log.warning("Ignoring unreadable cache QoR %s: %s", qpath, exc)
                 continue
-        diag = list((extra.get("diagnostics") or []))
+        diag = list(extra.get("diagnostics") or [])
         diag.append(f"CACHE_HIT from {d.name}")
         qor_result = QoRResult.from_summary(qor) if isinstance(qor, dict) else None
         return {"run_id": d.name, "run_dir": str(d), "manifest": m, "qor": qor,
                 "qor_result": qor_result, "diagnostics": diag, "cache_key": cache_key,
                 "status": RunStatus.CACHE_HIT.value}
     return None
-
-
-def _write_manifest_to(self, run_id: str, manifest: RunManifest) -> Path:
-    run_dir = self.runs_dir / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    # Rewrite artifacts to run-relative (portable) paths if caller passed absolutes.
-    p = run_dir / "run_manifest.json"
-    # Use the manifest's artifacts as-is (we already relativized).
-    p.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True, default=str),
-                 encoding="utf-8")
-    (run_dir / "manifest.json").write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
-    return p
-
-
-ArtifactManager.write_manifest_to = _write_manifest_to

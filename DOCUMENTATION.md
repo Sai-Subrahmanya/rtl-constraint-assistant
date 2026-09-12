@@ -216,7 +216,7 @@ rtl-constraint-assistant/
 |---|---|---|
 | `pyproject.toml` | 68 | PEP-621 project metadata, build system, dependencies, entry points, pytest/ruff/mypy config. |
 | `Makefile` | 44 | Convenience targets: `install`, `dev-install`, `test`, `test-cov`, `lint`, `typecheck`, `clean`, `example`, `example-pipeline`, `example-multiclock`, `dashboard`. |
-| `Dockerfile` | 34 | Reproducible container with Debian trixie, Python 3, Yosys, build tools, RCA installed via pip, optional OpenSTA build (commented out). Entrypoint `rca`, port 8765 for dashboard. |
+| `Dockerfile` | — | Default RCA/Python runtime plus explicit `open-source-yosys` target. No default OpenSTA/PDK/commercial software or runtime tool download; entrypoint is `rca`, port 8765 for dashboard. |
 | `LICENSE` | 21 | MIT license. |
 | `README.md` | 221 | Quick-start overview, architecture diagram, CLI list, installation. |
 | `.gitignore` | 22 | Excludes bytecode, virtualenvs, caches, build artifacts, example output dirs, IDE files. |
@@ -416,12 +416,56 @@ A timing exception selector is not itself a formal property. RCA therefore never
 | File | Lines | Purpose |
 |---|---|---|
 | `__init__.py` | — | Re-exports backend registry. |
-| `base.py` | ~80 | Abstract `EDABackend` ABC: `synthesize(design, cset, workdir) → SynthesizeResult`, `run_sta(design, cset, workdir, sdc_file) → TimingResult`, `name`, `capabilities()`. Also defines result dataclasses `SynthesizeResult`, `TimingResult` (wns, tns, whs, ths, worst_path, endpoints, area, power, cells, raw_log). |
-| `yosys/backend.py` | ~220 | **Yosys synthesis backend.** Writes a `synth.ys` script (`read_verilog`, `hierarchy -check -top <top>`, `proc; opt; fsm; opt; memory; opt`, `stat -top …`), executes Yosys via subprocess, parses stdout to extract cell counts and estimated area. Verifies the design elaborates and reports synthesis errors as diagnostics. Requires `yosys` on PATH (verified working: 24 cells on counter.sv — 8×DFFE, 8×AND, 7×XOR, 1×NOT). |
-| `opensta/backend.py` | ~180 | OpenSTA backend skeleton. Writes a `.tcl` command file (`read_verilog`, `link_design`, `read_sdc`, `report_wns`, `report_hold`, `report_power`) and invokes `sta` if available. Real STA requires a Liberty standard-cell library (not present in the sandbox); falls back to "not available" gracefully. |
+| `base.py` | — | `ToolBackend`, `ToolInfo`, and bounded `CommandRecord`. Tool invocation uses a deterministic argv list, explicit cwd, `shell=False`, timeout, bounded stdout/stderr tails, and POSIX process-group cleanup on timeout. Runtime environment values are intentionally not recorded. |
+| `preflight.py` | — | **Step 25.** Vendor-neutral `CapabilityStatus`, `CapabilityCheck`, and `EDAPreflight`. Performs non-executing selected-backend, executable/version, collateral, generated-SDC, include-dir, and output-location checks; produces a deterministic non-secret environment fingerprint. |
+| `yosys/backend.py` | — | **Yosys synthesis backend.** Writes a deterministic `synth.ys`, validates its exit status and fresh netlist output, records bounded command evidence, and removes old current-run netlist/stat outputs before a new invocation. Failure is classified rather than converted to QoR. |
+| `opensta/backend.py` | — | **OpenSTA backend.** Writes a deterministic Tcl/report map, requires readable Liberty and fresh synthesized netlist/SDC, validates every required report plus parseable setup/hold WNS, records bounded command evidence, and removes old timing-report outputs before invocation. Missing/malformed/failed/timed-out output has no QoR fallback. |
 | `synopsys/__init__.py` and `cadence/__init__.py` | — | Placeholder subpackages for future PrimeTime/DC and Tempus/Genus adapters. |
 | `common/__init__.py` | — | Re-exports shared EDA helpers. |
 | `common/mock.py` | ~120 | **Mock EDA backend** — a fast, deterministic surrogate used for CI, unit tests, and optimization smoke runs. It returns plausible timing results derived from clock period, register count, and SDC budgets (setup/hold slacks are modeled as `period - delay_estimate - budget`), and deterministically produces area/power numbers for Pareto smoke tests. It deliberately never crashes, so closed-loop tests always run. Imports guarded by `TYPE_CHECKING` to avoid a circular import with `qor.model`. |
+
+#### Step 25 real-EDA execution contract
+
+A `yosys_opensta` request is never interpreted as a request for mock data.
+Before launching either executable, RCA emits a typed `EDAPreflight` with
+checks for the selected execution boundary, a bounded safe version probe for
+each executable, RTL sources, include directories, readable Liberty collateral,
+the fresh generated SDC, and output locations. Checks are classified with
+`executable_missing`, `executable_found`, `version_discovered`,
+`collateral_missing`, `configuration_invalid`, `environment_ready`,
+`output_location_ready`, or `unsupported`. A found executable whose bounded
+version probe fails is intentionally not ready. Commercial execution is
+`unsupported`; Synopsys/Cadence support is restricted to their established SDC
+serializers.
+
+Tool command evidence is argv/cwd/timeout/return code, terminal execution
+classification (`execution_completed`, `execution_failed`, or
+`execution_timed_out`), and bounded output tails. There is no shell command
+string or serialized environment map; conventional credential-like command
+options and matching output are redacted from persisted evidence. A real flow
+removes run-local stale netlist/timing/stat/QoR/power outputs before tool launch.
+Nonzero, timeout,
+missing-output, and malformed-report paths do not yield canonical QoR, power,
+or a cache hit. A real timing violation is distinct: it has valid measured QoR
+and the normal `TIMING_FAIL` result.
+
+The sole run-local evidence file is `runs/<run-id>/run_manifest.json`. Its
+existing `RunManifest` records backend/tool versions, command provenance,
+input/output hashes, explicit `MOCK`/`REAL` execution mode, execution/failure
+state, preflight, configured power-report provenance, and a deterministic
+environment fingerprint. The
+fingerprint includes RCA/Python/platform/tool-version/Liberty/config identity,
+but excludes environment variables, timestamps, process IDs, random paths, and
+secrets. It is provenance only and does not alter the established cache-key
+contract. `QoRResult` remains canonical QoR, filesystem manifest/hash evidence
+remains cache authority, and SQLite stays advisory historical/query storage.
+
+`rca doctor project.yaml --json` is the operator-facing form of this bounded
+preflight. It reports RCA/Python, configuration context, configured SDC backend,
+selected real backend, Yosys/OpenSTA/SymbiYosys and Liberty readiness. The SDC
+that a real run creates is reported as an expected non-required doctor input;
+the real flow checks its generated copy before execution. An `AVAILABLE` probe
+is not a functional-flow or signoff claim.
 
 ### 5.16 `src/rca/qor/` — canonical QoR, Pareto, and history repository (WP-N, WP-O)
 
@@ -781,7 +825,8 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca compare [CONFIG] --a FILE.sdc --b FILE.sdc` | Semantically compare two SDC files through the hardened SDC importer, normalization + `semantic_compare`. Prints equivalence/UNKNOWN verdict, field- and scenario-context differences, and added/removed/modified sets; `--json` emits deterministic machine output. | `--json` |
 | `rca coverage [CONFIG]` | Print only the coverage metrics (clock/in/out %). |  |
 | `rca explain [CONFIG] [CONSTRAINT_ID]` | Print natural-language explanation(s) of one or all constraints (evidence, assumptions, source). |  |
-| `rca run-sta [CONFIG]` | Synthesize with Yosys and/or run OpenSTA with current SDC; print timing report. | `--eda {yosys,opensta,mock}`, `--sdc FILE` |
+| `rca doctor [CONFIG]` | Bounded, non-executing real-EDA/formal prerequisite evidence. It checks version probes and configured collateral; it does not run synthesis, STA, or proofs. | `--backend yosys_opensta`, `--json` |
+| `rca run-sta [CONFIG]` | Run only the explicit `mock` or `yosys_opensta` flow with current SDC; a real request fails closed when preflight is not ready. | `--backend {yosys_opensta,mock}`, `--sdc FILE`, `--force`, `--allow-partial-sdc` |
 | `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization. It atomically persists an authoritative execution ledger and normal manifest before recording advisory history. Candidate concurrency is configured only with `optimization.workers` (1–8; default 1). | `--backend`, `--dashboard` |
 | `rca history` | Query the local `<flow.output_dir>/qor.sqlite3` sidecar, explicitly import existing run artifacts, or read the authoritative optimizer ledger without SQLite. Never executes EDA, optimization, or cache reuse. | `--config`, `--output-dir`, `--run-id`, `--candidate --session`, `--scenario`, `--constraint-set`, `--best {setup_wns,area,power}`, `--area-source {real,proxy}`, `--import-legacy`, `--optimization-ledger`, `--json` |
 | `rca inspect [CONFIG] {module,port,net,register,clock,path}` | Structured inspection sub-tables of the design model (e.g. `rca inspect project.yaml port` prints all ports). |  |
@@ -832,10 +877,13 @@ constraints:
   false_paths: []
   multicycle_paths: []
 
-eda:
-  backend: mock         # yosys | opensta | mock
-  liberty: null
-  sdc_backend: generic
+flow:
+  # `flow.backend` is retained project/SDC configuration context. Select the
+  # execution boundary explicitly with `rca run-sta --backend ...`.
+  backend: generic
+  liberty: null         # required for real yosys_opensta execution
+  output_dir: output
+  tool_timeout_seconds: 600
 
 optimization:
   enabled: false
@@ -1113,23 +1161,29 @@ port 8765.
 
 ## 18. Docker
 
-The `Dockerfile` provides a reproducible image:
+The `Dockerfile` provides a reproducible local **RCA runtime** rather than
+claiming a complete signoff environment:
 
-- Base: `debian:trixie-slim`.
-- System packages: `python3`, `pip`, `yosys` (real synthesis available),
-  plus build deps (`cmake`, `ninja-build`, `clang`, `tcl-dev`, `swig`,
-  `bison`, `flex`, `git`) for optional OpenSTA compilation.
-- RCA installed via `pip3 install --no-cache-dir --break-system-packages -e .`.
-- A commented block shows how to build OpenSTA from source into
-  `/opt/OpenSTA` and symlink `sta` onto PATH.
+- Default target `runtime`: `debian:trixie-slim`, `python3`, `pip`, and the
+  Python/RCA dependencies declared in `pyproject.toml`.
+- Optional `open-source-yosys` target: adds Debian's open-source `yosys` only.
+  Build it deliberately with `docker build --target open-source-yosys -t
+  rca:yosys .`.
+- Neither target includes OpenSTA, a Liberty/PDK, activity data, proprietary
+  tools, or a runtime tool download. Mount/provision compatible open-source
+  tools and user-owned collateral explicitly for a real flow.
 - `WORKDIR /work`, `EXPOSE 8765`, `ENTRYPOINT ["rca"]`, `CMD ["--help"]`.
 
-Build & run:
+Build & inspect prerequisites:
 ```bash
 docker build -t rca .
-docker run --rm -v $PWD:/work -p 8765:8765 rca report project.yaml
-docker run --rm -v $PWD:/work -p 8765:8765 rca dashboard project.yaml --host 0.0.0.0
+docker run --rm -v "$PWD:/work" rca doctor /work/project.yaml --json
+docker build --target open-source-yosys -t rca:yosys .
+docker run --rm -v "$PWD:/work" -p 8765:8765 rca dashboard /work/project.yaml --host 0.0.0.0
 ```
+
+A successful container build or version probe is not a real-flow, PDK-quality,
+or signoff claim.
 
 ---
 
@@ -1155,13 +1209,12 @@ rerun. See `STEP21_QOR_DATABASE.md` for the complete contract.
 ## 19. Known Gaps and Roadmap
 
 Implemented as alpha-grade:
-- OpenSTA/OpenROAD: the backend adapters exist and the CLI can invoke
-  `sta`, but real STA requires a Liberty cell library. In the sandbox
-  `pip openroad` is a 0.0.1 stub; full STA integration needs a source
-  build of OpenROAD (scripted in the Dockerfile, commented out).
+- Yosys/OpenSTA: real execution is guarded by typed preflight and requires
+  user-provisioned compatible executables plus a readable Liberty cell library.
+  The default container intentionally does not bundle OpenSTA or a PDK.
 - Commercial backends (Synopsys PrimeTime/DC, Cadence Tempus/Genus) emit
-  correct SDC headers and dialect notes but do not yet produce all the
-  tool-specific Tcl prologue/epilogue.
+  established SDC dialect/rendering only. Commercial execution is unsupported;
+  RCA neither downloads/emulates those tools nor claims their results/signoff.
 - Formal verification of false paths / multicycle paths has an optional
   Step-14 `SymbiYosysFormalBackend` for explicit user-authored `.sby` jobs;
   the default remains conservative UNRESOLVED. RCA intentionally does not
@@ -1191,8 +1244,10 @@ Python dev headers are present.
 
 **Q: `Yosys not found`?**
 A: Install via apt (`apt install yosys`) or from
-https://github.com/YosysHQ/yosys. Yosys is optional — RCA falls back to
-the mock backend when it is missing.
+https://github.com/YosysHQ/yosys, then run `rca doctor project.yaml`. Yosys is
+optional only because mock is an explicit separate choice: a requested real
+`yosys_opensta` flow is `BLOCKED` when Yosys is unavailable and never falls
+back to mock.
 
 **Q: OpenSTA gives "liberty not specified"?**
 A: Real gate-level STA requires a standard-cell Liberty (.lib) file for

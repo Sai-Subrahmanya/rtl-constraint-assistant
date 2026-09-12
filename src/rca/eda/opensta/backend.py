@@ -13,17 +13,15 @@ policy is not enabled, the run is BLOCKED with a clear reason.
 
 from __future__ import annotations
 
-import json
 import os
-import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ...qor.model import PowerStatus, QoRResult, RunStatus, Feasibility
+from ...qor.model import Feasibility, PowerStatus, QoRResult, RunStatus
 from ...reports.timing import parse_sta_text
-from ...utils.hashing import hash_file, hash_text, stable_hash
+from ...utils.hashing import hash_text
 from ...utils.logging import get_logger
 from ..base import CommandRecord, ToolBackend, ToolInfo
 
@@ -40,6 +38,7 @@ class STAResult:
     command: CommandRecord | None = None
     status: str = RunStatus.ERROR.value
     error: str = ""
+    failure_classification: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +50,7 @@ class STAResult:
             "tool": self.tool_info.to_dict() if self.tool_info else None,
             "command": self.command.to_dict() if self.command else None,
             "error": self.error,
+            "failure_classification": self.failure_classification or None,
         }
 
 
@@ -93,7 +93,7 @@ class OpenSTABackend(ToolBackend):
                 info.available = True
             else:
                 info.error = f"version probe rc={rec.returncode}: {rec.stderr_tail[:200]}"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - tool discovery is an error boundary.
             info.error = f"version probe error: {e}"
         info.capabilities = {"sta": True, "sdf": True, "spef": True, "mcmm": True}
         self._info = info
@@ -110,7 +110,6 @@ class OpenSTABackend(ToolBackend):
         with ``report_wns -min``/``report_tns -min`` (minimum-analysis WNS
         is hold WNS). This is documented and tested.
         """
-        report_base = work_dir / f"{top}.{corner}.sta"
         # Outputs are referenced by basename so the script text is
         # independent of work_dir (run with cwd=work_dir, relative paths resolve).
         setup_rpt = work_dir / f"{top}.{corner}.setup.rpt"
@@ -167,8 +166,8 @@ class OpenSTABackend(ToolBackend):
             (str(sdc), sdc_hash),
             lib_key,
             # command set — fixed in _build_script; change here if script changes
-            "read_liberty;read_verilog;link_design;read_sdc;"
-            "report_checks(max/min);report_wns/tns(min/max);check_setup;exit",
+            ("read_liberty;read_verilog;link_design;read_sdc;"
+             "report_checks(max/min);report_wns/tns(min/max);check_setup;exit"),
         )
 
     def run_sta(self, netlist: Path, sdc: Path, liberty: list[Path],
@@ -187,23 +186,28 @@ class OpenSTABackend(ToolBackend):
 
         if not liberty:
             res.status = RunStatus.BLOCKED.value
+            res.failure_classification = "collateral_missing"
             res.error = "Liberty (.lib) required for real STA but none supplied."
             return res
         for lib in liberty:
             if not Path(lib).is_file():
                 res.status = RunStatus.BLOCKED.value
+                res.failure_classification = "collateral_missing"
                 res.error = f"Liberty file not found: {lib}"
                 return res
         if not Path(netlist).is_file():
             res.status = RunStatus.BLOCKED.value
+            res.failure_classification = "output_missing"
             res.error = f"Synthesized netlist not found: {netlist}"
             return res
         if not Path(sdc).is_file():
             res.status = RunStatus.BLOCKED.value
+            res.failure_classification = "collateral_missing"
             res.error = f"SDC file not found: {sdc}"
             return res
         if not allow_partial_sdc and extra_args.get("sdc_status") in ("PARTIAL", "BLOCKED"):
             res.status = RunStatus.BLOCKED.value
+            res.failure_classification = "configuration_invalid"
             res.error = (f"Refusing signoff STA: SDC generation status is "
                          f"{extra_args.get('sdc_status')}. Pass allow_partial_sdc=True "
                          f"for exploratory mode.")
@@ -213,6 +217,7 @@ class OpenSTABackend(ToolBackend):
         res.tool_info = info
         if not info.available:
             res.status = RunStatus.BLOCKED.value
+            res.failure_classification = "executable_missing"
             res.error = info.error
             return res
 
@@ -222,6 +227,21 @@ class OpenSTABackend(ToolBackend):
             tcl_text, tcl_path, report_map = self._build_script(
                 netlist, sdc, liberty, work_dir, top, corner)
         res.tcl_path = tcl_path
+        # Establish fresh report paths before every invocation. In particular,
+        # a tool failure cannot consume an earlier run's timing reports when a
+        # caller deliberately reuses a work directory.
+        res.report_paths = dict(report_map)
+        try:
+            for report_path in report_map.values():
+                if report_path.exists():
+                    if not report_path.is_file():
+                        raise OSError(f"expected report path is not a file: {report_path}")
+                    report_path.unlink()
+        except OSError as exc:
+            res.status = RunStatus.STA_FAILED.value
+            res.failure_classification = "output_location_invalid"
+            res.error = f"cannot establish fresh OpenSTA report outputs: {exc}"
+            return res
 
         if self._use_openroad:
             argv = [self.executable, "-exit", str(tcl_path)]
@@ -237,16 +257,30 @@ class OpenSTABackend(ToolBackend):
 
         if rec.returncode != 0:
             res.status = RunStatus.STA_FAILED.value
-            res.error = f"sta exited rc={rec.returncode}; see {res.log_path}"
+            res.failure_classification = (
+                "execution_timed_out" if rec.timed_out else "execution_failed"
+            )
+            res.error = (
+                f"OpenSTA timed out after {timeout}s; see {res.log_path}"
+                if rec.timed_out else f"sta exited rc={rec.returncode}; see {res.log_path}"
+            )
             return res
 
-        chunks: list[str] = []
-        for name, p in report_map.items():
-            res.report_paths[name] = p
-            if p.is_file():
-                chunks.append(p.read_text(encoding="utf-8", errors="replace"))
+        missing_reports = [name for name, path in report_map.items() if not path.is_file()]
+        if missing_reports:
+            res.status = RunStatus.STA_FAILED.value
+            res.failure_classification = "output_missing"
+            res.error = "OpenSTA did not produce required report(s): " + ", ".join(missing_reports)
+            return res
+
+        chunks = [path.read_text(encoding="utf-8", errors="replace") for path in report_map.values()]
         text = "\n".join(chunks)
         qor = parse_sta_text(text)
+        if qor.setup_wns is None or qor.hold_wns is None:
+            res.status = RunStatus.STA_FAILED.value
+            res.failure_classification = "output_malformed"
+            res.error = "OpenSTA reports are missing parseable setup and/or hold WNS evidence."
+            return res
         qor.tool = "opensta"
         qor.tool_version = info.version
         qor.raw_report_text = text

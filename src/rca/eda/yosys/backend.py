@@ -21,14 +21,13 @@ Liberty handling:
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ...utils.hashing import hash_file, hash_text, stable_hash
+from ...utils.hashing import hash_text
 from ...utils.logging import get_logger
 from ..base import CommandRecord, ToolBackend, ToolInfo
 
@@ -53,6 +52,7 @@ class SynthResult:
     command: CommandRecord | None = None
     success: bool = False
     error: str = ""
+    failure_classification: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,6 +65,7 @@ class SynthResult:
             "command": self.command.to_dict() if self.command else None,
             "success": self.success,
             "error": self.error,
+            "failure_classification": self.failure_classification or None,
         }
 
 
@@ -95,7 +96,7 @@ class YosysBackend(ToolBackend):
                 info.available = True
             else:
                 info.error = f"version probe failed rc={rec.returncode}: {rec.stderr_tail}"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - tool discovery is an error boundary.
             info.error = f"version probe error: {e}"
         info.capabilities = {"synthesis": True, "systemverilog": True, "abc": True}
         self._info = info
@@ -199,6 +200,22 @@ class YosysBackend(ToolBackend):
         work_dir.mkdir(parents=True, exist_ok=True)
         log_path = work_dir / "yosys.log"
         stats_path = work_dir / "synthesis_stats.json"
+        netlist = work_dir / f"{top}_synth.v"
+        # A reused run directory must never let a non-zero invocation inherit
+        # an old netlist/stat file as if this invocation had produced it.
+        try:
+            for stale in (netlist, stats_path):
+                if stale.exists():
+                    if not stale.is_file():
+                        raise OSError(f"expected output path is not a file: {stale}")
+                    stale.unlink()
+        except OSError as exc:
+            return SynthResult(
+                netlist=netlist, log_path=log_path, script_path=work_dir / "synth.ys",
+                stats_path=stats_path, tool_info=self._info or self.discover(),
+                error=f"cannot establish fresh Yosys outputs: {exc}",
+                failure_classification="output_location_invalid",
+            )
 
         script, script_path, netlist = self._build_script(
             sources, top, liberty, work_dir,
@@ -220,9 +237,16 @@ class YosysBackend(ToolBackend):
                              tool_info=self._info or self.discover(),
                              command=rec)
         if rec.returncode != 0:
-            result.error = f"yosys exited rc={rec.returncode}; see {log_path}"
+            result.failure_classification = (
+                "execution_timed_out" if rec.timed_out else "execution_failed"
+            )
+            result.error = (
+                f"yosys timed out after {timeout}s; see {log_path}"
+                if rec.timed_out else f"yosys exited rc={rec.returncode}; see {log_path}"
+            )
             return result
         if not netlist.is_file():
+            result.failure_classification = "output_missing"
             result.error = f"yosys did not produce netlist at {netlist}"
             return result
 
