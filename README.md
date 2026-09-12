@@ -18,6 +18,12 @@ outcomes and never treats structural analysis as a proof.
 
 > **Design philosophy**: *Never silently invent design intent. Correctness before QoR. The Universal Constraint Model is the source of truth — SDC is a serialization.*
 
+> **Knowledge reuse**: `rca knowledge` is an offline advisory lookup over
+> typed patterns, current UCM projections, optional approved JSON data, and
+> retained local history. It is not a second constraint source of truth; it
+> never parses/executes data files, changes fixed user intent, or accepts a
+> suggestion without an explicit UCM API action. See `STEP26_KNOWLEDGE_REUSE.md`.
+
 ---
 
 ## Quick start
@@ -58,10 +64,14 @@ rca optimize project.yaml --backend mock
 # 9. Query the local historical QoR repository (never executes EDA)
 rca history --config project.yaml --best setup_wns
 
-# 10. Full human-readable report
+# 10. Search offline vendor-neutral constraint knowledge (advisory only)
+rca knowledge search "false path" --json
+rca knowledge suggest project.yaml --json
+
+# 11. Full human-readable report
 rca report project.yaml
 
-# 11. Launch the web dashboard
+# 12. Launch the web dashboard
 rca dashboard project.yaml
 ```
 

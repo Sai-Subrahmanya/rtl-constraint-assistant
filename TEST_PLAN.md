@@ -1,8 +1,8 @@
-# Test Plan — RCA Validation, Formal, Semantic Comparison, Power, QoR History, and Real-EDA Boundaries (Steps 11–15, 20–25)
+# Test Plan — RCA Validation, Formal, Semantic Comparison, Power, QoR History, Real-EDA, and Knowledge Boundaries (Steps 11–15, 20–26)
 
 This test plan describes validation-engine, concrete formal-adapter,
-semantic-comparison, conservative power-report-ingestion, and real-EDA
-execution-boundary coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
+semantic-comparison, conservative power-report-ingestion, real-EDA
+execution-boundary, and offline knowledge/reuse coverage. Tests are kept in `tests/unit/test_validation.py` (Step 7),
 `tests/unit/test_validation_step13.py` (Step 13, 40 named scenarios),
 `tests/unit/test_symbiyosys.py` (Step 14, 11 named scenarios), and
 `tests/unit/test_equivalence.py` (Step 9 capability, Step-15 audit-hardened;
@@ -22,6 +22,30 @@ execution-boundary coverage. Tests are kept in `tests/unit/test_validation.py` (
 | Step-20 power-report ingestion | `tests/unit/test_power_reports.py` | 38 | One representative OpenROAD/OpenSTA `report_power` fixture; parsing, units, parser classification/canonical QoR compatibility, provenance, artifact/cache, MCMM, Pareto, mock, and CLI/report regressions. |
 | Step-21 QoR history repository | `tests/unit/test_qor_repository.py` | 37 | SQLite initialization/versioning, transactional historical graph persistence, canonical QoR/power/provenance/artifact/MCMM indexing, deterministic parameterized queries, explicit legacy import, flow failure safety, cache separation, CLI history, and WAL reader behavior. |
 | Step-25 real-EDA hardening | `tests/unit/test_eda_preflight.py`, `tests/unit/test_eda_subprocess_hardening.py`, `tests/integration/test_real_eda_boundary.py`, plus established EDA boundary cases | 30 new focused cases | Typed preflight/doctor JSON, safe argv and process-group timeout cleanup, explicit mock separation, controlled fake Yosys/OpenSTA success/failure/timeout/missing/malformed/stale behavior, provenance/manifest/fingerprint/no-secret contract, power evidence, and cache reuse/invalidation. |
+| Step-26 knowledge/reuse | `tests/unit/test_knowledge.py`, `tests/golden/test_knowledge_golden.py`, `tests/golden/knowledge/builtin_patterns.json`, `tests/integration/test_knowledge_cli.py` | 11 focused cases | Typed data/trust/applicability, Step-9 normalized equivalence and stable ranking, explicit UCM acceptance/duplicate/conflict preservation, history snapshot projection without trust promotion, strict JSON/no-execution security, built-in golden data, and advisory CLI/artifact boundaries. |
+
+## Step-26 knowledge/reuse scenarios
+
+1. Built-in pattern data is stable, typed, vendor-neutral, and never directly
+   acceptable as UCM.
+2. Existing Step-9 normalisation identifies unit-equivalent UCM constraints;
+   same scope with different values remains a reported disagreement.
+3. Ranking and suggestion IDs/order are repeatable and are not probability or
+   correctness claims.
+4. Explicit acceptance uses `ConstraintSet.add`, preserves provenance/evidence,
+   leaves fixed intent untouched, rejects duplicates, and reports conflicts for
+   the established validation pipeline.
+5. User JSON data is strict, bounded, non-symlink data only; unknown fields,
+   duplicate keys, YAML/Tcl/Python payloads, and non-executed strings are
+   rejected safely.
+6. SQLite history is read only, requires a retained canonical snapshot, keeps
+   validation/evidence observations, and never promotes historical existence to
+   `VERIFIED`.
+7. Built-in data is a checked-in golden fixture and the CLI reports advisory
+   `list`, `search`, `show`, and `suggest` output without accepting a result.
+
+See `STEP26_KNOWLEDGE_REUSE.md` for the data/API/CLI contract and exact
+non-authority boundary.
 
 ## Step-13 named scenarios
 

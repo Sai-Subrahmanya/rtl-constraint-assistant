@@ -1,0 +1,416 @@
+{
+  "items": [
+    {
+      "applicability": {
+        "evidence_required": [
+          "explicit clock target and period"
+        ],
+        "rationale": "Built-in guidance requires project-specific evidence; it never supplies timing intent.",
+        "required_clocks": [],
+        "required_constraint_types": [
+          "create_clock"
+        ],
+        "required_objects": [],
+        "required_scenarios": []
+      },
+      "assumptions": [],
+      "constraint_template": null,
+      "description": "Define a primary clock only when name, target, and period are explicitly evidenced.",
+      "id": "K-BUILTIN-CLOCK-DEFINITION",
+      "match_digest": null,
+      "origin": "BUILTIN",
+      "provenance": {
+        "affected_paths": [],
+        "assumption_ids": [],
+        "confidence": "MEDIUM",
+        "created_at": "1970-01-01T00:00:00+00:00",
+        "created_by": "rca.knowledge",
+        "dependency_ids": [],
+        "downstream_ids": [],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.knowledge",
+            "description": "Vendor-neutral built-in knowledge pattern.",
+            "detail": {
+              "knowledge_item_id": "K-BUILTIN-CLOCK-DEFINITION"
+            },
+            "id": "KN-BUILTIN-10fe0363fb7022b4",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "KNOWLEDGE-BUILTIN",
+            "source_objects": []
+          }
+        ],
+        "explanation": "Define a primary clock only when name, target, and period are explicitly evidenced.",
+        "import_meta": null,
+        "rule_id": "KNOWLEDGE-BUILTIN",
+        "scenario_ids": [],
+        "source_kind": "DERIVED"
+      },
+      "semantic_digest": null,
+      "source_constraint_id": null,
+      "source_constraint_set_hash": null,
+      "title": "Primary clock definition",
+      "trust_level": "VALIDATED",
+      "ucm_semantic_digest": null,
+      "warnings": [
+        "Built-in guidance is advisory and has no concrete UCM constraint to accept."
+      ]
+    },
+    {
+      "applicability": {
+        "evidence_required": [
+          "explicit clock-relationship or CDC evidence"
+        ],
+        "rationale": "Built-in guidance requires project-specific evidence; it never supplies timing intent.",
+        "required_clocks": [],
+        "required_constraint_types": [
+          "set_clock_groups"
+        ],
+        "required_objects": [],
+        "required_scenarios": []
+      },
+      "assumptions": [],
+      "constraint_template": null,
+      "description": "Declare asynchronous clock grouping only with explicit CDC or user evidence; never guess it from names.",
+      "id": "K-BUILTIN-CLOCK-RELATIONSHIP",
+      "match_digest": null,
+      "origin": "BUILTIN",
+      "provenance": {
+        "affected_paths": [],
+        "assumption_ids": [],
+        "confidence": "MEDIUM",
+        "created_at": "1970-01-01T00:00:00+00:00",
+        "created_by": "rca.knowledge",
+        "dependency_ids": [],
+        "downstream_ids": [],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.knowledge",
+            "description": "Vendor-neutral built-in knowledge pattern.",
+            "detail": {
+              "knowledge_item_id": "K-BUILTIN-CLOCK-RELATIONSHIP"
+            },
+            "id": "KN-BUILTIN-4b96191571370813",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "KNOWLEDGE-BUILTIN",
+            "source_objects": []
+          }
+        ],
+        "explanation": "Declare asynchronous clock grouping only with explicit CDC or user evidence; never guess it from names.",
+        "import_meta": null,
+        "rule_id": "KNOWLEDGE-BUILTIN",
+        "scenario_ids": [],
+        "source_kind": "DERIVED"
+      },
+      "semantic_digest": null,
+      "source_constraint_id": null,
+      "source_constraint_set_hash": null,
+      "title": "Clock relationship",
+      "trust_level": "VALIDATED",
+      "ucm_semantic_digest": null,
+      "warnings": [
+        "Built-in guidance is advisory and has no concrete UCM constraint to accept."
+      ]
+    },
+    {
+      "applicability": {
+        "evidence_required": [
+          "approved uncertainty methodology"
+        ],
+        "rationale": "Built-in guidance requires project-specific evidence; it never supplies timing intent.",
+        "required_clocks": [],
+        "required_constraint_types": [
+          "set_clock_uncertainty"
+        ],
+        "required_objects": [],
+        "required_scenarios": []
+      },
+      "assumptions": [],
+      "constraint_template": null,
+      "description": "Apply uncertainty only from an approved timing methodology or characterized source.",
+      "id": "K-BUILTIN-CLOCK-UNCERTAINTY",
+      "match_digest": null,
+      "origin": "BUILTIN",
+      "provenance": {
+        "affected_paths": [],
+        "assumption_ids": [],
+        "confidence": "MEDIUM",
+        "created_at": "1970-01-01T00:00:00+00:00",
+        "created_by": "rca.knowledge",
+        "dependency_ids": [],
+        "downstream_ids": [],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.knowledge",
+            "description": "Vendor-neutral built-in knowledge pattern.",
+            "detail": {
+              "knowledge_item_id": "K-BUILTIN-CLOCK-UNCERTAINTY"
+            },
+            "id": "KN-BUILTIN-d36cf35a99b655cd",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "KNOWLEDGE-BUILTIN",
+            "source_objects": []
+          }
+        ],
+        "explanation": "Apply uncertainty only from an approved timing methodology or characterized source.",
+        "import_meta": null,
+        "rule_id": "KNOWLEDGE-BUILTIN",
+        "scenario_ids": [],
+        "source_kind": "DERIVED"
+      },
+      "semantic_digest": null,
+      "source_constraint_id": null,
+      "source_constraint_set_hash": null,
+      "title": "Clock uncertainty",
+      "trust_level": "VALIDATED",
+      "ucm_semantic_digest": null,
+      "warnings": [
+        "Built-in guidance is advisory and has no concrete UCM constraint to accept."
+      ]
+    },
+    {
+      "applicability": {
+        "evidence_required": [
+          "functional false-path proof and selector scope"
+        ],
+        "rationale": "Built-in guidance requires project-specific evidence; it never supplies timing intent.",
+        "required_clocks": [],
+        "required_constraint_types": [
+          "set_false_path"
+        ],
+        "required_objects": [],
+        "required_scenarios": []
+      },
+      "assumptions": [],
+      "constraint_template": null,
+      "description": "Apply a false path only with explicit functional proof and full selector scope.",
+      "id": "K-BUILTIN-FALSE-PATH",
+      "match_digest": null,
+      "origin": "BUILTIN",
+      "provenance": {
+        "affected_paths": [],
+        "assumption_ids": [],
+        "confidence": "MEDIUM",
+        "created_at": "1970-01-01T00:00:00+00:00",
+        "created_by": "rca.knowledge",
+        "dependency_ids": [],
+        "downstream_ids": [],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.knowledge",
+            "description": "Vendor-neutral built-in knowledge pattern.",
+            "detail": {
+              "knowledge_item_id": "K-BUILTIN-FALSE-PATH"
+            },
+            "id": "KN-BUILTIN-1094833924d4fe1b",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "KNOWLEDGE-BUILTIN",
+            "source_objects": []
+          }
+        ],
+        "explanation": "Apply a false path only with explicit functional proof and full selector scope.",
+        "import_meta": null,
+        "rule_id": "KNOWLEDGE-BUILTIN",
+        "scenario_ids": [],
+        "source_kind": "DERIVED"
+      },
+      "semantic_digest": null,
+      "source_constraint_id": null,
+      "source_constraint_set_hash": null,
+      "title": "False-path exception",
+      "trust_level": "VALIDATED",
+      "ucm_semantic_digest": null,
+      "warnings": [
+        "Built-in guidance is advisory and has no concrete UCM constraint to accept."
+      ]
+    },
+    {
+      "applicability": {
+        "evidence_required": [
+          "generated-clock source and master clock"
+        ],
+        "rationale": "Built-in guidance requires project-specific evidence; it never supplies timing intent.",
+        "required_clocks": [],
+        "required_constraint_types": [
+          "create_generated_clock"
+        ],
+        "required_objects": [],
+        "required_scenarios": []
+      },
+      "assumptions": [],
+      "constraint_template": null,
+      "description": "Define a generated clock only with an evidenced source and master-clock relationship.",
+      "id": "K-BUILTIN-GENERATED-CLOCK",
+      "match_digest": null,
+      "origin": "BUILTIN",
+      "provenance": {
+        "affected_paths": [],
+        "assumption_ids": [],
+        "confidence": "MEDIUM",
+        "created_at": "1970-01-01T00:00:00+00:00",
+        "created_by": "rca.knowledge",
+        "dependency_ids": [],
+        "downstream_ids": [],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.knowledge",
+            "description": "Vendor-neutral built-in knowledge pattern.",
+            "detail": {
+              "knowledge_item_id": "K-BUILTIN-GENERATED-CLOCK"
+            },
+            "id": "KN-BUILTIN-615b7165e4b2d42b",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "KNOWLEDGE-BUILTIN",
+            "source_objects": []
+          }
+        ],
+        "explanation": "Define a generated clock only with an evidenced source and master-clock relationship.",
+        "import_meta": null,
+        "rule_id": "KNOWLEDGE-BUILTIN",
+        "scenario_ids": [],
+        "source_kind": "DERIVED"
+      },
+      "semantic_digest": null,
+      "source_constraint_id": null,
+      "source_constraint_set_hash": null,
+      "title": "Generated clock",
+      "trust_level": "VALIDATED",
+      "ucm_semantic_digest": null,
+      "warnings": [
+        "Built-in guidance is advisory and has no concrete UCM constraint to accept."
+      ]
+    },
+    {
+      "applicability": {
+        "evidence_required": [
+          "external interface timing budget and associated clock"
+        ],
+        "rationale": "Built-in guidance requires project-specific evidence; it never supplies timing intent.",
+        "required_clocks": [],
+        "required_constraint_types": [],
+        "required_objects": [],
+        "required_scenarios": []
+      },
+      "assumptions": [],
+      "constraint_template": null,
+      "description": "Apply I/O delay only with an explicit interface budget and associated clock.",
+      "id": "K-BUILTIN-IO-DELAY",
+      "match_digest": null,
+      "origin": "BUILTIN",
+      "provenance": {
+        "affected_paths": [],
+        "assumption_ids": [],
+        "confidence": "MEDIUM",
+        "created_at": "1970-01-01T00:00:00+00:00",
+        "created_by": "rca.knowledge",
+        "dependency_ids": [],
+        "downstream_ids": [],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.knowledge",
+            "description": "Vendor-neutral built-in knowledge pattern.",
+            "detail": {
+              "knowledge_item_id": "K-BUILTIN-IO-DELAY"
+            },
+            "id": "KN-BUILTIN-ec37a26cdde44f64",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "KNOWLEDGE-BUILTIN",
+            "source_objects": []
+          }
+        ],
+        "explanation": "Apply I/O delay only with an explicit interface budget and associated clock.",
+        "import_meta": null,
+        "rule_id": "KNOWLEDGE-BUILTIN",
+        "scenario_ids": [],
+        "source_kind": "DERIVED"
+      },
+      "semantic_digest": null,
+      "source_constraint_id": null,
+      "source_constraint_set_hash": null,
+      "title": "Input/output interface delay",
+      "trust_level": "VALIDATED",
+      "ucm_semantic_digest": null,
+      "warnings": [
+        "Built-in guidance is advisory and has no concrete UCM constraint to accept."
+      ]
+    },
+    {
+      "applicability": {
+        "evidence_required": [
+          "functional multicycle proof and endpoint scope"
+        ],
+        "rationale": "Built-in guidance requires project-specific evidence; it never supplies timing intent.",
+        "required_clocks": [],
+        "required_constraint_types": [
+          "set_multicycle_path"
+        ],
+        "required_objects": [],
+        "required_scenarios": []
+      },
+      "assumptions": [],
+      "constraint_template": null,
+      "description": "Apply a multicycle exception only with functional/architectural proof and complete endpoint scope.",
+      "id": "K-BUILTIN-MULTICYCLE",
+      "match_digest": null,
+      "origin": "BUILTIN",
+      "provenance": {
+        "affected_paths": [],
+        "assumption_ids": [],
+        "confidence": "MEDIUM",
+        "created_at": "1970-01-01T00:00:00+00:00",
+        "created_by": "rca.knowledge",
+        "dependency_ids": [],
+        "downstream_ids": [],
+        "evidence": [
+          {
+            "confidence": "MEDIUM",
+            "created_at": "1970-01-01T00:00:00+00:00",
+            "created_by": "rca.knowledge",
+            "description": "Vendor-neutral built-in knowledge pattern.",
+            "detail": {
+              "knowledge_item_id": "K-BUILTIN-MULTICYCLE"
+            },
+            "id": "KN-BUILTIN-3f9bdd0a3d9da3e5",
+            "kind": "rule",
+            "location": null,
+            "rule_id": "KNOWLEDGE-BUILTIN",
+            "source_objects": []
+          }
+        ],
+        "explanation": "Apply a multicycle exception only with functional/architectural proof and complete endpoint scope.",
+        "import_meta": null,
+        "rule_id": "KNOWLEDGE-BUILTIN",
+        "scenario_ids": [],
+        "source_kind": "DERIVED"
+      },
+      "semantic_digest": null,
+      "source_constraint_id": null,
+      "source_constraint_set_hash": null,
+      "title": "Multicycle path exception",
+      "trust_level": "VALIDATED",
+      "ucm_semantic_digest": null,
+      "warnings": [
+        "Built-in guidance is advisory and has no concrete UCM constraint to accept."
+      ]
+    }
+  ],
+  "schema_version": 1
+}

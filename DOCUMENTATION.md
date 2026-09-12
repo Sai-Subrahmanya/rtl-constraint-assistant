@@ -500,11 +500,19 @@ The repository preserves run/candidate/session/scenario/cache/tool/constraint id
 |---|---|---|
 | `__init__.py` | 9 | Placeholder/docstring. At present elaboration is performed inside `slang_adapter.py`; this package is reserved for parser-independent elaboration passes (parameter binding, generate unrolling, hierarchy flattening). |
 
-### 5.20 `src/rca/search/`
+### 5.20 `src/rca/search/` — deterministic search and knowledge reuse (Step 26)
 
 | File | Lines | Purpose |
 |---|---|---|
-| `__init__.py` | — | Reserved package for future "search for existing constraints" / knowledge-base lookup (Manual §146-149). |
+| `__init__.py` | — | Re-exports the typed offline knowledge/reuse API while preserving optimizer-search namespace separation. |
+| `knowledge.py` | ~1,000 | `KnowledgePattern`/`KnowledgeSuggestion`/`KnowledgeEngine` and explicit UCM acceptance. Reuses canonical UCM, Step-9 semantic normalization, provenance/evidence, and read-only SQLite projections; it is advisory only, never a second constraint model, parser, cache, or history authority. Strict JSON files are data-only and never execute Tcl/shell/Python/expressions. |
+
+Built-in patterns have declarative applicability requirements and no directly
+acceptable constraint template. Project UCM items are read-only indexes;
+history requires a hash-verified retained canonical snapshot and does not promote
+history to `VERIFIED`. Relevance ranking is deterministic lookup order, not a
+correctness probability. See `STEP26_KNOWLEDGE_REUSE.md` for the format,
+trust/applicability rules, acceptance boundary, and `rca knowledge` CLI.
 
 ### 5.21 `src/rca/artifacts/` — artifact/provenance and cache authority (WP-A, WP-N)
 
@@ -829,6 +837,8 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca run-sta [CONFIG]` | Run only the explicit `mock` or `yosys_opensta` flow with current SDC; a real request fails closed when preflight is not ready. | `--backend {yosys_opensta,mock}`, `--sdc FILE`, `--force`, `--allow-partial-sdc` |
 | `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization. It atomically persists an authoritative execution ledger and normal manifest before recording advisory history. Candidate concurrency is configured only with `optimization.workers` (1–8; default 1). | `--backend`, `--dashboard` |
 | `rca history` | Query the local `<flow.output_dir>/qor.sqlite3` sidecar, explicitly import existing run artifacts, or read the authoritative optimizer ledger without SQLite. Never executes EDA, optimization, or cache reuse. | `--config`, `--output-dir`, `--run-id`, `--candidate --session`, `--scenario`, `--constraint-set`, `--best {setup_wns,area,power}`, `--area-source {real,proxy}`, `--import-legacy`, `--optimization-ledger`, `--json` |
+| `rca knowledge list` / `search QUERY` / `show ID` | List, text-search, or inspect offline built-in/strict JSON/history knowledge items. No source, UCM, cache, or SQLite mutation occurs. Relevance is deterministic lookup order, never correctness. | `--knowledge FILE.json` (repeatable), `--history-output-dir`, `--json`; `search` also takes `--limit` |
+| `rca knowledge suggest [CONFIG]` | Build an in-memory project UCM view and return only advisory semantic matches. With a config, writes separate `knowledge_suggestions.json`; it has no acceptance action and never rewrites intent. | `--knowledge FILE.json`, `--history-output-dir`, `--limit-per-constraint`, `--json` |
 | `rca inspect [CONFIG] {module,port,net,register,clock,path}` | Structured inspection sub-tables of the design model (e.g. `rca inspect project.yaml port` prints all ports). |  |
 | `rca report [CONFIG]` | Human-readable design report (clocks, resets, domains, missing info, validation, constraint list) — Rich formatted. |  |
 | `rca dashboard [CONFIG]` | Start the FastAPI web dashboard (uvicorn). | `--port 8765`, `--open-browser/--no-open-browser`, `--host 0.0.0.0` |
@@ -1204,7 +1214,10 @@ conflict. `list_runs`, `best_qor`, candidate-lineage, MCMM, artifact,
 provenance, and replay-identity queries have fixed ordering and whitelisted
 fields. `get_replay_identity` validates retained artifact paths/hashes and
 reports absent evidence, but does not execute or promise a reproducible EDA
-rerun. See `STEP21_QOR_DATABASE.md` for the complete contract.
+rerun. `list_constraint_set_projections` is the Step-26 read-only metadata
+projection used only to locate separately retained canonical UCM snapshots; it
+neither serializes constraints into SQLite nor makes history authoritative. See
+`STEP21_QOR_DATABASE.md` for the complete contract.
 
 ## 19. Known Gaps and Roadmap
 

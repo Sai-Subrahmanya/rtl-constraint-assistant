@@ -12,7 +12,7 @@ import re
 import sys
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import typer
 import uvicorn
@@ -50,6 +50,7 @@ from ..provenance import AssumptionLedger
 from ..qor.repository import QoRRepositoryError, SQLiteQoRRepository
 from ..sdc import SDCParser, get_backend
 from ..sdc_importer import SdcImporter
+from ..search import KnowledgeEngine, KnowledgeError, load_knowledge_file
 from ..source.manifest import resolve_include_dirs, resolve_sources
 from ..timing_model import TimingGraph
 from ..utils import configure_logging, get_logger
@@ -65,6 +66,15 @@ app = typer.Typer(
 )
 console = Console()
 log = get_logger("cli")
+
+# ``knowledge`` is an advisory-only namespace. It deliberately has no command
+# that writes a project configuration or accepts a result implicitly.
+knowledge_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Offline typed constraint-pattern lookup and reuse advice (Step 26).",
+)
+app.add_typer(knowledge_app, name="knowledge")
 
 
 # ---- Helpers ----------------------------------------------------------------
@@ -1222,6 +1232,145 @@ def report(config: str = typer.Argument(..., help="Path to project YAML")):
                    "qor": latest_qor,
                    "constraints": cset.snapshot()})
     sys.stdout.write(text)
+
+
+def _knowledge_engine(knowledge_files: list[str], history_output_dir: str | None) -> KnowledgeEngine:
+    """Create an advisory corpus from declared, local, non-executing sources."""
+    engine = KnowledgeEngine()
+    try:
+        for path in sorted(set(knowledge_files)):
+            engine.add_patterns(load_knowledge_file(path))
+        if history_output_dir:
+            engine.index_history(SQLiteQoRRepository.for_output_dir(history_output_dir))
+    except KnowledgeError as exc:
+        console.print(f"[red]Knowledge input error: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    return engine
+
+
+@knowledge_app.command("list")
+def knowledge_list(
+    knowledge_file: Annotated[list[str] | None, typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)")] = None,
+    history_output_dir: str | None = typer.Option(None, "--history-output-dir", help="Read-only local QoR sidecar directory"),
+    json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
+):
+    """List loaded knowledge items; no project, UCM, or history row is modified."""
+    engine = _knowledge_engine(knowledge_file or [], history_output_dir)
+    data = {
+        "kind": "rca_knowledge_list",
+        "schema_version": 1,
+        "advisory": True,
+        "items": [pattern.to_dict() for pattern in engine.patterns()],
+        "diagnostics": sorted(engine.diagnostics),
+    }
+    if json_out:
+        sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+        return
+    console.print(Panel("[cyan]Constraint knowledge[/cyan] — offline advisory items, not UCM constraints"))
+    table = Table(title="Knowledge patterns")
+    table.add_column("ID"); table.add_column("Origin"); table.add_column("Trust")
+    table.add_column("Title")
+    for item in data["items"]:
+        table.add_row(item["id"], item["origin"], item["trust_level"], item["title"])
+    console.print(table)
+    for diagnostic in data["diagnostics"]:
+        console.print(f"[yellow]{diagnostic}[/yellow]")
+
+
+@knowledge_app.command("show")
+def knowledge_show(
+    item_id: str = typer.Argument(..., help="Knowledge item ID"),
+    knowledge_file: Annotated[list[str] | None, typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)")] = None,
+    history_output_dir: str | None = typer.Option(None, "--history-output-dir", help="Read-only local QoR sidecar directory"),
+    json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
+):
+    """Show one pattern and its retained provenance without accepting it."""
+    engine = _knowledge_engine(knowledge_file or [], history_output_dir)
+    item = engine.get(item_id)
+    if item is None:
+        console.print(f"[red]Knowledge item '{item_id}' was not found.[/red]")
+        raise typer.Exit(code=2)
+    data = {"kind": "rca_knowledge_item", "schema_version": 1, "advisory": True,
+            "item": item.to_dict(), "diagnostics": sorted(engine.diagnostics)}
+    if json_out:
+        sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+    else:
+        console.print_json(json.dumps(data, indent=2, sort_keys=True, default=str))
+
+
+@knowledge_app.command("search")
+def knowledge_search(
+    query: str = typer.Argument(..., help="Text to search over pattern IDs, titles, descriptions, and types"),
+    knowledge_file: Annotated[list[str] | None, typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)")] = None,
+    history_output_dir: str | None = typer.Option(None, "--history-output-dir", help="Read-only local QoR sidecar directory"),
+    limit: int = typer.Option(20, "--limit", min=0, help="Maximum deterministic result count"),
+    json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
+):
+    """Search advisory patterns only; ranking is relevance, not correctness."""
+    engine = _knowledge_engine(knowledge_file or [], history_output_dir)
+    data = {"kind": "rca_knowledge_search", "schema_version": 1, "advisory": True,
+            **engine.search(text=query, limit=limit).to_dict()}
+    if json_out:
+        sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+    else:
+        console.print(Panel("[cyan]Constraint knowledge search[/cyan] — relevance is not a correctness probability"))
+        console.print_json(json.dumps(data, indent=2, sort_keys=True, default=str))
+
+
+@knowledge_app.command("suggest")
+def knowledge_suggest(
+    config: str | None = typer.Argument(None, help="Optional project YAML used only to build a read-only inferred UCM view"),
+    knowledge_file: Annotated[list[str] | None, typer.Option("--knowledge", "-k", help="Strict JSON knowledge file (repeatable)")] = None,
+    history_output_dir: str | None = typer.Option(None, "--history-output-dir", help="Read-only local QoR sidecar directory"),
+    limit_per_constraint: int = typer.Option(5, "--limit-per-constraint", min=0, help="Deterministic result cap per UCM constraint"),
+    json_out: bool = typer.Option(False, "--json", help="Emit deterministic JSON"),
+):
+    """Produce advisory project matches; never accepts or changes project intent.
+
+    A supplied config is parsed/inferred in memory exactly as other analysis
+    commands do. The only output is a separate advisory JSON artifact; source
+    config, canonical UCM inputs, SQLite history, and SDC are not changed.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
+    engine = _knowledge_engine(knowledge_file or [], history_output_dir)
+    cset = None
+    report = None
+    project_name = None
+    artifact_path = None
+    suggestions = []
+    references: list[dict[str, Any]] = []
+    if config:
+        cfg = _load(config)
+        design, _ = _do_parse(cfg)
+        timing_graph = _do_timing(cfg, design)
+        cset, report = _do_inference(cfg, design, timing_graph, AssumptionLedger())
+        project_name = cfg.project.name
+        # This is a pure index of the inferred view; it never writes it back.
+        engine.index_constraint_set(cset)
+        suggestions = engine.suggestions_for_constraint_set(cset, limit_per_constraint=limit_per_constraint)
+        references = engine.inference_references(report, cset)
+        payload = {
+            "kind": "rca_knowledge_suggestions", "schema_version": 1, "advisory": True,
+            "project": project_name, "suggestions": [item.to_dict() for item in suggestions],
+            "inference_knowledge_references": references, "diagnostics": sorted(engine.diagnostics),
+            "acceptance": "No suggestion was accepted or written to the project.",
+        }
+        artifact_path = _am(cfg).write_json("knowledge_suggestions.json", payload)
+    data = {
+        "kind": "rca_knowledge_suggestions", "schema_version": 1, "advisory": True,
+        "project": project_name, "suggestions": [item.to_dict() for item in suggestions],
+        "inference_knowledge_references": references, "diagnostics": sorted(engine.diagnostics),
+        "artifact": str(artifact_path) if artifact_path else None,
+        "acceptance": "No suggestion was accepted or written to the project.",
+    }
+    if not config:
+        data["diagnostics"].append("No project config supplied; no project-UCM applicability check was performed.")
+        data["diagnostics"].sort()
+    if json_out:
+        sys.stdout.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+    else:
+        console.print(Panel("[cyan]Constraint knowledge suggestions[/cyan] — advisory only; no UCM mutation"))
+        console.print_json(json.dumps(data, indent=2, sort_keys=True, default=str))
 
 
 @app.command()

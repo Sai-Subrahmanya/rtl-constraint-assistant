@@ -56,6 +56,9 @@ class InferenceReport:
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     missing_information: list[dict[str, Any]] = field(default_factory=list)
     assumptions_added: list[dict[str, Any]] = field(default_factory=list)
+    # Optional Step-26 advisory references. Knowledge lookup may populate this
+    # list after inference, but it never changes rule results or UCM state.
+    knowledge_references: list[dict[str, Any]] = field(default_factory=list)
     constraints_added: int = 0
     evidence_count: int = 0
 
@@ -96,6 +99,7 @@ class InferenceReport:
             "missing_information": self.missing_information,
             "required_information": self.required_information(),
             "assumptions_added": len(self.assumptions_added),
+            "knowledge_references": self.knowledge_references,
             "evidence_count": self.evidence_count,
             "per_rule": [
                 {

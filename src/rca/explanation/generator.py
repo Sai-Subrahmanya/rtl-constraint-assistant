@@ -11,7 +11,6 @@ from typing import Any
 
 from ..constraint_model import Constraint, ConstraintSet
 from ..optimizer import Candidate
-from ..utils.enums import ConstraintType
 
 
 def explain_constraint(c: Constraint) -> str:
@@ -28,7 +27,14 @@ def explain_constraint(c: Constraint) -> str:
             lines.append(f"  Why: {c.provenance.explanation}")
         for ev in c.provenance.evidence:
             lines.append(f"    evidence[{ev.kind}]: {ev.description}")
-        for aid in c.provenance.assumptions:
+            # Step-26 reuse remains ordinary provenance evidence. Surface its
+            # stable knowledge identity here instead of inventing a parallel
+            # explanation model.
+            if ev.rule_id == "KNOWLEDGE-REUSE":
+                item_id = ev.detail.get("knowledge_item_id")
+                if item_id:
+                    lines.append(f"    knowledge item: {item_id} (explicit acceptance; requires confirmation)")
+        for aid in c.provenance.assumption_ids:
             lines.append(f"    assumption: {aid}")
     if c.assumption_ids:
         lines.append(f"  Assumptions: {c.assumption_ids}")

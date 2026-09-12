@@ -1264,6 +1264,55 @@ class SQLiteQoRRepository:
     def find_by_constraint_set(self, constraint_set_hash: str) -> list[dict[str, Any]]:
         return self.list_runs(constraint_set_hash=constraint_set_hash)
 
+    def list_constraint_set_projections(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Return deterministic, read-only constraint-set history projections.
+
+        This intentionally exposes only retained SQLite metadata and quality
+        observations.  It does not restore, rewrite, or treat the sidecar as
+        canonical UCM authority.  Consumers which need constraints must verify
+        and restore the separately retained canonical snapshot themselves.
+        """
+        self.initialize()
+        sql = """
+            SELECT cs.constraint_set_hash, cs.name, cs.snapshot_artifact_ref, cs.snapshot_sha256,
+                   e.evaluation_id, e.is_mock, q.validation_errors
+            FROM constraint_sets cs
+            LEFT JOIN evaluations e ON e.constraint_set_hash=cs.constraint_set_hash
+            LEFT JOIN qor_measurements q ON q.evaluation_id=e.evaluation_id
+            ORDER BY cs.constraint_set_hash ASC, e.evaluation_id ASC
+        """
+        conn = self._connect()
+        try:
+            grouped: dict[str, dict[str, Any]] = {}
+            for row in conn.execute(sql).fetchall():
+                value = dict(row)
+                key = value["constraint_set_hash"]
+                item = grouped.setdefault(key, {
+                    "constraint_set_hash": key,
+                    "name": value["name"],
+                    "snapshot_artifact_ref": value["snapshot_artifact_ref"],
+                    "snapshot_sha256": value["snapshot_sha256"],
+                    "run_count": 0,
+                    "validated_run_count": 0,
+                    "mock_run_count": 0,
+                    "evaluation_ids": [],
+                })
+                evaluation_id = value["evaluation_id"]
+                if evaluation_id is None:
+                    continue
+                item["run_count"] += 1
+                item["evaluation_ids"].append(evaluation_id)
+                item["mock_run_count"] += int(bool(value["is_mock"]))
+                # This records only that an historical row retained a zero
+                # validation-error measurement. It is not a correctness or
+                # equivalence proof and never implies VERIFIED trust.
+                if value["validation_errors"] == 0:
+                    item["validated_run_count"] += 1
+            result = [grouped[key] for key in sorted(grouped)]
+            return result[:max(0, int(limit))] if limit is not None else result
+        finally:
+            conn.close()
+
     def get_candidate(self, session_id: str, candidate_id: str) -> dict[str, Any] | None:
         self.initialize()
         conn = self._connect()
