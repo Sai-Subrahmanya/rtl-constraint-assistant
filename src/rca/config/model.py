@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from ..utils.enums import (
     FlowStage,
@@ -111,6 +111,10 @@ class OptimizationPerturbation(BaseModel):
 
 class OptimizationConfig(BaseModel):
     enabled: bool = False
+    # Bounded candidate-level orchestration. One deliberately keeps the
+    # established direct serial path; higher values never create nested MCMM,
+    # cache, database, or tool-stage worker pools.
+    workers: StrictInt = Field(default=1, ge=1, le=8)
     max_iterations: int = 20
     max_eda_runs: int = 20
     max_runtime_minutes: int = 120

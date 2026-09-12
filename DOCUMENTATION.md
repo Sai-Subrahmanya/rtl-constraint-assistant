@@ -760,7 +760,7 @@ accept `--verbose/--quiet`, `--results-dir`, and `--safe-mode {strict,balanced,a
 | `rca coverage [CONFIG]` | Print only the coverage metrics (clock/in/out %). |  |
 | `rca explain [CONFIG] [CONSTRAINT_ID]` | Print natural-language explanation(s) of one or all constraints (evidence, assumptions, source). |  |
 | `rca run-sta [CONFIG]` | Synthesize with Yosys and/or run OpenSTA with current SDC; print timing report. | `--eda {yosys,opensta,mock}`, `--sdc FILE` |
-| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization; after its established files are written, records a session-scoped local historical index. | `--backend`, `--iterations N`, `--eda-runs-per-iter N`, `--timeout SECS`, `--eda {mock,yosys,opensta}` |
+| `rca optimize [CONFIG]` | Closed-loop multi-objective Pareto optimization; after its established files are written, records a session-scoped local historical index. Candidate concurrency is configured only with `optimization.workers` (1–8; default 1). | `--backend`, `--dashboard` |
 | `rca history` | Query the local `<flow.output_dir>/qor.sqlite3` sidecar or explicitly import existing run artifacts. Never executes EDA, optimization, or cache reuse. | `--config`, `--output-dir`, `--run-id`, `--candidate --session`, `--scenario`, `--constraint-set`, `--best {setup_wns,area,power}`, `--area-source {real,proxy}`, `--import-legacy`, `--json` |
 | `rca inspect [CONFIG] {module,port,net,register,clock,path}` | Structured inspection sub-tables of the design model (e.g. `rca inspect project.yaml port` prints all ports). |  |
 | `rca report [CONFIG]` | Human-readable design report (clocks, resets, domains, missing info, validation, constraint list) — Rich formatted. |  |
@@ -817,6 +817,7 @@ eda:
 
 optimization:
   enabled: false
+  workers: 1              # bounded complete-candidate evaluations; 1..8, 1 is serial
   max_iterations: 8
   eda_runs_per_iteration: 4
   objectives: [setup_slack, hold_slack, area, power]
@@ -1018,6 +1019,37 @@ described in Manual §120–§129:
 All FIXED constraints (USER clocks, USER clock groups, FORMALLY_VERIFIED
 exceptions) are immutable across mutations — the optimizer will never
 touch them, honoring Manual §128.
+
+### Bounded simultaneous candidate evaluation
+
+`optimization.workers` is a strict integer from **1** through **8** and the
+only concurrency control; it defaults to **1**. There is intentionally no CLI
+worker override or automatic sizing. At `workers: 1`, optimization follows the
+direct established serial code path and creates no executor. At higher values,
+RCA uses a bounded standard-library `ThreadPoolExecutor` only for independent,
+complete candidate evaluations. Candidate generation/deduplication, IDs,
+lineage, and task ordinals are fixed before submission; the coordinator applies
+outcomes in planned task order, never completion order.
+
+An MCMM candidate remains one task whose scenarios execute serially in existing
+scenario order and aggregate completely before the result becomes visible. The
+coordinator alone updates optimizer state, budget, Pareto/rank state and
+advisory history. A task's physical output ID contains a fresh invocation token,
+task ordinal, candidate ID, and scenario component, but those locator details
+are excluded from cache identity. The filesystem manifest/hash cache remains
+the sole cache authority. Worker tasks write normal flow artifacts/manifests
+then defer SQLite indexing; the coordinator indexes completed evidence in task
+order. Executor construction/submission errors fail closed as an optimization
+concurrency error rather than falling back to serial; individual task failures
+remain isolated candidates.
+
+Planned admission never dispatches a complete task that exceeds
+`max_eda_runs`. After a wall-clock deadline, no later wave is admitted, while
+already-started work completes safely. This can make an elapsed-time limit
+observe completed in-flight work; it does not promise a performance gain. Run
+`python scripts/benchmark_candidate_concurrency.py --workers 1,2,4` for the
+small controlled fake-evaluator measurement harness. See
+`STEP22_CANDIDATE_CONCURRENCY.md` and ADR-005 for the full contract.
 
 ---
 

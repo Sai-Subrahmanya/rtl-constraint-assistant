@@ -8,6 +8,7 @@ explain, run-sta, optimize, inspect, report, dashboard.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import webbrowser
 from pathlib import Path
@@ -25,7 +26,14 @@ from ..artifacts import ArtifactManager, RunManifest
 from ..config.model import ProjectConfig, default_config, load_config, write_config
 from ..constraint_model import ConstraintSet
 from ..design_model import Design
-from ..eda import MockEDA, OpenSTABackend, YosysBackend, get_tool, run_flow
+from ..eda import (
+    MockEDA,
+    OpenSTABackend,
+    YosysBackend,
+    get_tool,
+    index_deferred_history_evidence,
+    run_flow,
+)
 from ..equivalence import compare_sdc_text
 from ..exceptions import analyze_exceptions, formal_backend_from_config, verify_exceptions
 from ..explanation import design_report, explain_candidate, explain_constraint
@@ -42,9 +50,9 @@ from ..parser import SlangAdapter
 from ..provenance import AssumptionLedger
 from ..qor.model import QoRResult
 from ..qor.repository import QoRRepositoryError, SQLiteQoRRepository
+from ..scenarios import build_scenarios
 from ..sdc import SDCParser, get_backend
 from ..sdc_importer import SdcImporter
-from ..scenarios import build_scenarios
 from ..source.manifest import resolve_include_dirs, resolve_sources
 from ..timing_model import TimingGraph
 from ..utils import configure_logging, get_logger
@@ -165,6 +173,24 @@ def _mcmm_per_scenario_sdc(cset: ConstraintSet, backend, design_name: str,
                            mode=SafeMode.BALANCED, with_provenance=True,
                            scenario=scenario_id)
     return res.text
+
+
+def _parallel_task_flow_id(work_dir: Path, candidate_id: str, scenario_id: str) -> str | None:
+    """Return a task-specific physical run ID only for an optimizer worker.
+
+    ``Optimizer`` preassigns task directory names containing a per-invocation
+    token, ordinal, and candidate ID before submission. The scenario component
+    completes the physical-flow locator while leaving the existing input-only
+    cache key untouched. Baseline/direct serial callbacks do not use this path.
+    """
+    task_component = Path(work_dir).name
+    if not task_component.startswith("task_"):
+        return None
+    scenario_component = re.sub(r"[^A-Za-z0-9_.-]+", "-", scenario_id).strip(".-") or "scenario"
+    candidate_component = re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate_id).strip(".-") or "candidate"
+    # The candidate component is intentionally repeated as an independently
+    # visible guard even though it is already embedded in the task component.
+    return f"run_{task_component}_{candidate_component}_{scenario_component}"
 
 
 def _print_power_summary(console, q: dict, *, indent: str = "  ") -> None:
@@ -924,19 +950,22 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
             cand_cset = cand.constraint_set or cset
             sdc_text = _mcmm_per_scenario_sdc(
                 cand_cset, sdc_backend, cfg.project.name, matrix, scenario.id)
+            task_run_id = _parallel_task_flow_id(work, cand.id, scenario.id)
             flow_result = run_flow(
                 cfg=cfg, cset=cand_cset, sdc_text=sdc_text,
                 sdc_generation_status="COMPLETE", sources=sources,
                 include_dirs=resolve_include_dirs(cfg),
                 output_dir=Path(cfg.flow.output_dir), backend="yosys_opensta",
-                candidate_id=cand.id, scenario=scenario.id, corner=scenario.corner,
-                mode=scenario.mode,
+                run_id=task_run_id, candidate_id=cand.id, scenario=scenario.id,
+                corner=scenario.corner, mode=scenario.mode,
+                defer_history_indexing=task_run_id is not None,
             )
             return {
                 "qor": flow_result.get("qor_result"),
                 "cache_key": flow_result.get("cache_key", ""),
                 "cache_status": flow_result.get("status", ""),
                 "run_id": flow_result.get("run_id", ""),
+                "_deferred_history_evidence": flow_result.get("_deferred_history_evidence"),
             }
 
         if backend == "mock":
@@ -952,13 +981,25 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
             if backend == "mock":
                 tool = MockEDA()
                 return tool.evaluate_candidate(cand, work)
+            task_run_id = _parallel_task_flow_id(work, cand.id, "default")
             flow_result = run_flow(
                 cfg=cfg, cset=cand_cset, sdc_text=sdc_text,
                 sdc_generation_status="COMPLETE", sources=sources,
                 include_dirs=resolve_include_dirs(cfg),
                 output_dir=Path(cfg.flow.output_dir), backend="yosys_opensta",
-                candidate_id=cand.id,
+                run_id=task_run_id, candidate_id=cand.id,
+                defer_history_indexing=task_run_id is not None,
             )
+            if task_run_id is not None:
+                # Preserve the transient history evidence beside the canonical
+                # QoR return value for the optimizer coordinator.
+                return {
+                    "qor": flow_result.get("qor_result"),
+                    "cache_key": flow_result.get("cache_key", ""),
+                    "cache_status": flow_result.get("status", ""),
+                    "run_id": flow_result.get("run_id", ""),
+                    "_deferred_history_evidence": flow_result.get("_deferred_history_evidence"),
+                }
             return flow_result.get("qor_result")
 
     opt = Optimizer(cfg, evaluate_fn=evaluate, work_dir=runs_dir)
@@ -975,16 +1016,31 @@ def optimize(config: str = typer.Argument(..., help="Path to project YAML"),
     if result.final and result.final.constraint_set:
         final_sdc = sdc_backend.render(result.final.constraint_set, design_name=cfg.project.name)
         am.write_text("design.final.sdc", final_sdc)
-    # The existing optimizer JSON/JSONL artifacts remain canonical.  Index
-    # after they are complete; a database issue only emits a warning and never
-    # changes candidate, optimizer, EDA, or cache semantics.
+    # The existing optimizer JSON/JSONL artifacts remain canonical. Parallel
+    # workers return completed physical-flow evidence rather than writing
+    # SQLite; consume it here in task-list order before session persistence.
+    # A database issue only emits a warning and never changes candidate, EDA,
+    # artifact, QoR, or cache semantics; ``rca history --import-legacy`` can
+    # later reconcile the authoritative manifests.
+    for evidence in opt.deferred_history_evidence:
+        warning = index_deferred_history_evidence(evidence)
+        if warning:
+            result.diagnostics.append(warning)
+            console.print(f"[yellow]{warning}[/yellow]")
+    # Preserve coordinator persistence diagnostics in the already-established
+    # optimizer state artifact without creating a separate concurrency record.
+    am.write_json("optimizer_state.json", result.to_dict())
+
     history_session_id = None
     try:
         history_session_id = SQLiteQoRRepository.for_output_dir(cfg.flow.output_dir).record_optimizer_session(
             result, project_name=cfg.project.name, output_dir=cfg.flow.output_dir,
         )
     except Exception as exc:
-        console.print(f"[yellow]QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}[/yellow]")
+        warning = f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
+        result.diagnostics.append(warning)
+        am.write_json("optimizer_state.json", result.to_dict())
+        console.print(f"[yellow]{warning}[/yellow]")
     console.print(Panel("[cyan bold]Optimization complete[/cyan bold]"))
     if history_session_id:
         console.print(f"  Historical QoR session: {history_session_id}")

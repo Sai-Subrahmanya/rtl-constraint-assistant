@@ -240,6 +240,12 @@ PROJECT_SCHEMA: dict = {
             "additionalProperties": False,
             "properties": {
                 "enabled": {"type": "boolean", "default": False},
+                "workers": {
+                    "type": "integer", "minimum": 1, "maximum": 8, "default": 1,
+                    "description": (
+                        "Bounded concurrent complete-candidate evaluations; 1 is serial."
+                    ),
+                },
                 "max_iterations": {"type": "integer", "minimum": 1, "default": 20},
                 "max_eda_runs": {"type": "integer", "minimum": 1, "default": 20},
                 "max_runtime_minutes": {"type": "integer", "minimum": 1, "default": 120},

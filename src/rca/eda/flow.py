@@ -311,6 +311,45 @@ def _index_qor_history(*, output_dir: Path, cset: ConstraintSet | None,
         return message
 
 
+def deferred_history_evidence(*, output_dir: Path, cset: ConstraintSet | None,
+                              qor: QoRResult | None, manifest: RunManifest,
+                              run_id: str, run_dir: Path, run_status: str,
+                              repository: Any | None = None) -> dict[str, Any]:
+    """Package completed authoritative flow evidence for coordinator indexing.
+
+    This deliberately carries existing in-memory QoR/manifest objects only
+    within one process. It neither serializes a second artifact nor participates
+    in cache lookup. A parallel candidate worker returns this evidence after all
+    normal artifacts are complete; its optimizer coordinator indexes it in
+    planned task order.
+    """
+    return {
+        "output_dir": output_dir,
+        "cset": cset,
+        "qor": qor,
+        "manifest": manifest,
+        "run_id": run_id,
+        "run_dir": run_dir,
+        "run_status": run_status,
+        "repository": repository,
+    }
+
+
+def index_deferred_history_evidence(evidence: dict[str, Any]) -> str | None:
+    """Best-effort coordinator-side indexing of ``deferred_history_evidence``."""
+    try:
+        return _index_qor_history(
+            output_dir=Path(evidence["output_dir"]), cset=evidence.get("cset"),
+            qor=evidence.get("qor"), manifest=evidence["manifest"],
+            run_id=str(evidence["run_id"]), run_dir=Path(evidence["run_dir"]),
+            run_status=str(evidence["run_status"]), repository=evidence.get("repository"),
+        )
+    except Exception as exc:
+        message = f"QOR_DATABASE_PERSISTENCE_WARNING: {type(exc).__name__}: {exc}"
+        log.warning(message)
+        return message
+
+
 def run_flow(cfg: Any,
              cset: ConstraintSet,
              sdc_text: str,
@@ -331,6 +370,7 @@ def run_flow(cfg: Any,
              sta_bin: str | None = None,
              force: bool = False,
              qor_repository: Any | None = None,
+             defer_history_indexing: bool = False,
              ) -> dict[str, Any]:
     project_root = Path(cfg._config_path).parent if hasattr(cfg, "_config_path") else Path(".")
     output_dir = output_dir or Path(getattr(getattr(cfg, "flow", None), "output_dir", "output"))
@@ -421,10 +461,17 @@ def run_flow(cfg: Any,
         )
         am.write_manifest_to(run_id, manifest)
         # Unit-level mock flow remains filesystem-only unless a repository is
-        # explicitly supplied. CLI optimizer persistence is handled after its
-        # established optimizer artifacts are written.
+        # explicitly supplied. For a parallel optimizer task, any requested
+        # repository write is instead returned to its coordinator.
+        evidence = None
         persistence_warning = None
-        if qor_repository is not None:
+        if defer_history_indexing:
+            evidence = deferred_history_evidence(
+                output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
+                run_id=run_id, run_dir=run_dir, run_status=RunStatus.MOCK.value,
+                repository=qor_repository,
+            )
+        elif qor_repository is not None:
             persistence_warning = _index_qor_history(
                 output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
                 run_id=run_id, run_dir=run_dir, run_status=RunStatus.MOCK.value,
@@ -435,6 +482,7 @@ def run_flow(cfg: Any,
                 "run_dir": str(run_dir), "manifest": manifest.to_dict(),
                 "qor": qor.summary(), "qor_result": qor, "diagnostics": result_diagnostics,
                 "persistence_warning": persistence_warning,
+                "_deferred_history_evidence": evidence,
                 "synth": None, "sta": None}
 
     # ---------- REAL backends ----------
@@ -530,7 +578,8 @@ def run_flow(cfg: Any,
         return _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash,
                         lib_hashes, diagnostics, run_dir, reason="; ".join(diagnostics),
                         tool_identity=tool_identity, cache_key=cache_key,
-                        inc_hashes=inc_hashes, cset=cset, qor_repository=qor_repository)
+                        inc_hashes=inc_hashes, cset=cset, qor_repository=qor_repository,
+                        defer_history_indexing=defer_history_indexing)
 
     extra_synth = {"defines": defines_map,
                    "include_dirs": [str(p) for p in include_dirs_paths],
@@ -545,7 +594,9 @@ def run_flow(cfg: Any,
                         reason=f"Yosys raised {type(e).__name__}: {e}",
                         tool_identity=tool_identity,
                         status=RunStatus.SYNTHESIS_FAILED.value,
-                        cache_key=cache_key, inc_hashes=inc_hashes, cset=cset, qor_repository=qor_repository)
+                        cache_key=cache_key, inc_hashes=inc_hashes, cset=cset,
+                        qor_repository=qor_repository,
+                        defer_history_indexing=defer_history_indexing)
     if not synth_res.success:
         diagnostics.append(synth_res.error)
         return _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash,
@@ -553,7 +604,8 @@ def run_flow(cfg: Any,
                         tool_identity=tool_identity,
                         status=RunStatus.SYNTHESIS_FAILED.value,
                         cache_key=cache_key, inc_hashes=inc_hashes,
-                        synth_res=synth_res, cset=cset, qor_repository=qor_repository)
+                        synth_res=synth_res, cset=cset, qor_repository=qor_repository,
+                        defer_history_indexing=defer_history_indexing)
     netlist = synth_res.netlist
     netlist_hash = hash_file(netlist)
 
@@ -672,11 +724,23 @@ def run_flow(cfg: Any,
     am.write_manifest_to(run_id, manifest)
     # Index only after the normal run artifacts and manifest are complete.
     # Database failure is advisory and cannot alter the actual EDA outcome.
-    persistence_warning = _index_qor_history(
-        output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
-        run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
-    )
-    result_diagnostics = diagnostics + sta_diag + ([persistence_warning] if persistence_warning else [])
+    # A candidate worker never writes normal optimizer history: it returns the
+    # same completed evidence for deterministic coordinator-side indexing.
+    evidence = None
+    if defer_history_indexing:
+        evidence = deferred_history_evidence(
+            output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
+            run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
+        )
+        persistence_warning = None
+    else:
+        persistence_warning = _index_qor_history(
+            output_dir=output_dir, cset=cset, qor=qor, manifest=manifest,
+            run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
+        )
+    result_diagnostics = diagnostics + sta_diag
+    if persistence_warning:
+        result_diagnostics.append(persistence_warning)
     return {
         "status": status, "run_id": run_id, "run_dir": str(run_dir),
         "manifest": manifest.to_dict(),
@@ -684,6 +748,7 @@ def run_flow(cfg: Any,
         "qor_result": qor,
         "diagnostics": result_diagnostics,
         "persistence_warning": persistence_warning,
+        "_deferred_history_evidence": evidence,
         "synth": synth_res.to_dict(), "sta": sta_result,
         "cache_key": cache_key,
     }
@@ -704,7 +769,8 @@ def _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashe
              diagnostics, run_dir, reason, tool_identity=None,
              status=RunStatus.BLOCKED.value, cache_key=None,
              inc_hashes=None, synth_res=None, cset: ConstraintSet | None = None,
-             qor_repository: Any | None = None):
+             qor_repository: Any | None = None,
+             defer_history_indexing: bool = False):
     artifacts: dict[str, Any] = {}
     if synth_res is not None:
         artifacts = {
@@ -727,17 +793,29 @@ def _blocked(am, run_id, candidate_id, rtl_hashes, sdc_hash, cfg_hash, lib_hashe
         am.write_manifest_to(run_id, manifest)
     except Exception:
         pass
-    # A blocked/failed manifest is still historical evidence.  Index it only
-    # after the manifest write attempt; failure remains non-fatal to EDA state.
-    persistence_warning = _index_qor_history(
-        output_dir=am.output_dir, cset=cset, qor=None, manifest=manifest,
-        run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
-    )
-    result_diagnostics = diagnostics + [reason] + ([persistence_warning] if persistence_warning else [])
+    # A blocked/failed manifest is still historical evidence. Index it only
+    # after the manifest write attempt; a parallel worker returns it for the
+    # coordinator rather than touching SQLite.
+    evidence = None
+    if defer_history_indexing:
+        evidence = deferred_history_evidence(
+            output_dir=am.output_dir, cset=cset, qor=None, manifest=manifest,
+            run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
+        )
+        persistence_warning = None
+    else:
+        persistence_warning = _index_qor_history(
+            output_dir=am.output_dir, cset=cset, qor=None, manifest=manifest,
+            run_id=run_id, run_dir=run_dir, run_status=status, repository=qor_repository,
+        )
+    result_diagnostics = diagnostics + [reason]
+    if persistence_warning:
+        result_diagnostics.append(persistence_warning)
     return {"status": status, "run_id": run_id, "run_dir": str(run_dir),
             "manifest": manifest.to_dict(), "qor": None,
             "diagnostics": result_diagnostics,
             "persistence_warning": persistence_warning,
+            "_deferred_history_evidence": evidence,
             "synth": synth_res.to_dict() if synth_res else None,
             "sta": None, "blocked_reason": reason}
 

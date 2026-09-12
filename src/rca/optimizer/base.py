@@ -17,7 +17,10 @@ candidate record captures all provenance.
 from __future__ import annotations
 
 import copy
+import re
 import time
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -67,6 +70,9 @@ class OptimizationResult:
     stop_reason: StopReason = StopReason.USER_STOP
     elapsed_seconds: float = 0.0
     explanation: dict[str, Any] = field(default_factory=dict)
+    # Coordinator-only execution diagnostics.  They never influence QoR,
+    # feasibility, cache identity, or candidate/Pareto selection.
+    diagnostics: list[str] = field(default_factory=list)
 
     # Convenience counts --------------------------------------------------
     @property
@@ -107,7 +113,35 @@ class OptimizationResult:
             "elapsed_s": self.elapsed_seconds,
             "candidates": [c.to_dict() for c in self.all_candidates],
             "explanation": self.explanation,
+            "diagnostics": list(self.diagnostics),
         }
+
+
+@dataclass(frozen=True)
+class _EvaluationTask:
+    """One coordinator-owned, preplanned candidate evaluation.
+
+    The candidate ID, lineage, and mutation have already been assigned before
+    this task reaches a worker.  The task directory is context for a callback;
+    real flow output remains the separately named physical run directory.
+    """
+
+    ordinal: int
+    # Coordinator-owned record that receives outcome classification.
+    candidate: Candidate
+    # Isolated callback input; a worker never receives the coordinator's
+    # mutable Candidate object or its ConstraintSet/lists.
+    worker_candidate: Candidate
+    work_dir: Path
+
+
+@dataclass(frozen=True)
+class _EvaluationOutcome:
+    """Raw worker result returned to the coordinator in planned-task order."""
+
+    task: _EvaluationTask
+    value: Any = None
+    error: Exception | None = None
 
 
 class Optimizer:
@@ -123,6 +157,24 @@ class Optimizer:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.budget = OptimizationBudget.from_config(cfg)
         self._priorities = dict(cfg.optimization.priorities)
+        self.workers = int(cfg.optimization.workers)
+        # Allocated only when the parallel planner first creates a task. It is
+        # deliberately not a candidate, QoR, cache, or constraint identity;
+        # it solely separates task-local working directories and flow run IDs.
+        self._invocation_token: str | None = None
+        self._next_task_ordinal = 0
+        self._executor: ThreadPoolExecutor | None = None
+        self._deferred_history_evidence: list[dict[str, Any]] = []
+
+    @property
+    def deferred_history_evidence(self) -> tuple[dict[str, Any], ...]:
+        """Completed physical-flow evidence for coordinator-only indexing.
+
+        Parallel CLI callbacks use this transient channel after they have
+        written authoritative artifacts/manifests.  It intentionally is not
+        part of ``OptimizationResult`` serialization or the QoR model.
+        """
+        return tuple(self._deferred_history_evidence)
 
     # ------------------------------------------------------------------
     # Main entry
@@ -130,6 +182,17 @@ class Optimizer:
     def run(self, baseline_cset: ConstraintSet,
             baseline_qor: QoRResult | None = None,
             baseline_sdc: str = "") -> OptimizationResult:
+        """Run optimization and always release a parallel executor if one exists."""
+        try:
+            return self._run_impl(baseline_cset, baseline_qor, baseline_sdc)
+        finally:
+            # Covers coordinator exceptions as well as normal and early exits.
+            # The serial path never constructs an executor.
+            self._shutdown_executor()
+
+    def _run_impl(self, baseline_cset: ConstraintSet,
+                  baseline_qor: QoRResult | None = None,
+                  baseline_sdc: str = "") -> OptimizationResult:
         result = OptimizationResult()
         t0 = time.time()
         opt = self.cfg.optimization
@@ -198,42 +261,20 @@ class Optimizer:
             self.budget.tick_iteration()
             result.iterations = iter_num
 
-            round_candidates: list[Candidate] = []
-            for parent in frontier_parents:
-                cands = generate_candidates(
-                    parent,
-                    parent.constraint_set or baseline_cset,
-                    self.cfg,
-                    max_candidates=4,
-                    _id_start=len(result.all_candidates),
+            concurrency_error: str | None = None
+            deadline_reached = False
+            if self.workers == 1:
+                # Deliberate direct serial path.  Keep the established
+                # candidate-by-candidate budget checks exactly intact.
+                round_candidates = self._evaluate_iteration_serial(
+                    frontier_parents, baseline_cset, baseline, result, explored_hashes
                 )
-                for c in cands:
-                    if c.constraint_model_hash in explored_hashes:
-                        continue
-                    explored_hashes.add(c.constraint_model_hash)
-                    self._evaluate(c)
-                    self._classify(
-                        c,
-                        baseline_setup_wns=baseline.qor.setup_wns if baseline.qor else None,
-                        baseline_hold_wns=baseline.qor.hold_wns if baseline.qor else None,
+            else:
+                round_candidates, concurrency_error, deadline_reached = (
+                    self._evaluate_iteration_parallel(
+                        frontier_parents, baseline_cset, baseline, result, explored_hashes, mcmm
                     )
-                    cand_eda_runs = _eda_run_count(c)
-                    self.budget.tick_eda_run(cand_eda_runs)
-                    result.eda_runs += cand_eda_runs
-                    self._count_cache(c, result)
-                    result.all_candidates.append(c)
-                    if c.blocked:
-                        result.blocked.append(c)
-                        c.decision = CandidateDecision.REJECTED_INVALID
-                    elif not c.hard_feasible:
-                        c.decision = CandidateDecision.REJECTED_INFEASIBLE
-                        result.infeasible.append(c)
-                    else:
-                        round_candidates.append(c)
-                    if self.budget.should_stop():
-                        break
-                if self.budget.should_stop():
-                    break
+                )
 
             # Recompute Pareto across ALL feasible candidates so far
             feasible = [c for c in result.all_candidates if c.hard_feasible]
@@ -266,6 +307,16 @@ class Optimizer:
             frontier_parents = list(front) if round_candidates else []
             if not round_candidates and iter_num > 1:
                 self.budget.no_improve += 1
+            if concurrency_error:
+                result.diagnostics.append(concurrency_error)
+                self.budget.stop_reason = StopReason.ERROR
+                break
+            if deadline_reached:
+                # Do not admit another parallel wave after elapsed runtime
+                # reached its existing wall-clock boundary. In-flight work was
+                # collected safely and remains ordered by task plan.
+                self.budget.stop_reason = StopReason.MAX_TIME
+                break
 
         # ----- final selection -----
         feasible_all = [c for c in result.all_candidates if c.hard_feasible]
@@ -327,6 +378,249 @@ class Optimizer:
         return result
 
     # ------------------------------------------------------------------
+    # Deterministic candidate-task scheduling
+    # ------------------------------------------------------------------
+    def _evaluate_iteration_serial(
+        self, frontier_parents: list[Candidate], baseline_cset: ConstraintSet,
+        baseline: Candidate, result: OptimizationResult, explored_hashes: set[str],
+    ) -> list[Candidate]:
+        """Established direct candidate loop used when ``workers == 1``."""
+        round_candidates: list[Candidate] = []
+        for parent in frontier_parents:
+            cands = generate_candidates(
+                parent,
+                parent.constraint_set or baseline_cset,
+                self.cfg,
+                max_candidates=4,
+                _id_start=len(result.all_candidates),
+            )
+            for candidate in cands:
+                if candidate.constraint_model_hash in explored_hashes:
+                    continue
+                explored_hashes.add(candidate.constraint_model_hash)
+                self._evaluate(candidate)
+                self._finalize_candidate(candidate, baseline, result, round_candidates)
+                if self.budget.should_stop():
+                    break
+            if self.budget.should_stop():
+                break
+        return round_candidates
+
+    def _evaluate_iteration_parallel(
+        self, frontier_parents: list[Candidate], baseline_cset: ConstraintSet,
+        baseline: Candidate, result: OptimizationResult, explored_hashes: set[str],
+        mcmm_enabled: bool,
+    ) -> tuple[list[Candidate], str | None, bool]:
+        """Evaluate one deterministic iteration with bounded candidate workers.
+
+        Candidate generation/deduplication/IDs happen before task submission.
+        Worker completion order is intentionally ignored; outcomes are applied
+        in the planned task order by this coordinator thread.
+        """
+        candidates = self._plan_parallel_candidates(
+            frontier_parents, baseline_cset, result, explored_hashes, mcmm_enabled
+        )
+        tasks = [self._make_task(candidate) for candidate in candidates]
+        outcomes, concurrency_error, deadline_reached = self._run_parallel_tasks(tasks)
+        round_candidates: list[Candidate] = []
+        for outcome in outcomes:
+            candidate = outcome.task.candidate
+            self._apply_evaluation_outcome(candidate, outcome)
+            self._finalize_candidate(candidate, baseline, result, round_candidates)
+        return round_candidates, concurrency_error, deadline_reached
+
+    def _plan_parallel_candidates(
+        self, frontier_parents: list[Candidate], baseline_cset: ConstraintSet,
+        result: OptimizationResult, explored_hashes: set[str], mcmm_enabled: bool,
+    ) -> list[Candidate]:
+        """Return the serial-order candidate prefix permitted by EDA budget.
+
+        The existing serial loop accounts each complete MCMM candidate as one
+        attempt per active scenario.  That count is known from the immutable
+        active matrix before dispatch, so a parallel batch does not oversubscribe
+        ``max_eda_runs`` merely because several tasks are in flight.
+        """
+        planned: list[Candidate] = []
+        next_id_start = len(result.all_candidates)
+        projected_eda_runs = self.budget.eda_runs
+        task_cost = self._planned_eda_run_cost(mcmm_enabled)
+        # The established serial loop consults ``should_stop`` after each
+        # candidate. On its final permitted iteration that means only the
+        # first candidate is admitted before MAX_ITERATIONS is observed. Keep
+        # that legacy admission boundary while still planning before dispatch.
+        last_permitted_iteration = self.budget.iterations >= self.budget.max_iterations
+        for parent in frontier_parents:
+            candidates = generate_candidates(
+                parent,
+                parent.constraint_set or baseline_cset,
+                self.cfg,
+                max_candidates=4,
+                _id_start=next_id_start,
+            )
+            for candidate in candidates:
+                if candidate.constraint_model_hash in explored_hashes:
+                    continue
+                # Do not dispatch a candidate whose complete MCMM task would
+                # exceed the configured physical EDA-run budget. This check is
+                # performed before submission, not when worker completions
+                # arrive, so parallelism cannot oversubscribe the budget.
+                if projected_eda_runs + task_cost > self.budget.max_eda_runs:
+                    self.budget.stop_reason = StopReason.MAX_EDA_RUNS
+                    return planned
+                explored_hashes.add(candidate.constraint_model_hash)
+                planned.append(candidate)
+                next_id_start += 1
+                projected_eda_runs += task_cost
+                if projected_eda_runs == self.budget.max_eda_runs:
+                    self.budget.stop_reason = StopReason.MAX_EDA_RUNS
+                    return planned
+                if last_permitted_iteration:
+                    return planned
+        return planned
+
+    def _planned_eda_run_cost(self, mcmm_enabled: bool) -> int:
+        if not mcmm_enabled:
+            return 1
+        try:
+            from ..mcmm import build_scenario_matrix
+            return max(1, len(build_scenario_matrix(self.cfg).active_ids))
+        except Exception:
+            # Matrix construction is already guarded by _mcmm_enabled; retain
+            # safe single-task accounting if an external config-like caller
+            # cannot expose the matrix.
+            return 1
+
+    def _make_task(self, candidate: Candidate) -> _EvaluationTask:
+        if self._invocation_token is None:
+            self._invocation_token = uuid.uuid4().hex[:16]
+        self._next_task_ordinal += 1
+        candidate_component = (
+            re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate.id).strip(".-") or "candidate"
+        )
+        name = f"task_{self._invocation_token}_{self._next_task_ordinal:04d}_{candidate_component}"
+        return _EvaluationTask(
+            ordinal=self._next_task_ordinal,
+            candidate=candidate,
+            worker_candidate=_worker_candidate_snapshot(candidate),
+            work_dir=self.work_dir / "tasks" / name,
+        )
+
+    def _run_parallel_tasks(
+        self, tasks: list[_EvaluationTask],
+    ) -> tuple[list[_EvaluationOutcome], str | None, bool]:
+        """Run bounded waves and return outcomes in planned order.
+
+        No ``as_completed`` ordering is used.  A construction/submission error
+        is a deterministic concurrency error, not a serial fallback.  Already
+        submitted independent tasks are allowed to finish before the coordinator
+        reports that error.
+        """
+        if not tasks:
+            return [], None, False
+        try:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(
+                    max_workers=self.workers,
+                    thread_name_prefix="rca-candidate",
+                )
+        except Exception as exc:
+            return (
+                [self._concurrency_error_outcome(task, "executor", exc) for task in tasks],
+                "OPTIMIZATION_CONCURRENCY_ERROR: executor construction failed "
+                f"({type(exc).__name__})",
+                False,
+            )
+
+        outcomes: list[_EvaluationOutcome] = []
+        deadline_reached = False
+        deadline = self.budget.start_time + self.budget.max_runtime_seconds
+        for wave_start in range(0, len(tasks), self.workers):
+            if time.time() >= deadline:
+                deadline_reached = True
+                break
+            wave = tasks[wave_start:wave_start + self.workers]
+            futures: list[tuple[_EvaluationTask, Future[_EvaluationOutcome]]] = []
+            submission_error: Exception | None = None
+            for task in wave:
+                try:
+                    futures.append((task, self._executor.submit(self._worker_evaluate, task)))
+                except Exception as exc:
+                    submission_error = exc
+                    break
+            # Preserve planned semantic order even where a task unexpectedly
+            # fails outside the worker wrapper.
+            for task, future in futures:
+                try:
+                    outcomes.append(future.result())
+                except Exception as exc:
+                    outcomes.append(self._concurrency_error_outcome(task, "future", exc))
+            if submission_error is not None:
+                submitted = {task.ordinal for task, _ in futures}
+                for task in tasks[wave_start:]:
+                    if task.ordinal not in submitted:
+                        outcomes.append(
+                            self._concurrency_error_outcome(
+                                task, "submission", submission_error
+                            )
+                        )
+                return (
+                    outcomes,
+                    "OPTIMIZATION_CONCURRENCY_ERROR: task submission failed "
+                    f"({type(submission_error).__name__})",
+                    False,
+                )
+        return outcomes, None, deadline_reached
+
+    def _worker_evaluate(self, task: _EvaluationTask) -> _EvaluationOutcome:
+        """Execute only task-local callback work; never mutate optimizer state."""
+        try:
+            task.work_dir.mkdir(parents=True, exist_ok=False)
+            assert self.evaluate_fn is not None
+            return _EvaluationOutcome(
+                task=task,
+                value=self.evaluate_fn(task.worker_candidate, task.work_dir),
+            )
+        except Exception as exc:
+            return _EvaluationOutcome(task=task, error=exc)
+
+    @staticmethod
+    def _concurrency_error_outcome(
+        task: _EvaluationTask, phase: str, error: Exception,
+    ) -> _EvaluationOutcome:
+        return _EvaluationOutcome(
+            task=task,
+            error=RuntimeError(f"concurrency_{phase}_error:{type(error).__name__}:{error}"),
+        )
+
+    def _finalize_candidate(
+        self, candidate: Candidate, baseline: Candidate, result: OptimizationResult,
+        round_candidates: list[Candidate],
+    ) -> None:
+        self._classify(
+            candidate,
+            baseline_setup_wns=baseline.qor.setup_wns if baseline.qor else None,
+            baseline_hold_wns=baseline.qor.hold_wns if baseline.qor else None,
+        )
+        candidate_eda_runs = _eda_run_count(candidate)
+        self.budget.tick_eda_run(candidate_eda_runs)
+        result.eda_runs += candidate_eda_runs
+        self._count_cache(candidate, result)
+        result.all_candidates.append(candidate)
+        if candidate.blocked:
+            result.blocked.append(candidate)
+            candidate.decision = CandidateDecision.REJECTED_INVALID
+        elif not candidate.hard_feasible:
+            candidate.decision = CandidateDecision.REJECTED_INFEASIBLE
+            result.infeasible.append(candidate)
+        else:
+            round_candidates.append(candidate)
+
+    def _shutdown_executor(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+
+    # ------------------------------------------------------------------
     # Evaluation & classification
     # ------------------------------------------------------------------
     def _mcmm_enabled(self) -> bool:
@@ -352,33 +646,66 @@ class Optimizer:
         return any(getattr(c, "mcmm", None) is not None for c in cands)
 
     def _evaluate(self, cand: Candidate) -> None:
+        """Evaluate directly in deliberate serial mode (no executor)."""
         assert self.evaluate_fn is not None
         cand.decision = CandidateDecision.EDA_PENDING
         try:
-            qor_out = self.evaluate_fn(cand, self.work_dir)
-            if _is_mcmm_result(qor_out):
-                self._apply_mcmm(cand, qor_out)
-            else:
-                qor, cache_key, cache_status, run_id = _normalize_eval(qor_out)
-                cand.qor = qor
-                cand.cache_key = cache_key or ""
-                cand.cache_status = cache_status or "MISS"
-                cand.run_id = run_id or ""
-                if qor is not None:
-                    qor.candidate_id = cand.id
-                    qor.cache_key = cand.cache_key
-                    qor.cache_status = cand.cache_status
-                    qor.run_id = cand.run_id or qor.run_id
-                cand.validity_status = "VALIDATED"
-                cand.decision = CandidateDecision.EVALUATED
-        except Exception as e:
-            log.error("Candidate %s evaluation failed: %s", cand.id, e)
-            cand.warnings.append(str(e))
-            cand.decision = CandidateDecision.REJECTED_INVALID
-            cand.validity_status = "ERROR"
-            cand.blocked = True
-            cand.infeasible_reason = f"evaluation_error:{e}"
-            cand.qor = QoRResult(tool="error", notes=[str(e)])
+            self._apply_evaluation_value(cand, self.evaluate_fn(cand, self.work_dir))
+        except Exception as exc:
+            self._apply_evaluation_error(cand, exc)
+
+    def _apply_evaluation_outcome(self, cand: Candidate, outcome: _EvaluationOutcome) -> None:
+        """Apply one worker result on the coordinator in planned-task order."""
+        cand.decision = CandidateDecision.EDA_PENDING
+        if outcome.error is not None:
+            self._apply_evaluation_error(cand, outcome.error)
+            return
+        try:
+            self._apply_evaluation_value(cand, outcome.value)
+        except Exception as exc:
+            self._apply_evaluation_error(cand, exc)
+
+    def _apply_evaluation_value(self, cand: Candidate, qor_out: Any) -> None:
+        self._capture_deferred_history(qor_out)
+        if _is_mcmm_result(qor_out):
+            self._apply_mcmm(cand, qor_out)
+            return
+        qor, cache_key, cache_status, run_id = _normalize_eval(qor_out)
+        cand.qor = qor
+        cand.cache_key = cache_key or ""
+        cand.cache_status = cache_status or "MISS"
+        cand.run_id = run_id or ""
+        if qor is not None:
+            qor.candidate_id = cand.id
+            qor.cache_key = cand.cache_key
+            qor.cache_status = cand.cache_status
+            qor.run_id = cand.run_id or qor.run_id
+        cand.validity_status = "VALIDATED"
+        cand.decision = CandidateDecision.EVALUATED
+
+    def _capture_deferred_history(self, value: Any) -> None:
+        """Collect transient flow evidence only after a task has completed."""
+        evidence: Any = None
+        if _is_mcmm_result(value):
+            evidence = getattr(value, "_deferred_history_evidence", None)
+        elif isinstance(value, dict):
+            evidence = value.get("_deferred_history_evidence")
+        if isinstance(evidence, dict):
+            self._deferred_history_evidence.append(evidence)
+        elif isinstance(evidence, (list, tuple)):
+            self._deferred_history_evidence.extend(
+                item for item in evidence if isinstance(item, dict)
+            )
+
+    @staticmethod
+    def _apply_evaluation_error(cand: Candidate, exc: Exception) -> None:
+        log.error("Candidate %s evaluation failed: %s", cand.id, exc)
+        cand.warnings.append(str(exc))
+        cand.decision = CandidateDecision.REJECTED_INVALID
+        cand.validity_status = "ERROR"
+        cand.blocked = True
+        cand.infeasible_reason = f"evaluation_error:{exc}"
+        cand.qor = QoRResult(tool="error", notes=[str(exc)])
 
     def _apply_mcmm(self, cand: Candidate, mcmm_result: Any) -> None:
         """Attach an MCMMResult to a candidate and derive global verdict.
@@ -500,6 +827,34 @@ def _normalize_eval(out: Any) -> tuple[QoRResult | None, str, str, str]:
                 str(out.get("cache_status", "") or out.get("status", "") or ""),
                 str(out.get("run_id", "") or ""))
     return None, "", "", ""
+
+
+def _worker_candidate_snapshot(candidate: Candidate) -> Candidate:
+    """Copy the callback input so worker-side mutation cannot race coordinator state.
+
+    The callback receives all immutable planning identity and constraint inputs
+    it needs, but none of the coordinator-owned evaluation, selection, rank,
+    warning, or list state. ConstraintSet cloning follows the existing
+    fallback-safe clone helper used by baseline construction.
+    """
+    return Candidate(
+        id=candidate.id,
+        parent_id=candidate.parent_id,
+        generation=candidate.generation,
+        constraint_model_hash=candidate.constraint_model_hash,
+        sdc_hash=candidate.sdc_hash,
+        constraint_set=(
+            _clone_cset(candidate.constraint_set)
+            if candidate.constraint_set is not None else None
+        ),
+        sdc_text=candidate.sdc_text,
+        generated_changes=list(candidate.generated_changes),
+        mutated_constraint_ids=list(candidate.mutated_constraint_ids),
+        decision_reason=candidate.decision_reason,
+        scenario=candidate.scenario,
+        corner=candidate.corner,
+        mode=candidate.mode,
+    )
 
 
 def _clone_cset(cset: ConstraintSet) -> ConstraintSet:

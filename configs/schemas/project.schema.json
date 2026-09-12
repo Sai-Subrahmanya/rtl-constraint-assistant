@@ -348,6 +348,13 @@
           "type": "boolean",
           "default": false
         },
+        "workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 1,
+          "description": "Bounded concurrent complete-candidate evaluations; 1 is serial."
+        },
         "max_iterations": {
           "type": "integer",
           "minimum": 1,

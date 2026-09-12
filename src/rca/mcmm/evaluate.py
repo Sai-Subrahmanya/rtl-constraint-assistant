@@ -65,12 +65,20 @@ class MCMMEvaluator:
         cset = getattr(cand, "constraint_set", None) or self.base_cset
         result = MCMMResult(candidate_id=getattr(cand, "id", ""))
         result.active_scenario_ids = list(self.matrix.active_ids)
+        deferred_history_evidence: list[dict[str, Any]] = []
 
         for scenario in self.matrix.active_scenarios():
             sqor = self._evaluate_scenario(cand, cset, scenario, work_dir)
             result.scenario_results[scenario.id] = sqor
+            evidence = getattr(sqor, "_deferred_history_evidence", None)
+            if isinstance(evidence, dict):
+                deferred_history_evidence.append(evidence)
             if sqor.run_id:
                 result.run_ids.append(sqor.run_id)
+        # This transient attribute carries existing flow manifest/QoR evidence
+        # from a parallel worker back to the optimizer coordinator. It is not
+        # part of MCMM serialization, aggregation, cache identity, or QoR.
+        setattr(result, "_deferred_history_evidence", deferred_history_evidence)
         result.eda_runs = len(self.matrix.active_scenarios())
 
         # Global aggregation.  The per-scenario baseline (Step 12 §8) must be
@@ -175,6 +183,10 @@ class MCMMEvaluator:
         )
         out = self.evaluate_scenario(scenario, cand, work_dir)
         qor, cache_key, cache_status, run_id = _normalize_scenario_eval(out)
+        if isinstance(out, dict):
+            evidence = out.get("_deferred_history_evidence")
+            if isinstance(evidence, dict):
+                setattr(sqor, "_deferred_history_evidence", evidence)
         sqor.qor = qor
         sqor.cache_key = cache_key or scenario_cache_key(
             scenario, cset, backend=self.name,

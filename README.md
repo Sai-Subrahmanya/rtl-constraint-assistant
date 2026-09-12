@@ -186,7 +186,7 @@ rtl-constraint-assistant/
 | `rca compare --a A.sdc --b B.sdc` | Semantic UCM-level diff between two SDC files with scenario and provenance context; unsupported or unresolved intent is reported as `UNKNOWN`, never equivalent. |
 | `rca explain -c CID` | Explain why a constraint exists and its evidence. |
 | `rca run-sta`      | Run synthesis + STA and collect QoR. |
-| `rca optimize`     | Closed-loop multi-objective optimization; records a session-scoped historical QoR index after its established artifacts are written. |
+| `rca optimize`     | Closed-loop multi-objective optimization; `optimization.workers` is the only bounded candidate-concurrency control (1–8, default 1) and records a session-scoped historical QoR index after established artifacts are written. |
 | `rca history`      | Query/import the local SQLite QoR history sidecar. Never runs EDA, optimization, or cache reuse. |
 | `rca inspect`      | Inspect clocks/resets/ports/registers/modules. |
 | `rca report`       | Full human-readable design + constraints report. |
