@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..constraint_model import Constraint, ConstraintSet
+from ..inference.rules import InferenceCandidate
 from ..optimizer import Candidate
 
 
@@ -38,6 +39,32 @@ def explain_constraint(c: Constraint) -> str:
             lines.append(f"    assumption: {aid}")
     if c.assumption_ids:
         lines.append(f"  Assumptions: {c.assumption_ids}")
+    return "\n".join(lines)
+
+
+def explain_inference_candidate(candidate: InferenceCandidate) -> str:
+    """Explain an advisory candidate without representing it as accepted UCM."""
+    lines = [
+        f"Inference candidate {candidate.id}: {candidate.kind}",
+        f"  Advisory status: {candidate.status.value}",
+        f"  Acceptance decision: {candidate.decision.value}",
+        f"  Analysis: {candidate.analysis}",
+        f"  Why: {candidate.rationale}",
+    ]
+    if candidate.source_objects:
+        lines.append(f"  Source objects: {list(candidate.source_objects)}")
+    if candidate.rule_ids:
+        lines.append(f"  Rules: {list(candidate.rule_ids)}")
+    for evidence in candidate.evidence:
+        lines.append(f"    evidence[{evidence.kind}]: {evidence.description}")
+    for missing in candidate.missing_information:
+        lines.append(f"  Missing: [{missing.get('id', '?')}] {missing.get('message', '')}")
+    for warning in candidate.warnings:
+        lines.append(f"  Warning: {warning}")
+    for reference in candidate.knowledge_references:
+        lines.append("  Knowledge: " + str(reference.get("knowledge_item_id", "?"))
+                     + " (advisory only)")
+    lines.append("  UCM state: NOT_ACCEPTED")
     return "\n".join(lines)
 
 

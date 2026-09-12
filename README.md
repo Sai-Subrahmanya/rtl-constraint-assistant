@@ -24,6 +24,13 @@ outcomes and never treats structural analysis as a proof.
 > never parses/executes data files, changes fixed user intent, or accepts a
 > suggestion without an explicit UCM API action. See `STEP26_KNOWLEDGE_REUSE.md`.
 
+> **Inference advice**: `rca infer` reports deterministic structural facts,
+> candidates, ambiguity, conflicts, and missing information without changing
+> UCM or coverage. It never fabricates clock periods, I/O budgets, generated
+> clock details, relationships, or timing exceptions. A complete candidate can
+> enter UCM only through explicit API acceptance and existing validation. See
+> `docs/STEP27_CONSTRAINT_INFERENCE.md`.
+
 ---
 
 ## Quick start
@@ -37,8 +44,9 @@ cd examples/simple_counter
 # 1. Analyze the RTL (parses, elaborates, discovers clocks/resets/domains)
 rca analyze project.yaml
 
-# 2. See inference engine proposals
+# 2. See non-mutating evidence-backed inference advice
 rca infer project.yaml
+rca infer project.yaml --json
 
 # 3. Generate SDC (generic / OpenSTA / Synopsys / Cadence backend)
 rca generate project.yaml --backend generic
@@ -195,7 +203,7 @@ rtl-constraint-assistant/
 |--------------------|---------|
 | `rca init`         | Scaffold a new project directory with an RTL template. |
 | `rca analyze`      | Parse/elaborate RTL, report structural findings & missing info. |
-| `rca infer`        | Run inference engine and print proposed constraints. |
+| `rca infer`        | Report non-mutating structural facts and advisory candidates (`--json` available); no candidate is applied to UCM. |
 | `rca generate`     | Emit SDC (generic/opensta/synopsys/cadence backend). |
 | `rca validate`     | Validate generated or imported SDC; runs configured SymbiYosys exception proofs if opted in. |
 | `rca coverage`     | Per-category coverage report with uncovered objects. |

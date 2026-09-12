@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from ..design_model import Design
 from ..provenance import Evidence
-from ..timing_model import Clock, TimingGraph
+from ..timing_model import TimingGraph
 from ..utils.enums import (
     Confidence,
     InferenceResultStatus,
@@ -63,7 +63,9 @@ def rule_clk_001_sequential(design: Design, tg: TimingGraph, *,
         res.add_evidence(ev)
 
         if c.period_seconds is not None:
-            src_kind = SourceKind.USER if c.source_of_value == "USER" else SourceKind.INFERENCE
+            src_kind = (SourceKind.USER if c.source_of_value == "USER"
+                        else (SourceKind.EXISTING_SDC if c.source_of_value == "EXISTING_SDC"
+                              else SourceKind.INFERENCE))
             conf = Confidence.HIGH if c.source_of_value in ("USER", "EXISTING_SDC") else Confidence.MEDIUM
             status = "FIXED" if c.status == "FIXED" else ("CONFIRMED" if conf >= Confidence.HIGH else "PROPOSED")
             values: dict = {"name": name, "period": c.period_seconds}

@@ -492,46 +492,66 @@ def analyze(config: str = typer.Argument(..., help="Path to project YAML"),
 
 
 @app.command()
-def infer(config: str = typer.Argument(..., help="Path to project YAML")):
-    """Run the inference engine and report proposed constraints (no SDC written)."""
-    configure_logging(level="INFO")
+def infer(config: str = typer.Argument(..., help="Path to project YAML"),
+          json_out: bool = typer.Option(False, "--json", help="Output deterministic advisory JSON only")):
+    """Report non-mutating, evidence-backed constraint candidates.
+
+    Unlike legacy materialization used by generate/validate compatibility
+    paths, this command never adds an inferred candidate to a UCM. A caller
+    must explicitly use the candidate API to accept a valid proposal.
+    """
+    configure_logging(level="WARNING" if json_out else "INFO")
     cfg = _load(config)
     design, _ = _do_parse(cfg)
     tg = _do_timing(cfg, design)
-    ledger = AssumptionLedger()
-    cset, report = _do_inference(cfg, design, tg, ledger)
-    console.print(Panel(f"[cyan]Inference report[/cyan] — {cfg.project.name}"))
-    t = Table(title=f"Proposed constraints ({len(cset)})")
-    for col in ("ID", "Type", "Targets", "Source", "Confidence", "Status"):
-        t.add_column(col)
-    for c in cset:
-        t.add_row(c.id, c.type.value, ", ".join(c.target_objects[:3]),
-                  c.source_kind.value, c.confidence.value, c.status.value)
-    console.print(t)
+    baseline = ConstraintSet(name=cfg.project.name)
+    report = InferenceEngine().infer_candidates(
+        design, tg, cfg, baseline, AssumptionLedger(), knowledge=KnowledgeEngine(),
+    )
+    if json_out:
+        sys.stdout.write(json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str))
+        return
 
-    # Structured missing-information display.
+    console.print(Panel(f"[cyan]Inference report (advisory; UCM unchanged)[/cyan] — {cfg.project.name}"))
+    facts = report.structural_facts
+    if facts:
+        ft = Table(title=f"Structural facts ({len(facts)})")
+        ft.add_column("Category"); ft.add_column("Object"); ft.add_column("Observation")
+        for fact in facts:
+            ft.add_row(fact["category"], fact["object"], fact["statement"])
+        console.print(ft)
+    candidates = report.candidates
+    ct = Table(title=f"Advisory candidates ({len(candidates)}; not applied)")
+    for col in ("ID", "Kind", "Status", "Decision", "Objects", "Why"):
+        ct.add_column(col)
+    for candidate in candidates:
+        ct.add_row(candidate.id, candidate.kind, candidate.status.value, candidate.decision.value,
+                   ", ".join(candidate.source_objects[:3]) or "-", candidate.rationale)
+    console.print(ct)
+
     required = report.required_information()
     if required:
-        mt = Table(title="Required information (blocking complete SDC generation)",
-                   show_lines=False)
+        mt = Table(title="Missing information / confirmation required", show_lines=False)
         mt.add_column("ID"); mt.add_column("Category"); mt.add_column("Object")
         mt.add_column("Message"); mt.add_column("Blocking")
-        for i, mi in enumerate(required, 1):
-            mt.add_row(mi.get("id", f"REQ-{i:03d}"),
-                       mi.get("category", ""),
-                       mi.get("object", ""),
-                       mi.get("message", ""),
-                       "YES" if mi.get("blocking") else "no")
+        for i, missing in enumerate(required, 1):
+            mt.add_row(missing.get("id", f"REQ-{i:03d}"), missing.get("category", ""),
+                       missing.get("object", ""), missing.get("message", ""),
+                       "YES" if missing.get("blocking") else "no")
         console.print(mt)
+    rejected = [candidate for candidate in candidates
+                if candidate.status.value in {"AMBIGUOUS", "UNSUPPORTED", "CONFLICTING", "REJECTED"}]
+    if rejected:
+        console.print(f"\n[yellow]Ambiguous, unsupported, or rejected advisory items: {len(rejected)}[/yellow]")
     if report.warnings:
         console.print(f"\n[yellow]Warnings: {len(report.warnings)}[/yellow]")
-        for w in report.warnings[:20]:
-            console.print(f"  - {w.get('message', w)}")
+        for warning in report.warnings[:20]:
+            console.print(f"  - {warning.get('message', warning)}")
     if report.conflicts:
-        console.print(f"\n[magenta]Conflicts (user vs inference): {len(report.conflicts)}[/magenta]")
-        for c in report.conflicts[:10]:
-            console.print(f"  - {c.get('message', c)}")
-    _maybe_print_matrix(cfg, cset, console)
+        console.print(f"\n[magenta]Conflicts retained (nothing overwritten): {len(report.conflicts)}[/magenta]")
+        for conflict in report.conflicts[:10]:
+            console.print(f"  - {conflict.get('message', conflict)}")
+    _maybe_print_matrix(cfg, baseline, console)
 
 
 @app.command()

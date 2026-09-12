@@ -33,6 +33,14 @@ def test_simple_counter_cli_pipeline_and_artifact_authority(tmp_path):
     json_analysis = _invoke("analyze", str(config), "--json")
     assert json.loads(json_analysis.output)["design"]["top"] == "counter"
     assert "Inference report" in _invoke("infer", str(config)).output
+    infer_json = _invoke("infer", str(config), "--json")
+    infer_payload = json.loads(infer_json.output)
+    assert infer_payload["constraints_added"] == 0
+    assert "structural_facts" in infer_payload and "candidates" in infer_payload
+    assert "ambiguous_candidates" in infer_payload
+    assert "unsupported_or_rejected_candidates" in infer_payload
+    assert all(item["acceptance_state"] == "NOT_ACCEPTED" for item in infer_payload["candidates"])
+    assert infer_json.output == _invoke("infer", str(config), "--json").output
     assert "SDC GENERATION" in _invoke("generate", str(config), "--backend", "generic").output
     generated = output / "design.generic.sdc"
     assert generated.is_file()

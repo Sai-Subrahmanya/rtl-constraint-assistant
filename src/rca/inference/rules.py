@@ -16,15 +16,137 @@ Architectural boundary:
 
 from __future__ import annotations
 
+import copy
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from enum import Enum
+from typing import Any
 
-from ..provenance import Evidence
+from ..provenance import Evidence, ProvenanceRecord
 from ..utils.enums import (
     Confidence,
     InferenceResultStatus,
     RequirementLevel,
 )
+
+
+class InferenceStatus(str, Enum):
+    """Status of one advisory inference candidate.
+
+    This is deliberately separate from UCM lifecycle status, UCM confidence,
+    knowledge trust, and validation status. A candidate remains advisory until
+    an explicit caller accepts it into a ``ConstraintSet``.
+    """
+
+    INFERRED = "INFERRED"
+    CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    AMBIGUOUS = "AMBIGUOUS"
+    UNSUPPORTED = "UNSUPPORTED"
+    CONFLICTING = "CONFLICTING"
+    REJECTED = "REJECTED"
+
+
+class InferenceDecision(str, Enum):
+    """Whether a caller may explicitly attempt UCM acceptance."""
+
+    ACCEPTABLE = "ACCEPTABLE"
+    ALREADY_PRESENT = "ALREADY_PRESENT"
+    REQUIRES_CONFIRMATION = "REQUIRES_CONFIRMATION"
+    REJECTED = "REJECTED"
+
+
+# Candidate evidence intentionally reuses the canonical RCA Evidence model;
+# this alias documents the inference-facing API without a second provenance
+# representation.
+InferenceEvidence = Evidence
+
+
+@dataclass(frozen=True)
+class InferenceCandidate:
+    """A deterministic, non-UCM inference recommendation.
+
+    ``constraint_template`` is an optional copied canonical UCM constraint. It
+    is evidence for a *possible* later explicit action, not an accepted or
+    emittable constraint.
+    """
+
+    id: str
+    kind: str
+    constraint_type: str | None
+    status: InferenceStatus
+    decision: InferenceDecision
+    rule_ids: tuple[str, ...]
+    analysis: str
+    source_objects: tuple[str, ...]
+    clock_refs: tuple[str, ...]
+    port_refs: tuple[str, ...]
+    register_refs: tuple[str, ...]
+    evidence: tuple[InferenceEvidence, ...]
+    provenance: ProvenanceRecord
+    rationale: str
+    source_snapshot_identity: dict[str, str]
+    constraint_template: dict[str, Any] | None = None
+    knowledge_references: tuple[dict[str, Any], ...] = ()
+    assumptions: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    missing_information: tuple[dict[str, Any], ...] = ()
+    existing_constraint_ids: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "constraint_type": self.constraint_type,
+            "status": self.status.value,
+            "decision": self.decision.value,
+            "rule_ids": list(self.rule_ids),
+            "analysis": self.analysis,
+            "source_objects": list(self.source_objects),
+            "clock_refs": list(self.clock_refs),
+            "port_refs": list(self.port_refs),
+            "register_refs": list(self.register_refs),
+            "evidence": [item.to_dict() for item in sorted(self.evidence, key=lambda item: item.id)],
+            "provenance": self.provenance.to_dict(),
+            "rationale": self.rationale,
+            "source_snapshot_identity": dict(sorted(self.source_snapshot_identity.items())),
+            "constraint_template": copy.deepcopy(self.constraint_template),
+            "knowledge_references": [dict(item) for item in sorted(
+                self.knowledge_references,
+                key=lambda item: (str(item.get("knowledge_item_id", "")), str(item.get("suggestion_id", ""))),
+            )],
+            "assumptions": sorted(self.assumptions),
+            "warnings": sorted(self.warnings),
+            "missing_information": [dict(item) for item in sorted(
+                self.missing_information, key=lambda item: str(item.get("id", "")),
+            )],
+            "existing_constraint_ids": sorted(self.existing_constraint_ids),
+            "acceptance_state": "NOT_ACCEPTED",
+        }
+
+
+@dataclass(frozen=True)
+class InferenceAcceptanceResult:
+    """Result of an explicit candidate-to-UCM conversion attempt."""
+
+    status: str
+    candidate_id: str
+    constraint_id: str | None = None
+    duplicate_of: str | None = None
+    conflict_ids: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    validation_issues: tuple[dict[str, Any], ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "candidate_id": self.candidate_id,
+            "constraint_id": self.constraint_id,
+            "duplicate_of": self.duplicate_of,
+            "conflict_ids": list(self.conflict_ids),
+            "warnings": list(self.warnings),
+            "validation_issues": [dict(item) for item in self.validation_issues],
+        }
 
 
 @dataclass
